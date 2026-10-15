@@ -4,6 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#eeecf4">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Étudiant OS">
 <title>Étudiant OS</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -280,6 +287,28 @@ const Receipt = sketch("Receipt", [
   { d: "M4.9 2.7c.2 6.2.2 12.4 0 18.6 1-.6 2-1.2 3-1.7 1 .6 2 1.1 3 1.6 1-.5 2-1.1 3-1.6 1 .6 2 1.1 3 1.7.2-6.2.2-12.4 0-18.6-1 .6-2 1.1-3 1.7-1-.6-2-1.1-3-1.7-1 .6-2 1.1-3 1.7-1-.6-2-1.1-3-1.7Z", f: true },
   { d: "M8.4 8.6c2.4-.2 4.8-.2 7.2 0M8.4 12.3c2.4-.2 4.8-.2 7.2 0M8.4 16c1.4-.1 2.7-.1 4 0" },
 ]);
+const Camera = sketch("Camera", [
+  { d: "M3.2 8.4c.1-1.2.9-2 2.1-2.1h2.2l1.4-2.1c2.2-.2 4.4-.2 6.6 0l1.4 2.1h2.2c1.2.1 2 .9 2.1 2.1.2 3.5.2 7 0 10.5-.1 1.2-.9 2-2.1 2.1-4.4.3-8.9.3-13.3 0-1.2-.1-2-.9-2.1-2.1-.2-3.5-.2-7-.1-10.5Z", f: true },
+  { d: "M12 9.6c2 0 3.6 1.6 3.6 3.6 0 2-1.6 3.6-3.6 3.6-2 0-3.6-1.6-3.6-3.6 0-2 1.6-3.6 3.6-3.6Z" },
+]);
+const FileText = sketch("FileText", [
+  { d: "M5.2 3.3c3-.2 6-.2 9 0l4.6 4.7c.2 4.1.2 8.3 0 12.4-4.5.3-9 .3-13.5 0-.3-5.7-.3-11.4-.1-17.1Z", f: true },
+  { d: "M14 3.4c0 1.6 0 3.1.2 4.7 1.5.1 3 .1 4.6 0M8.4 12.4c2.4-.2 4.8-.2 7.2 0M8.4 16c2.4-.2 4.8-.2 7.2 0" },
+]);
+const Maximize = sketch("Maximize", [{ d: "M3.6 8.4c-.1-1.6-.1-3.2.1-4.8 1.6-.2 3.2-.2 4.8 0M15.6 3.6c1.6-.2 3.2-.2 4.8 0 .2 1.6.2 3.2.1 4.8M20.4 15.6c.1 1.6.1 3.2-.1 4.8-1.6.2-3.2.2-4.8 0M8.4 20.4c-1.6.2-3.2.2-4.8 0-.2-1.6-.2-3.2-.1-4.8" }]);
+const Volume = sketch("Volume", [
+  { d: "M3.4 9.3c1.1-.2 2.3-.2 3.4 0 1.9-1.7 3.9-3.3 6-4.8.3 5 .3 10 0 15-2.1-1.5-4.1-3.1-6-4.8-1.1.2-2.3.2-3.4 0-.2-1.8-.2-3.6 0-5.4Z", f: true },
+  { d: "M16.4 9c1.2 1.9 1.2 4.1 0 6M19 6.4c2.4 3.4 2.4 7.8 0 11.2" },
+]);
+const Palette = sketch("Palette", [
+  { d: "M12 3.1c5 0 9 3.6 9 8.1 0 2.6-2.1 3.9-4.2 3.6-1.5-.2-2.5.9-1.9 2.3.6 1.4-.3 3.7-2.9 3.7-5 0-8.9-4-8.9-8.9 0-4.9 4-8.8 8.9-8.8Z", f: true },
+  { d: "M7.6 11.2h.2M10.2 7.4h.2M14.6 7.4h.2" },
+]);
+const Bookmark = sketch("Bookmark", [{ d: "M6.2 3.4c3.9-.2 7.7-.2 11.6 0 .3 5.8.3 11.6 0 17.4-2-1.6-3.9-3.1-5.8-4.5-1.9 1.4-3.8 2.9-5.8 4.5-.3-5.8-.3-11.6 0-17.4Z", f: true }]);
+const Database = sketch("Database", [
+  { d: "M12 3c4.4 0 8 1.3 8 3s-3.6 3-8 3-8-1.3-8-3 3.6-3 8-3Z", f: true },
+  { d: "M4 6.1c-.1 4-.1 7.9.1 11.9.4 1.7 3.8 3 7.9 3s7.5-1.3 7.9-3c.2-4 .2-7.9.1-11.9M4.1 12c.4 1.6 3.8 2.9 7.9 2.9s7.5-1.3 7.9-2.9" },
+]);
 const Sparkles = sketch("Sparkles", [
   { d: "M10.5 3.2c.6 3.2 2.3 5 5.5 5.8-3.2.7-4.9 2.6-5.5 5.8-.6-3.2-2.4-5.1-5.6-5.8 3.2-.8 5-2.6 5.6-5.8Z", f: true },
   { d: "M18.4 13.6c.3 1.5 1.1 2.3 2.6 2.7-1.5.3-2.3 1.2-2.6 2.7-.3-1.5-1.2-2.4-2.7-2.7 1.5-.4 2.4-1.2 2.7-2.7ZM5.6 16.4c.2 1 .8 1.6 1.8 1.8-1 .2-1.6.8-1.8 1.8-.2-1-.8-1.6-1.8-1.8 1-.2 1.6-.8 1.8-1.8Z" },
@@ -313,10 +342,17 @@ interface SettingsState {
   name: string; sleepGoal: number; wakeDefault: string; bedDefault: string; prepMinutes: number;
   fallAsleep: number; maxBlock: number; theme: "system" | "light" | "dark"; pomodoro: PomodoroCfg;
   onboarded: boolean; roommates: string[]; currency: string;
+  accent: string; hiddenViews: ViewKey[]; quickExpenses: QuickExpense[];
 }
+interface QuickExpense { label: string; amount: number; category: ExpenseCat }
+interface TemplateItem { name: string; aisle: Aisle; qty: string; price: number }
+interface GroceryTemplate { id: ID; name: string; items: TemplateItem[] }
+/** Base produits apprise : dernier prix payé, rayon, nombre d'achats. */
+interface Product { name: string; aisle: Aisle; price: number; count: number; last: string }
 interface AppState {
   version: 1; courses: Course[]; classes: ClassSession[]; tasks: Task[]; groceries: GroceryItem[];
   chores: Chore[]; sleep: SleepLog[]; focus: FocusEntry[]; budget: Budget; settings: SettingsState;
+  templates: GroceryTemplate[]; products: Product[];
 }
 
 // ---------------------------------------------------------------- Utilitaires date / temps
@@ -414,19 +450,24 @@ function seed(): AppState {
   ];
   return {
     version: 1, courses, classes, tasks, groceries, chores, sleep, focus,
-    budget: { monthly: 750, limits: { Courses: 180, Restauration: 60, Loisirs: 50, Transport: 30 }, expenses },
+    budget: { monthly: 750, limits: { Courses: 180, Restauration: 60, Loisirs: 50, Transport: 30 }, expenses }, templates: [], products: [],
     settings: { ...DEFAULT_SETTINGS, name: "Camille", roommates: ["Inès", "Hugo"] },
   };
 }
 const DEFAULT_SETTINGS: SettingsState = {
   name: "", sleepGoal: 8, wakeDefault: "07:30", bedDefault: "23:30", prepMinutes: 50, fallAsleep: 14,
   maxBlock: 90, theme: "system", pomodoro: { work: 50, short: 10, long: 25, longEvery: 3 }, onboarded: false, roommates: [], currency: "€",
+  accent: "cobalt", hiddenViews: [],
+  quickExpenses: [
+    { label: "Resto U", amount: 3.3, category: "Restauration" }, { label: "Café", amount: 1.5, category: "Restauration" },
+    { label: "Ticket transport", amount: 2.1, category: "Transport" }, { label: "Boulangerie", amount: 2.4, category: "Courses" },
+  ],
 };
 /** Espace vierge personnalisé : rien d'inventé, seulement les réglages de l'utilisateur. */
 function blank(settings: Partial<SettingsState>, monthly: number): AppState {
   return {
     version: 1, courses: [], classes: [], tasks: [], groceries: [], chores: [], sleep: [], focus: [],
-    budget: { monthly, limits: {}, expenses: [] }, settings: { ...DEFAULT_SETTINGS, onboarded: true, ...settings },
+    budget: { monthly, limits: {}, expenses: [] }, settings: { ...DEFAULT_SETTINGS, onboarded: true, ...settings }, templates: [], products: [],
   };
 }
 
@@ -441,7 +482,20 @@ type Action =
   | { type: "sleep/upsert"; log: SleepLog } | { type: "sleep/remove"; date: string }
   | { type: "focus/log"; entry: FocusEntry }
   | { type: "expense/add"; expense: Expense } | { type: "expense/remove"; id: ID } | { type: "budget/set"; patch: Partial<Omit<Budget, "expenses">> }
-  | { type: "settings"; patch: Partial<SettingsState> };
+  | { type: "settings"; patch: Partial<SettingsState> }
+  | { type: "template/save"; template: GroceryTemplate } | { type: "template/remove"; id: ID }
+  | { type: "grocery/addMany"; items: GroceryItem[] }
+  | { type: "product/upsert"; product: Omit<Product, "count" | "last"> } | { type: "product/remove"; name: string }
+  | { type: "class/addMany"; sessions: ClassSession[]; courses: Course[] };
+
+const norm = (x: string) => x.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+function learnProduct(list: Product[], p: Omit<Product, "count" | "last">, bought = false): Product[] {
+  const k = norm(p.name); if (!k) return list;
+  const prev = list.find((x) => norm(x.name) === k);
+  const next: Product = { name: prev?.name ?? p.name.trim(), aisle: p.aisle, price: p.price > 0 ? Math.round(p.price * 100) / 100 : prev?.price ?? 0,
+    count: (prev?.count ?? 0) + (bought ? 1 : 0), last: bought ? todayISO() : prev?.last ?? "" };
+  return [next, ...list.filter((x) => norm(x.name) !== k)];
+}
 
 function reducer(s: AppState, a: Action): AppState {
   switch (a.type) {
@@ -465,14 +519,19 @@ function reducer(s: AppState, a: Action): AppState {
     };
     case "class/add": return { ...s, classes: [...s.classes, a.session] };
     case "class/remove": return { ...s, classes: s.classes.filter((c) => c.id !== a.id) };
-    case "grocery/add": return { ...s, groceries: [...s.groceries, a.item] };
+    case "grocery/add": return {
+      ...s, groceries: [...s.groceries, a.item],
+      products: a.item.price > 0 ? learnProduct(s.products, { name: a.item.name, aisle: a.item.aisle, price: a.item.price }) : s.products,
+    };
     case "grocery/toggle": return { ...s, groceries: s.groceries.map((g) => (g.id === a.id ? { ...g, checked: !g.checked } : g)) };
     case "grocery/remove": return { ...s, groceries: s.groceries.filter((g) => g.id !== a.id) };
     case "grocery/update": return { ...s, groceries: s.groceries.map((g) => (g.id === a.id ? { ...g, ...a.patch } : g)) };
     case "grocery/checkout": {
       const n = s.groceries.filter((g) => g.checked).length;
       const expense: Expense = { id: uid(), date: a.date, amount: Math.round(a.amount * 100) / 100, category: "Courses", label: `Courses (${n} article${n > 1 ? "s" : ""})` };
-      return { ...s, groceries: s.groceries.filter((g) => !g.checked), budget: { ...s.budget, expenses: [...s.budget.expenses, expense] } };
+      const bought = s.groceries.filter((g) => g.checked);
+      const products = bought.reduce((ps, g) => learnProduct(ps, { name: g.name, aisle: g.aisle, price: g.price }, true), s.products);
+      return { ...s, groceries: s.groceries.filter((g) => !g.checked), budget: { ...s.budget, expenses: [...s.budget.expenses, expense] }, products };
     }
     case "expense/add": return { ...s, budget: { ...s.budget, expenses: [...s.budget.expenses, a.expense] } };
     case "expense/remove": return { ...s, budget: { ...s.budget, expenses: s.budget.expenses.filter((e) => e.id !== a.id) } };
@@ -487,6 +546,12 @@ function reducer(s: AppState, a: Action): AppState {
     case "sleep/remove": return { ...s, sleep: s.sleep.filter((l) => l.date !== a.date) };
     case "focus/log": return { ...s, focus: [...s.focus, a.entry] };
     case "settings": return { ...s, settings: { ...s.settings, ...a.patch } };
+    case "template/save": return { ...s, templates: [...s.templates.filter((t) => t.id !== a.template.id), a.template] };
+    case "template/remove": return { ...s, templates: s.templates.filter((t) => t.id !== a.id) };
+    case "grocery/addMany": return { ...s, groceries: [...s.groceries, ...a.items] };
+    case "product/upsert": return { ...s, products: learnProduct(s.products, a.product) };
+    case "product/remove": return { ...s, products: s.products.filter((x) => norm(x.name) !== norm(a.name)) };
+    case "class/addMany": return { ...s, courses: [...s.courses, ...a.courses], classes: [...s.classes, ...a.sessions] };
   }
 }
 
@@ -505,6 +570,7 @@ function migrate(p: AppState): AppState {
     groceries: p.groceries.map((g) => ({ ...g, price: g.price ?? 0 })),
     budget: p.budget ?? { monthly: 600, limits: {}, expenses: [] },
     settings: { ...DEFAULT_SETTINGS, ...p.settings, roommates: p.settings.roommates ?? [], onboarded: p.settings.onboarded ?? false },
+    templates: p.templates ?? [], products: p.products ?? [],
   };
 }
 function isAppState(x: unknown): x is AppState {
@@ -775,6 +841,90 @@ const Modal: React.FC<{ title: string; onClose: () => void; children: React.Reac
   );
 };
 
+// ---------------------------------------------------------------- Chargement à la demande (PDF, OCR)
+const scriptCache = new Map<string, Promise<void>>();
+function loadScript(src: string): Promise<void> {
+  if (!scriptCache.has(src)) scriptCache.set(src, new Promise((ok, ko) => {
+    const el = document.createElement("script"); el.src = src; el.async = true;
+    el.onload = () => ok(); el.onerror = () => { scriptCache.delete(src); ko(new Error("Chargement impossible : " + src)); };
+    document.head.appendChild(el);
+  }));
+  return scriptCache.get(src)!;
+}
+const PDFJS = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/";
+type PdfJs = { GlobalWorkerOptions: { workerSrc: string }; getDocument: (o: { data: ArrayBuffer }) => { promise: Promise<PdfDoc> } };
+type PdfDoc = { numPages: number; getPage: (n: number) => Promise<PdfPage> };
+type PdfPage = {
+  getTextContent: () => Promise<{ items: { str: string; transform: number[] }[] }>;
+  getViewport: (o: { scale: number }) => { width: number; height: number };
+  render: (o: { canvasContext: CanvasRenderingContext2D; viewport: unknown }) => { promise: Promise<void> };
+};
+async function pdfjs(): Promise<PdfJs> {
+  await loadScript(PDFJS + "pdf.min.js");
+  const lib = (window as unknown as { pdfjsLib: PdfJs }).pdfjsLib;
+  lib.GlobalWorkerOptions.workerSrc = PDFJS + "pdf.worker.min.js";
+  return lib;
+}
+type Tess = { recognize: (img: File, lang: string, o?: { logger?: (m: { status: string; progress: number }) => void }) => Promise<{ data: { text: string } }> };
+async function tesseract(): Promise<Tess> {
+  await loadScript("https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/tesseract.min.js");
+  return (window as unknown as { Tesseract: Tess }).Tesseract;
+}
+
+// Petit stockage de fichiers (PDF de l'emploi du temps) dans IndexedDB : trop gros pour localStorage.
+function idb<T>(mode: IDBTransactionMode, run: (st: IDBObjectStore) => IDBRequest): Promise<T> {
+  return new Promise((ok, ko) => {
+    const open = indexedDB.open("etudiant-os", 1);
+    open.onupgradeneeded = () => open.result.createObjectStore("files");
+    open.onerror = () => ko(open.error);
+    open.onsuccess = () => { const tx = open.result.transaction("files", mode); const rq = run(tx.objectStore("files")); rq.onsuccess = () => ok(rq.result as T); rq.onerror = () => ko(rq.error); };
+  });
+}
+const fileSave = (k: string, v: Blob) => idb<void>("readwrite", (st) => st.put(v, k));
+const fileLoad = (k: string) => idb<Blob | undefined>("readonly", (st) => st.get(k));
+const fileDelete = (k: string) => idb<void>("readwrite", (st) => st.delete(k));
+
+// ---------------------------------------------------------------- Lecture de ticket de caisse
+interface ReceiptResult { amount: number | null; date: string | null; store: string; text: string }
+function parseReceipt(text: string): ReceiptResult {
+  const lines = text.split(/\n/).map((l) => l.trim()).filter(Boolean);
+  const amountsIn = (l: string) => [...l.matchAll(/(\d{1,4})[.,](\d{2})(?!\d)/g)].map((m) => Number(m[1] + "." + m[2]));
+  let amount: number | null = null;
+  const totalLine = [...lines].reverse().find((l) => /(total|a\s*payer|à\s*payer|net\s*a|montant|ttc|carte|cb\b|esp[eè]ces)/i.test(l) && !/sous[-\s]?total|tva|remise|rendu/i.test(l) && amountsIn(l).length);
+  if (totalLine) amount = amountsIn(totalLine).pop() ?? null;
+  if (amount === null) { const all = lines.flatMap(amountsIn).filter((v) => v < 2000); amount = all.length ? Math.max(...all) : null; }
+  const dm = text.match(/(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2,4})/);
+  let date: string | null = null;
+  if (dm) { const y = dm[3].length === 2 ? 2000 + Number(dm[3]) : Number(dm[3]); const d = new Date(y, Number(dm[2]) - 1, Number(dm[1])); if (!isNaN(d.getTime()) && y > 2000) date = iso(d); }
+  const store = (lines.find((l) => /[a-z]{3,}/i.test(l) && !/\d{2}[/.]\d{2}/.test(l)) ?? "").replace(/[^\p{L}\d '&-]/gu, "").trim().slice(0, 32);
+  return { amount, date, store, text };
+}
+const ReceiptScanner: React.FC<{ onResult: (r: ReceiptResult) => void; label?: string; className?: string }> = ({ onResult, label = "Scanner un ticket", className }) => {
+  const { toast } = useStore();
+  const ref = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState<number | null>(null);
+  const run = async (file: File) => {
+    setBusy(0);
+    try {
+      const T = await tesseract();
+      const { data } = await T.recognize(file, "fra", { logger: (m) => m.status === "recognizing text" && setBusy(Math.round(m.progress * 100)) });
+      const r = parseReceipt(data.text);
+      onResult(r);
+      toast(r.amount ? `Ticket lu : ${r.amount.toFixed(2).replace(".", ",")}${r.store ? ` · ${r.store}` : ""}. Vérifiez puis validez.` : "Montant introuvable sur la photo. Saisissez-le à la main.", r.amount ? "ok" : "info");
+    } catch {
+      toast("Lecture impossible ici. Elle fonctionne sur le site en ligne (connexion requise la première fois).", "bad");
+    } finally { setBusy(null); }
+  };
+  return (
+    <>
+      <Btn type="button" className={className} disabled={busy !== null} onClick={() => ref.current?.click()}>
+        <Camera size={15} />{busy !== null ? `Lecture du ticket… ${busy} %` : label}
+      </Btn>
+      <input ref={ref} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) run(f); e.target.value = ""; }} />
+    </>
+  );
+};
+
 // ---------------------------------------------------------------- Module : Tableau de bord
 const Dashboard: React.FC<{ go: (v: ViewKey) => void }> = ({ go }) => {
   const { state } = useStore();
@@ -873,6 +1023,149 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void }> = ({ go }) => {
 const BLOCK_STYLE: Record<Block["kind"], string> = {
   class: "border-l-[3px] bg-sunken", task: "border-l-[3px] bg-accent/8", chore: "border-l-[3px] border-l-warn bg-warn/10", meal: "border-l-[3px] border-l-line bg-transparent text-muted", sleep: "",
 };
+// ---------------------------------------------------------------- Import d'emploi du temps PDF
+interface Detected { key: string; day: number; start: string; end: string; title: string; room: string; on: boolean }
+const DAY_WORDS: RegExp[] = [
+  /\b(lundi|lun\.?|monday|mon)\b/i, /\b(mardi|tuesday|tue)\b/i, /\b(mercredi|mer\.?|wednesday|wed)\b/i, /\b(jeudi|jeu\.?|thursday|thu)\b/i,
+  /\b(vendredi|ven\.?|friday|fri)\b/i, /\b(samedi|sam\.?|saturday|sat)\b/i, /\b(dimanche|dim\.?|sunday|sun)\b/i,
+];
+const dayOf = (t: string) => DAY_WORDS.findIndex((re) => re.test(t));
+const TIME_RE = /(\d{1,2})\s*[h:]\s*(\d{2})?\s*(?:-|–|—|à|a|>)\s*(\d{1,2})\s*[h:]\s*(\d{2})?/gi;
+const ROOM_RE = /\b((?:salle|amphi(?:théâtre)?|room|labo|bât\.?|bat\.?|td|tp)\s*[\w.-]{1,8}|[a-z]\d{3})\b/i;
+async function extractTimetable(buf: ArrayBuffer): Promise<Detected[]> {
+  const lib = await pdfjs();
+  const doc = await lib.getDocument({ data: buf }).promise;
+  const out: Detected[] = [];
+  for (let n = 1; n <= doc.numPages; n++) {
+    const page = await doc.getPage(n);
+    const items = (await page.getTextContent()).items.filter((i) => i.str.trim()).map((i) => ({ s: i.str.trim(), x: i.transform[4], y: i.transform[5] }));
+    // En-têtes de colonnes (emplois du temps en grille : un jour par colonne)
+    const headers = items.map((i) => ({ day: i.s.length < 14 ? dayOf(i.s) : -1, x: i.x })).filter((h) => h.day >= 0);
+    const scan = (lines: (typeof items)[], fixedDay: number) => {
+      let current = fixedDay;
+      lines.forEach((line, li) => {
+        const text = line.map((i) => i.s).join(" ");
+        const d = fixedDay >= 0 ? fixedDay : dayOf(text); if (d >= 0) current = d;
+        const day = current; if (day < 0) return;
+        for (const m of text.matchAll(TIME_RE)) {
+          const start = `${pad(Number(m[1]))}:${m[2] ?? "00"}`, end = `${pad(Number(m[3]))}:${m[4] ?? "00"}`;
+          if (toMin(end) <= toMin(start) || Number(m[1]) > 23 || Number(m[3]) > 23) continue;
+          const next = [1, 2, 3].map((k) => (lines[li + k] ?? []).map((i) => i.s).join(" ")).filter((t) => !t.match(TIME_RE));
+          let title = text.replace(TIME_RE, " ").replace(DAY_WORDS[day], " ").replace(/\s+/g, " ").trim();
+          if (title.length < 3) title = next[0] ?? "";
+          const room = (title.match(ROOM_RE) ?? next.slice(0, 2).join(" ").match(ROOM_RE))?.[0] ?? "";
+          title = title.replace(room, "").replace(/^[\s|•·,;:—–-]+|[\s|•·,;:—–-]+$/g, "").trim().slice(0, 60) || "Cours";
+          const key = `${day}-${start}-${end}-${norm(title)}`;
+          if (!out.some((o) => o.key === key)) out.push({ key, day, start, end, title, room, on: true });
+        }
+      });
+    };
+    const toLines = (its: typeof items) => {
+      const ls: (typeof items)[] = [];
+      for (const it of [...its].sort((a, b) => b.y - a.y || a.x - b.x)) { const l = ls[ls.length - 1]; if (l && Math.abs(l[0].y - it.y) < 3) l.push(it); else ls.push([it]); }
+      return ls;
+    };
+    const cols = headers.filter((h, i) => headers.findIndex((o) => o.day === h.day) === i).sort((a, b) => a.x - b.x);
+    const ys = headers.map((h) => items.find((i) => i.x === h.x && dayOf(i.s) === h.day)?.y ?? 0);
+    const isGrid = cols.length >= 2 && Math.max(...ys) - Math.min(...ys) < 20 && cols[cols.length - 1].x - cols[0].x > 80;
+    if (isGrid) {
+      // Grille : chaque fragment appartient à la colonne du jour la plus proche (hors marge gauche des créneaux).
+      const gap = (cols[cols.length - 1].x - cols[0].x) / (cols.length - 1);
+      const top = Math.max(...headers.map((h) => items.find((i) => i.x === h.x && dayOf(i.s) === h.day)?.y ?? 0));
+      cols.forEach((c) => scan(toLines(items.filter((i) => {
+        if (i.y > top + 2) return false;
+        const near = cols.reduce((b, h) => (Math.abs(h.x - i.x) < Math.abs(b.x - i.x) ? h : b));
+        return near === c && Math.abs(i.x - c.x) < gap * 0.75 && i.x > cols[0].x - gap * 0.35;
+      })), c.day));
+    } else scan(toLines(items), -1);
+  }
+  return out.sort((a, b) => a.day - b.day || toMin(a.start) - toMin(b.start));
+}
+async function renderPdf(blob: Blob, el: HTMLElement) {
+  const lib = await pdfjs();
+  const doc = await lib.getDocument({ data: await blob.arrayBuffer() }).promise;
+  el.innerHTML = "";
+  for (let n = 1; n <= doc.numPages; n++) {
+    const page = await doc.getPage(n);
+    const vp = page.getViewport({ scale: 2 });
+    const c = document.createElement("canvas"); c.width = vp.width; c.height = vp.height;
+    c.style.width = "100%"; c.style.height = "auto"; c.style.borderRadius = "12px"; c.style.marginBottom = "12px"; c.style.background = "#fff";
+    el.appendChild(c);
+    await page.render({ canvasContext: c.getContext("2d")!, viewport: vp }).promise;
+  }
+}
+const TimetableImport: React.FC = () => {
+  const { state, dispatch, toast } = useStore();
+  const ref = useRef<HTMLInputElement>(null);
+  const [rows, setRows] = useState<Detected[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [hasPdf, setHasPdf] = useState(false);
+  const [viewing, setViewing] = useState(false);
+  const viewer = useRef<HTMLDivElement>(null);
+  useEffect(() => { fileLoad("timetable.pdf").then((b) => setHasPdf(!!b)).catch(() => {}); }, []);
+  useEffect(() => {
+    if (!viewing) return;
+    fileLoad("timetable.pdf").then((b) => b && viewer.current && renderPdf(b, viewer.current)).catch(() => toast("Affichage du PDF impossible ici.", "bad"));
+  }, [viewing]);
+  const onFile = async (f: File) => {
+    setBusy(true);
+    try {
+      await fileSave("timetable.pdf", f).then(() => setHasPdf(true)).catch(() => {});
+      const found = await extractTimetable(await f.arrayBuffer());
+      setRows(found);
+      toast(found.length ? `${found.length} créneaux détectés : vérifiez-les avant d'importer.` : "Aucun horaire reconnu. Le PDF est gardé pour consultation ; ajoutez les cours à la main.", found.length ? "ok" : "info");
+    } catch { toast("Lecture du PDF impossible ici. Elle fonctionne sur le site en ligne.", "bad"); }
+    finally { setBusy(false); }
+  };
+  const upd = (k: string, patch: Partial<Detected>) => setRows((r) => r && r.map((x) => (x.key === k ? { ...x, ...patch } : x)));
+  const importRows = () => {
+    const sel = (rows ?? []).filter((r) => r.on); if (!sel.length) return;
+    const palette = ["#2f6fed", "#0f9d76", "#d9822b", "#c2417a", "#7a5af5", "#1d9bb5", "#b5651d"];
+    const newCourses: Course[] = [];
+    const courseFor = (title: string) => {
+      const k = norm(title);
+      const hit = [...state.courses, ...newCourses].find((c) => k.includes(norm(c.name)) || norm(c.name).includes(k) || (c.code && k.includes(norm(c.code))));
+      if (hit) return hit.id;
+      const c: Course = { id: uid(), name: title, code: title.replace(/[^A-Za-z0-9]/g, "").slice(0, 7).toUpperCase(), coef: 1, color: palette[(state.courses.length + newCourses.length) % palette.length], grades: [] };
+      newCourses.push(c); return c.id;
+    };
+    const sessions = sel.map((r) => ({ id: uid(), courseId: courseFor(r.title), day: r.day, start: r.start, end: r.end, room: r.room }));
+    dispatch({ type: "class/addMany", sessions, courses: newCourses });
+    toast(`${sessions.length} cours ajoutés${newCourses.length ? ` · ${newCourses.length} nouveaux modules` : ""}. Ajustez les coefficients dans Académique.`);
+    setRows(null);
+  };
+  return (
+    <Card title={<span className="flex items-center gap-2"><FileText size={15} />Emploi du temps PDF</span>}>
+      <p className="text-xs text-muted">Importez le PDF de votre école : les horaires sont détectés et ajoutés au planning après vérification. Le PDF reste consultable ici.</p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Btn variant="primary" disabled={busy} onClick={() => ref.current?.click()}><Upload size={14} />{busy ? "Lecture…" : "Importer un PDF"}</Btn>
+        {hasPdf && <Btn onClick={() => setViewing(true)}><FileText size={14} />Voir mon PDF</Btn>}
+        {hasPdf && <Btn variant="danger" onClick={() => fileDelete("timetable.pdf").then(() => { setHasPdf(false); toast("PDF retiré", "info"); })} aria-label="Retirer le PDF"><Trash2 size={13} /></Btn>}
+        <input ref={ref} type="file" accept="application/pdf,.pdf" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); e.target.value = ""; }} />
+      </div>
+      {rows && rows.length > 0 && (
+        <div className="mt-3">
+          <ul className="flex max-h-80 flex-col gap-1.5 overflow-y-auto pr-1">
+            {rows.map((r) => (
+              <li key={r.key} className={cx("grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 rounded-xl border-2 p-2 text-xs transition", r.on ? "border-fg/60" : "border-line opacity-50")}>
+                <input type="checkbox" aria-label="Importer ce créneau" checked={r.on} onChange={(e) => upd(r.key, { on: e.target.checked })} className="mt-1.5 h-4 w-4 accent-[rgb(var(--accent))]" />
+                <Input aria-label="Intitulé" className="h-7 text-xs" value={r.title} onChange={(e) => upd(r.key, { title: e.target.value })} />
+                <span />
+                <div className="flex min-w-0 flex-wrap gap-1">
+                  <Select aria-label="Jour" className="h-7 w-auto text-xs" value={r.day} onChange={(e) => upd(r.key, { day: Number(e.target.value) })}>{DAYS.map((d, i) => <option key={d} value={i}>{d}</option>)}</Select>
+                  <Input aria-label="Début" type="time" className="h-7 w-[92px] text-xs" value={r.start} onChange={(e) => upd(r.key, { start: e.target.value })} />
+                  <Input aria-label="Fin" type="time" className="h-7 w-[92px] text-xs" value={r.end} onChange={(e) => upd(r.key, { end: e.target.value })} />
+                  <Input aria-label="Salle" placeholder="Salle" className="h-7 w-20 text-xs" value={r.room} onChange={(e) => upd(r.key, { room: e.target.value })} />
+                </div>
+              </li>))}
+          </ul>
+          <div className="mt-2 flex justify-end gap-2"><Btn variant="ghost" onClick={() => setRows(null)}>Annuler</Btn><Btn variant="primary" onClick={importRows}><Check size={14} />Ajouter {rows.filter((r) => r.on).length} cours</Btn></div>
+        </div>)}
+      {viewing && <Modal title="Mon emploi du temps" onClose={() => setViewing(false)}><div ref={viewer} className="text-sm text-muted">Chargement du PDF…</div></Modal>}
+    </Card>
+  );
+};
+
 const Planning: React.FC = () => {
   const { state, dispatch, toast } = useStore();
   const [offset, setOffset] = useState(0);
@@ -932,6 +1225,7 @@ const Planning: React.FC = () => {
                 <span className="text-[10px] text-muted">{DAYS[weekday(parseISO(p.date))]}</span><span className="font-mono text-[10px] tabular-nums">{Math.round(p.load * 100)}%</span></button>); })}
           </div>
         </Card>
+        <TimetableImport />
         <Card title="Emploi du temps fixe">
           <ul className="mb-3 flex max-h-56 flex-col gap-1 overflow-auto pr-1 text-xs">
             {[...state.classes].sort((a, b) => a.day - b.day || toMin(a.start) - toMin(b.start)).map((c) => { const co = state.courses.find((x) => x.id === c.courseId); return (
@@ -1069,6 +1363,36 @@ function beep() {
     o.start(); o.stop(ctx.currentTime + 0.8);
   } catch { /* audio indisponible */ }
 }
+type Ambient = "off" | "brun" | "pluie" | "vagues";
+const AMBIENTS: { k: Ambient; label: string }[] = [{ k: "off", label: "Silence" }, { k: "brun", label: "Bruit brun" }, { k: "pluie", label: "Pluie douce" }, { k: "vagues", label: "Vagues" }];
+/** Sons d'ambiance générés en direct (aucun fichier audio). */
+function useAmbient(): [Ambient, (k: Ambient) => void] {
+  const ref = useRef<AudioContext | null>(null);
+  const [kind, setKind] = useState<Ambient>("off");
+  const play = useCallback((k: Ambient) => {
+    ref.current?.close().catch(() => {}); ref.current = null; setKind(k);
+    if (k === "off") return;
+    try {
+      const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const ctx = new AC(); ref.current = ctx;
+      const len = ctx.sampleRate * 6, buf = ctx.createBuffer(1, len, ctx.sampleRate), d = buf.getChannelData(0);
+      let last = 0, b0 = 0, b1 = 0, b2 = 0;
+      for (let i = 0; i < len; i++) {
+        const w = Math.random() * 2 - 1;
+        if (k === "pluie") { b0 = 0.99765 * b0 + w * 0.099046; b1 = 0.963 * b1 + w * 0.2965; b2 = 0.57 * b2 + w * 1.0526; d[i] = (b0 + b1 + b2 + w * 0.1848) * 0.09; }
+        else { last = (last + 0.02 * w) / 1.02; d[i] = last * 3.2; }
+      }
+      const src = ctx.createBufferSource(); src.buffer = buf; src.loop = true;
+      const gain = ctx.createGain(); gain.gain.value = 0.35;
+      src.connect(gain); gain.connect(ctx.destination);
+      if (k === "vagues") { const lfo = ctx.createOscillator(), depth = ctx.createGain(); lfo.frequency.value = 0.09; depth.gain.value = 0.3; lfo.connect(depth); depth.connect(gain.gain); lfo.start(); }
+      src.start();
+    } catch { setKind("off"); }
+  }, []);
+  useEffect(() => () => { ref.current?.close().catch(() => {}); }, []);
+  return [kind, play];
+}
+
 const Focus: React.FC = () => {
   const { state, dispatch, toast } = useStore();
   const cfg = state.settings.pomodoro;
@@ -1078,6 +1402,17 @@ const Focus: React.FC = () => {
   const [cycles, setCycles] = useState(0);
   const [taskId, setTaskId] = useState<ID | "">(state.tasks.find((t) => t.status === "doing")?.id ?? "");
   const endAt = useRef<number | null>(null);
+  const [zen, setZen] = useState(false);
+  const [ambient, playAmbient] = useAmbient();
+  useEffect(() => {
+    if (!zen) return;
+    let lock: { release: () => Promise<void> } | null = null;
+    (navigator as unknown as { wakeLock?: { request: (t: string) => Promise<typeof lock> } }).wakeLock?.request("screen").then((l) => { lock = l; }).catch(() => {});
+    document.documentElement.requestFullscreen?.().catch(() => {});
+    const k = (e: KeyboardEvent) => { if (e.key === "Escape") setZen(false); };
+    window.addEventListener("keydown", k);
+    return () => { window.removeEventListener("keydown", k); lock?.release().catch(() => {}); if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {}); };
+  }, [zen]);
   const total = (p: Phase) => (p === "work" ? cfg.work : p === "short" ? cfg.short : cfg.long) * 60;
 
   const commitFocus = useCallback((seconds: number) => {
@@ -1131,8 +1466,26 @@ const Focus: React.FC = () => {
   }, [state.focus, state.tasks]);
   const setCfg = (patch: Partial<PomodoroCfg>) => dispatch({ type: "settings", patch: { pomodoro: { ...cfg, ...patch } } });
 
+  const zenTask = state.tasks.find((t) => t.id === taskId);
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+      {zen && (
+        <div className="fixed inset-0 z-[80] flex flex-col items-center justify-center gap-6 overflow-y-auto bg-bg px-6 py-10 animate-fade" role="dialog" aria-label="Mode focus">
+          <p className="text-xs font-semibold uppercase tracking-[.25em] text-muted">{PHASE_LABEL[phase]} · cycle {(cycles % cfg.longEvery) + 1}/{cfg.longEvery}</p>
+          <p className="font-display text-[clamp(72px,24vw,240px)] font-extrabold leading-none tabular-nums tracking-tighter">{pad(Math.floor(remaining / 60))}:{pad(remaining % 60)}</p>
+          <div className="h-2 w-full max-w-md overflow-hidden rounded-full border-2 border-fg bg-panel"><div className="h-full bg-hi transition-all duration-500" style={{ width: `${progress * 100}%` }} /></div>
+          <p className="max-w-md text-center font-display text-xl font-bold"><span className="marker">{zenTask?.title ?? "Focus libre"}<svg viewBox="0 0 200 20" preserveAspectRatio="none" aria-hidden><path d="M2 12 C 40 6, 80 16, 120 9 S 180 6, 198 11" /></svg></span></p>
+          <div className="flex items-center gap-3">
+            <Btn variant="primary" className="h-14 w-40 text-base" onClick={toggle}>{running ? <><Pause size={20} />Pause</> : <><Play size={20} />Démarrer</>}</Btn>
+            <Btn variant="ghost" onClick={() => complete(total(phase) - remaining)} aria-label="Phase suivante"><SkipForward size={20} /></Btn>
+          </div>
+          <div className="flex flex-wrap justify-center gap-2">
+            <Volume size={16} className="mt-1.5 text-muted" />
+            {AMBIENTS.map((a) => (<button key={a.k} onClick={() => playAmbient(a.k)} className={cx("rounded-full border-2 px-3 py-1 text-xs font-semibold transition", ambient === a.k ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-line text-muted hover:border-fg/60")}>{a.label}</button>))}
+          </div>
+          <p className="max-w-sm text-center text-xs text-muted">Activez « Ne pas déranger » sur votre téléphone. L'écran reste allumé tant que le mode focus est ouvert.</p>
+          <Btn variant="ghost" onClick={() => { setZen(false); playAmbient("off"); }}><X size={15} />Quitter le mode focus <Kbd>Échap</Kbd></Btn>
+        </div>)}
       <Card>
         <div className="flex flex-col items-center gap-5 py-4">
           <div className="flex gap-1 rounded-lg bg-sunken p-1">
@@ -1153,6 +1506,7 @@ const Focus: React.FC = () => {
             <Btn variant="primary" data-pomo-toggle className="h-11 w-32 text-sm" onClick={toggle}>{running ? <><Pause size={16} />Pause</> : <><Play size={16} />Démarrer</>}</Btn>
             <Btn variant="ghost" onClick={() => complete(total(phase) - remaining)} aria-label="Passer à la phase suivante"><SkipForward size={16} /></Btn>
           </div>
+          <Btn onClick={() => setZen(true)}><Maximize size={15} />Mode focus plein écran</Btn>
           <p className="text-xs text-muted"><Kbd>Espace</Kbd> démarrer / pause</p>
           <Field label="Tâche en cours" htmlFor="pomo-task" className="w-full max-w-sm">
             <Select id="pomo-task" value={taskId} onChange={(e) => setTaskId(e.target.value)}>
@@ -1190,11 +1544,66 @@ const GUESS: [RegExp, Aisle][] = [
 ];
 const guessAisle = (name: string): Aisle => GUESS.find(([re]) => re.test(name))?.[1] ?? "Épicerie";
 
+// Base de produits courante (prix moyens indicatifs en France) : complétée par vos propres achats.
+const CATALOG: TemplateItem[] = ([
+  ["Lait demi-écrémé", "Frais", "1 L", 1.05], ["Œufs", "Frais", "x12", 3.4], ["Yaourts nature", "Frais", "x8", 2.1], ["Beurre doux", "Frais", "250 g", 2.6],
+  ["Emmental râpé", "Frais", "200 g", 2.3], ["Jambon blanc", "Frais", "4 tranches", 2.9], ["Blancs de poulet", "Frais", "500 g", 6.5], ["Crème fraîche", "Frais", "20 cl", 1.3],
+  ["Tofu nature", "Frais", "400 g", 2.8], ["Mozzarella", "Frais", "125 g", 1.1], ["Saumon fumé", "Frais", "4 tranches", 4.9], ["Steaks hachés", "Frais", "x2", 3.6],
+  ["Bananes", "Fruits & légumes", "1 kg", 1.9], ["Pommes", "Fruits & légumes", "1 kg", 2.4], ["Tomates", "Fruits & légumes", "1 kg", 2.9], ["Carottes", "Fruits & légumes", "1 kg", 1.3],
+  ["Oignons", "Fruits & légumes", "1 kg", 1.6], ["Pommes de terre", "Fruits & légumes", "2,5 kg", 3.2], ["Salade", "Fruits & légumes", "x1", 1.1], ["Citrons", "Fruits & légumes", "x4", 1.8],
+  ["Avocats", "Fruits & légumes", "x2", 2.2], ["Courgettes", "Fruits & légumes", "1 kg", 2.5], ["Épinards", "Fruits & légumes", "500 g", 2.5], ["Ail", "Fruits & légumes", "x3", 1.2],
+  ["Pâtes", "Épicerie", "500 g", 0.95], ["Riz basmati", "Épicerie", "1 kg", 3.2], ["Pain de mie", "Épicerie", "x1", 1.6], ["Baguette", "Épicerie", "x1", 1.1],
+  ["Céréales", "Épicerie", "500 g", 2.9], ["Café moulu", "Épicerie", "250 g", 4.5], ["Thé", "Épicerie", "x25", 2.2], ["Sucre", "Épicerie", "1 kg", 1.2],
+  ["Farine", "Épicerie", "1 kg", 0.9], ["Huile d'olive", "Épicerie", "50 cl", 5.2], ["Sauce tomate", "Épicerie", "500 g", 1.4], ["Thon en boîte", "Épicerie", "x3", 3.9],
+  ["Lentilles", "Épicerie", "500 g", 1.7], ["Pois chiches", "Épicerie", "400 g", 0.9], ["Confiture", "Épicerie", "370 g", 2.3], ["Chocolat", "Épicerie", "200 g", 1.9],
+  ["Biscuits", "Épicerie", "x1", 1.8], ["Sel", "Épicerie", "1 kg", 0.6], ["Épices", "Épicerie", "x1", 1.5], ["Avoine", "Épicerie", "500 g", 1.4],
+  ["Eau minérale", "Boissons", "6 x 1,5 L", 2.4], ["Jus d'orange", "Boissons", "1 L", 1.9], ["Eau pétillante", "Boissons", "6 x 1 L", 2.9], ["Lait d'avoine", "Boissons", "1 L", 1.8],
+  ["Légumes surgelés", "Surgelés", "1 kg", 2.2], ["Pizza surgelée", "Surgelés", "x1", 3.1], ["Frites surgelées", "Surgelés", "1 kg", 2.0], ["Glace", "Surgelés", "500 ml", 3.5],
+  ["Dentifrice", "Hygiène", "x1", 2.4], ["Gel douche", "Hygiène", "250 ml", 2.6], ["Shampoing", "Hygiène", "250 ml", 3.1], ["Déodorant", "Hygiène", "x1", 3.0],
+  ["Papier toilette", "Hygiène", "x6", 3.4], ["Mouchoirs", "Hygiène", "x1", 1.6], ["Coton", "Hygiène", "x1", 1.5],
+  ["Liquide vaisselle", "Entretien", "x1", 1.7], ["Lessive", "Entretien", "1,5 L", 6.9], ["Éponges", "Entretien", "x3", 1.5], ["Sacs poubelle 30 L", "Entretien", "x20", 2.2],
+  ["Essuie-tout", "Entretien", "x2", 2.3], ["Nettoyant multi-usage", "Entretien", "750 ml", 2.5], ["Javel", "Entretien", "1 L", 1.4],
+] as [string, Aisle, string, number][]).map(([name, aisle, qty, price]) => ({ name, aisle, qty, price }));
+
+const pick = (...names: string[]) => names.map((n) => CATALOG.find((c) => c.name === n)!).filter(Boolean);
+const BUILTIN_TEMPLATES: GroceryTemplate[] = [
+  { id: "tpl-week", name: "Essentiels de la semaine", items: pick("Lait demi-écrémé", "Œufs", "Pâtes", "Riz basmati", "Bananes", "Tomates", "Oignons", "Pain de mie", "Yaourts nature", "Légumes surgelés") },
+  { id: "tpl-breakfast", name: "Petit-déjeuner", items: pick("Céréales", "Lait demi-écrémé", "Café moulu", "Confiture", "Beurre doux", "Jus d'orange", "Avoine") },
+  { id: "tpl-clean", name: "Produits ménagers", items: pick("Liquide vaisselle", "Lessive", "Éponges", "Sacs poubelle 30 L", "Essuie-tout", "Nettoyant multi-usage") },
+  { id: "tpl-hygiene", name: "Salle de bain", items: pick("Dentifrice", "Gel douche", "Shampoing", "Papier toilette", "Déodorant") },
+  { id: "tpl-pasta", name: "Soirée pâtes", items: pick("Pâtes", "Sauce tomate", "Emmental râpé", "Oignons", "Ail") },
+  { id: "tpl-budget", name: "Petit budget (< 20 €)", items: pick("Lentilles", "Pois chiches", "Riz basmati", "Carottes", "Oignons", "Œufs", "Thon en boîte", "Bananes") },
+];
+
 const Groceries: React.FC = () => {
   const { state, dispatch, toast } = useStore();
   const [name, setName] = useState(""); const [qty, setQty] = useState(""); const [aisle, setAisle] = useState<Aisle | "auto">("auto");
   const [quick, setQuick] = useState(false); const [bulk, setBulk] = useState(""); const [hideChecked, setHideChecked] = useState(false);
   const [price, setPrice] = useState(""); const [paid, setPaid] = useState("");
+  const [tplName, setTplName] = useState(""); const [dbQuery, setDbQuery] = useState("");
+  // Base produits = vos produits appris (prioritaires) + catalogue courant.
+  const db = useMemo(() => {
+    const mine = state.products.map((x) => ({ name: x.name, aisle: x.aisle, qty: "", price: x.price, mine: true, count: x.count }));
+    const keys = new Set(mine.map((x) => norm(x.name)));
+    return [...mine, ...CATALOG.filter((c) => !keys.has(norm(c.name))).map((c) => ({ ...c, mine: false, count: 0 }))];
+  }, [state.products]);
+  const findProduct = (n: string) => db.find((x) => norm(x.name) === norm(n));
+  const onName = (v: string) => {
+    setName(v); const hit = findProduct(v);
+    if (hit) { if (!price) setPrice(hit.price ? String(hit.price).replace(".", ",") : ""); if (!qty && hit.qty) setQty(hit.qty); setAisle(hit.aisle); }
+  };
+  const applyTemplate = (t: GroceryTemplate) => {
+    const have = new Set(state.groceries.map((g) => norm(g.name)));
+    const items = t.items.filter((i) => !have.has(norm(i.name))).map((i) => ({ id: uid(), name: i.name, aisle: i.aisle, qty: i.qty, checked: false, price: findProduct(i.name)?.price ?? i.price }));
+    if (!items.length) { toast("Tout est déjà dans votre liste.", "info"); return; }
+    dispatch({ type: "grocery/addMany", items }); toast(`${items.length} articles ajoutés depuis « ${t.name} »`);
+  };
+  const saveTemplate = () => {
+    if (!tplName.trim() || !state.groceries.length) { toast("Donnez un nom, avec au moins un article dans la liste.", "bad"); return; }
+    dispatch({ type: "template/save", template: { id: uid(), name: tplName.trim(), items: state.groceries.map((g) => ({ name: g.name, aisle: g.aisle, qty: g.qty, price: g.price })) } });
+    toast(`Liste « ${tplName.trim()} » enregistrée`); setTplName("");
+  };
+  const dbList = db.filter((x) => !dbQuery || norm(x.name).includes(norm(dbQuery))).slice(0, dbQuery ? 30 : 8);
   const cur = state.settings.currency;
   const left = state.groceries.filter((g) => !g.checked).length;
   const estTotal = state.groceries.reduce((n, g) => n + g.price, 0);
@@ -1219,7 +1628,7 @@ const Groceries: React.FC = () => {
   };
   const addBulk = () => {
     const lines = bulk.split(/[\n,;]/).map((l) => l.trim()).filter(Boolean);
-    lines.forEach((l) => { const m = l.match(/^(.*?)(?:\s+(x?\d+.*))?$/); dispatch({ type: "grocery/add", item: { id: uid(), name: m?.[1] ?? l, qty: m?.[2] ?? "", aisle: guessAisle(l), checked: false, price: 0 } }); });
+    lines.forEach((l) => { const m = l.match(/^(.*?)(?:\s+(x?\d+.*))?$/); dispatch({ type: "grocery/add", item: { id: uid(), name: m?.[1] ?? l, qty: m?.[2] ?? "", aisle: findProduct(m?.[1] ?? l)?.aisle ?? guessAisle(l), checked: false, price: findProduct(m?.[1] ?? l)?.price ?? 0 } }); });
     if (lines.length) toast(`${lines.length} articles ajoutés et triés par rayon`); setBulk("");
   };
   return (
@@ -1252,6 +1661,7 @@ const Groceries: React.FC = () => {
               <p className="font-mono text-lg font-semibold tabular-nums">{money(cartTotal, cur)} <span className="text-sm font-normal text-muted">/ {money(estTotal, cur)}</span></p></div>
             {state.groceries.some((g) => g.checked) && <>
               <Field label="Montant payé" htmlFor="gr-paid"><Input id="gr-paid" inputMode="decimal" className="w-28" placeholder={cartTotal ? cartTotal.toFixed(2).replace(".", ",") : "0,00"} value={paid} onChange={(e) => setPaid(e.target.value)} /></Field>
+              <ReceiptScanner label="Scanner le ticket" onResult={(r) => r.amount && setPaid(r.amount.toFixed(2).replace(".", ","))} />
               <Btn variant="primary" onClick={checkout}><Receipt size={14} />Valider les achats</Btn>
               <Btn variant="ghost" onClick={() => { dispatch({ type: "grocery/clearChecked" }); toast("Articles cochés retirés", "info"); }}><Trash2 size={13} />Retirer sans dépense</Btn></>}
           </div>)}
@@ -1266,12 +1676,43 @@ const Groceries: React.FC = () => {
         </Card>
         <Card title="Ajouter un article">
           <form onSubmit={add} className="flex flex-col gap-2">
-            <Input id="gr-name" aria-label="Article" placeholder="Ex. Lait demi-écrémé" value={name} onChange={(e) => setName(e.target.value)} />
+            <Input id="gr-name" aria-label="Article" list="gr-products" autoComplete="off" placeholder="Ex. Lait demi-écrémé" value={name} onChange={(e) => onName(e.target.value)} />
+            <datalist id="gr-products">{db.map((x) => <option key={x.name} value={x.name}>{x.price ? money(x.price, cur) : ""}</option>)}</datalist>
             <div className="grid grid-cols-2 gap-2"><Input id="gr-qty" aria-label="Quantité" placeholder="Quantité" value={qty} onChange={(e) => setQty(e.target.value)} />
               <Input id="gr-price" aria-label="Prix estimé" inputMode="decimal" placeholder={`Prix estimé (${cur})`} value={price} onChange={(e) => setPrice(e.target.value)} />
               <Select id="gr-aisle" aria-label="Rayon" className="col-span-2" value={aisle} onChange={(e) => setAisle(e.target.value as Aisle | "auto")}><option value="auto">Rayon auto{name ? ` (${guessAisle(name)})` : ""}</option>{AISLES.map((a) => <option key={a} value={a}>{a}</option>)}</Select></div>
             <Btn type="submit" variant="primary"><Plus size={14} />Ajouter</Btn>
           </form>
+        </Card>
+        <Card title={<span className="flex items-center gap-2"><Bookmark size={15} />Listes prêtes</span>}>
+          <div className="flex flex-wrap gap-1.5">
+            {[...BUILTIN_TEMPLATES, ...state.templates].map((t) => (
+              <span key={t.id} className="group inline-flex items-center rounded-full border-2 border-fg/70 bg-panel text-xs font-semibold transition hover:-translate-y-0.5 hover:bg-hi/40">
+                <button className="py-1 pl-3 pr-2" onClick={() => applyTemplate(t)} title={t.items.map((i) => i.name).join(", ")}>{t.name} <span className="font-mono text-muted">· {t.items.length}</span></button>
+                {state.templates.some((x) => x.id === t.id) && <button aria-label={`Supprimer ${t.name}`} className="pr-2 text-muted hover:text-bad" onClick={() => { dispatch({ type: "template/remove", id: t.id }); toast("Liste supprimée", "info"); }}><X size={11} /></button>}
+              </span>))}
+          </div>
+          <div className="mt-3 flex gap-2">
+            <Input id="tpl-name" aria-label="Nom de la liste" placeholder="Enregistrer la liste actuelle sous…" value={tplName} onChange={(e) => setTplName(e.target.value)} />
+            <Btn onClick={saveTemplate} disabled={!state.groceries.length} aria-label="Enregistrer la liste"><Plus size={14} /></Btn>
+          </div>
+        </Card>
+        <Card title={<span className="flex items-center gap-2"><Database size={15} />Base de produits</span>} action={<span className="font-mono text-[11px] text-muted">{db.length}</span>}>
+          <Input id="db-q" aria-label="Chercher un produit" placeholder="Chercher un produit…" value={dbQuery} onChange={(e) => setDbQuery(e.target.value)} />
+          <ul className="mt-2 flex max-h-72 flex-col divide-y divide-line overflow-y-auto text-[13px]">
+            {dbList.map((x) => (
+              <li key={x.name} className="group flex items-center gap-2 py-1.5">
+                <button className="min-w-0 flex-1 truncate text-left hover:text-accent" title="Ajouter à la liste"
+                  onClick={() => { dispatch({ type: "grocery/add", item: { id: uid(), name: x.name, aisle: x.aisle, qty: x.qty, checked: false, price: x.price } }); toast(`${x.name} ajouté`); }}>
+                  {x.mine && <span className="mr-1 text-accent" title="Appris de vos achats">●</span>}{x.name}</button>
+                <input aria-label={`Prix ${x.name}`} inputMode="decimal" defaultValue={x.price ? String(x.price).replace(".", ",") : ""} key={x.name + x.price}
+                  onBlur={(e) => { const v = parseAmount(e.target.value); if (v > 0 && v !== x.price) { dispatch({ type: "product/upsert", product: { name: x.name, aisle: x.aisle, price: v } }); toast("Prix enregistré"); } }}
+                  className="w-16 rounded-md border border-transparent bg-transparent px-1 text-right font-mono text-xs tabular-nums text-muted outline-none hover:border-line focus:border-accent focus:text-fg" />
+                {x.mine && <button aria-label="Oublier ce produit" className="text-muted opacity-0 hover:text-bad group-hover:opacity-100" onClick={() => dispatch({ type: "product/remove", name: x.name })}><X size={11} /></button>}
+              </li>))}
+            {!dbList.length && <li className="py-3 text-xs text-muted">Aucun produit. Ajoutez-le à la liste avec un prix : il sera mémorisé.</li>}
+          </ul>
+          <p className="mt-2 text-[11px] text-muted">● produits appris de vos achats (dernier prix payé). Touchez un nom pour l'ajouter à la liste.</p>
         </Card>
         <Card title="Saisie en vrac">
           <textarea id="gr-bulk" aria-label="Articles en vrac" value={bulk} onChange={(e) => setBulk(e.target.value)} rows={4} placeholder={"tomates 6\nliquide vaisselle\nthé vert, riz"} className={cx(inputCls, "h-auto py-2")} />
@@ -1287,10 +1728,6 @@ const CATS: ExpenseCat[] = ["Courses", "Restauration", "Logement", "Transport", 
 const CAT_COLOR: Record<ExpenseCat, string> = {
   Courses: "#10a37f", Restauration: "#e0802a", Logement: "#5b6b8c", Transport: "#2b8bd6", Études: "#6d5bd0", Loisirs: "#d6457a", Santé: "#1aa3a3", Autre: "#8a8f98",
 };
-const QUICK: { label: string; amount: number; category: ExpenseCat }[] = [
-  { label: "Resto U", amount: 3.3, category: "Restauration" }, { label: "Café", amount: 1.5, category: "Restauration" },
-  { label: "Ticket transport", amount: 2.1, category: "Transport" }, { label: "Boulangerie", amount: 2.4, category: "Courses" },
-];
 const BudgetView: React.FC = () => {
   const { state, dispatch, toast } = useStore();
   const cur = state.settings.currency;
@@ -1356,6 +1793,7 @@ const BudgetView: React.FC = () => {
         </div>
         <div className="flex min-w-0 flex-col gap-4">
           <Card title="Nouvelle dépense">
+            <ReceiptScanner className="mb-3 w-full" onResult={(r) => setF({ ...f, amount: r.amount ? r.amount.toFixed(2).replace(".", ",") : f.amount, date: r.date ?? f.date, label: r.store || "Ticket de caisse", category: "Courses" })} />
             <form onSubmit={add} className="grid grid-cols-2 gap-2">
               <Input id="bd-label" aria-label="Libellé" placeholder="Libellé (ex. Pharmacie)" className="col-span-2" value={f.label} onChange={(e) => setF({ ...f, label: e.target.value })} />
               <Input id="bd-amount" aria-label="Montant" inputMode="decimal" placeholder={`Montant (${cur})`} value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
@@ -1364,7 +1802,7 @@ const BudgetView: React.FC = () => {
               <Btn type="submit" variant="primary" className="col-span-2"><Plus size={14} />Ajouter la dépense</Btn>
             </form>
             <p className="mb-1.5 mt-3 text-[11px] uppercase tracking-wider text-muted">Ajout rapide</p>
-            <div className="flex flex-wrap gap-1.5">{QUICK.map((q) => (
+            <div className="flex flex-wrap gap-1.5">{state.settings.quickExpenses.map((q) => (
               <button key={q.label} onClick={() => { dispatch({ type: "expense/add", expense: { id: uid(), date: todayISO(), amount: q.amount, category: q.category, label: q.label } }); toast(`${q.label} : ${money(q.amount, cur)}`); }}
                 className="rounded-full border border-line px-2.5 py-1 text-xs transition hover:border-accent hover:text-accent">{q.label} · {money(q.amount, cur)}</button>))}</div>
           </Card>
@@ -1513,6 +1951,61 @@ const Sleep: React.FC = () => {
 };
 
 // ---------------------------------------------------------------- Module : Réglages
+const ACCENTS: { k: string; label: string; light: string; dark: string }[] = [
+  { k: "cobalt", label: "Cobalt", light: "52 72 240", dark: "120 138 255" },
+  { k: "menthe", label: "Menthe", light: "0 135 105", dark: "60 210 160" },
+  { k: "corail", label: "Corail", light: "222 64 52", dark: "255 120 100" },
+  { k: "prune", label: "Prune", light: "128 58 200", dark: "182 132 255" },
+  { k: "ocre", label: "Ocre", light: "176 110 0", dark: "245 180 60" },
+  { k: "fuchsia", label: "Fuchsia", light: "212 30 120", dark: "255 110 170" },
+];
+const accentCss = (k: string) => {
+  const a = ACCENTS.find((x) => x.k === k) ?? ACCENTS[0];
+  return `:root{--accent:${a.light}}@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--accent:${a.dark}}}:root[data-theme="dark"]{--accent:${a.dark}}`;
+};
+const Personalize: React.FC = () => {
+  const { state, dispatch, toast } = useStore();
+  const s = state.settings;
+  const set = (patch: Partial<SettingsState>) => dispatch({ type: "settings", patch });
+  const [q, setQ] = useState({ label: "", amount: "", category: "Restauration" as ExpenseCat });
+  return (
+    <Card title={<span className="flex items-center gap-2"><Palette size={15} />Personnalisation</span>} className="md:col-span-2 lg:col-span-2">
+      <div className="grid gap-6 lg:grid-cols-3">
+        <div>
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[.12em] text-muted">Couleur d'accent</p>
+          <div className="flex flex-wrap gap-2">{ACCENTS.map((a) => (
+            <button key={a.k} onClick={() => set({ accent: a.k })} aria-label={a.label} title={a.label}
+              className={cx("grid h-10 w-10 place-items-center rounded-full border-2 border-fg transition-transform duration-300 [transition-timing-function:var(--spring)] hover:-rotate-6 hover:scale-110", s.accent === a.k && "scale-110 shadow-[3px_3px_0_0_rgb(var(--ink))]")}
+              style={{ background: `rgb(${a.light})` }}>{s.accent === a.k && <Check size={16} className="text-white" strokeWidth={3} />}</button>))}</div>
+        </div>
+        <div>
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[.12em] text-muted">Modules affichés</p>
+          <div className="flex flex-wrap gap-1.5">{NAV.filter((n) => n.key !== "dashboard" && n.key !== "settings").map((n) => {
+            const on = !s.hiddenViews.includes(n.key);
+            return (<button key={n.key} onClick={() => set({ hiddenViews: on ? [...s.hiddenViews, n.key] : s.hiddenViews.filter((x) => x !== n.key) })}
+              className={cx("inline-flex items-center gap-1.5 rounded-full border-2 px-2.5 py-1 text-xs font-semibold transition", on ? "border-fg bg-hi/60" : "border-line text-muted line-through")}><n.icon size={13} />{n.label}</button>);
+          })}</div>
+          <p className="mt-2 text-[11px] text-muted">Les modules masqués restent accessibles avec la recherche (Ctrl K).</p>
+        </div>
+        <div className="min-w-0">
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[.12em] text-muted">Dépenses rapides</p>
+          <ul className="flex flex-col gap-1">{s.quickExpenses.map((x, i) => (
+            <li key={i} className="flex items-center gap-2 text-[13px]"><span className="min-w-0 flex-1 truncate">{x.label}</span><span className="font-mono text-xs text-muted">{money(x.amount, s.currency)}</span>
+              <button aria-label={`Retirer ${x.label}`} className="text-muted hover:text-bad" onClick={() => set({ quickExpenses: s.quickExpenses.filter((_, k) => k !== i) })}><X size={12} /></button></li>))}</ul>
+          <form className="mt-2 grid grid-cols-[1fr_72px] gap-1.5" onSubmit={(e) => { e.preventDefault(); const amount = parseAmount(q.amount);
+            if (!q.label.trim() || !(amount > 0)) { toast("Nom et montant requis.", "bad"); return; }
+            set({ quickExpenses: [...s.quickExpenses, { label: q.label.trim(), amount, category: q.category }] }); setQ({ ...q, label: "", amount: "" }); toast("Raccourci ajouté"); }}>
+            <Input aria-label="Nom" placeholder="Ex. Kebab" className="h-8 text-xs" value={q.label} onChange={(e) => setQ({ ...q, label: e.target.value })} />
+            <Input aria-label="Montant" inputMode="decimal" placeholder="0,00" className="h-8 text-xs" value={q.amount} onChange={(e) => setQ({ ...q, amount: e.target.value })} />
+            <Select aria-label="Catégorie" className="h-8 text-xs" value={q.category} onChange={(e) => setQ({ ...q, category: e.target.value as ExpenseCat })}>{CATS.map((c) => <option key={c} value={c}>{c}</option>)}</Select>
+            <Btn type="submit" size="sm" className="h-8"><Plus size={12} /></Btn>
+          </form>
+        </div>
+      </div>
+    </Card>
+  );
+};
+
 const SettingsView: React.FC = () => {
   const { state, dispatch, toast } = useStore();
   const s = state.settings;
@@ -1541,6 +2034,7 @@ const SettingsView: React.FC = () => {
           <Field label="Bloc de travail max (min)" htmlFor="st-block"><Input id="st-block" type="number" min={25} max={180} step={5} value={s.maxBlock} onChange={(e) => set({ maxBlock: Math.max(25, Number(e.target.value)) })} /></Field>
         </div>
       </Card>
+      <Personalize />
       <Card title="Sauvegarde">
         <div className="flex flex-wrap gap-2">
           <Btn onClick={exportJson}><Download size={14} />Exporter en JSON</Btn>
@@ -1686,10 +2180,11 @@ function StudentOS() {
   const hour = new Date().getHours();
   const greet = hour < 6 ? "Bonne nuit" : hour < 18 ? "Bonjour" : "Bonsoir";
   const current = NAV.find((n) => n.key === view)!;
+  const navItems = NAV.filter((n) => !state.settings.hiddenViews.includes(n.key));
 
   if (!state.settings.onboarded) return (
     <StoreCtx.Provider value={ctx}>
-      <PencilDefs />
+      <PencilDefs /><style>{accentCss(state.settings.accent)}</style>
       <Onboarding onDone={(s) => { dispatch({ type: "replace", state: s }); setView("dashboard"); toast(`Bienvenue ${s.settings.name} ! Commencez par ajouter vos cours dans Académique et Planning.`); }} />
       <ToastStack toasts={toasts} />
     </StoreCtx.Provider>
@@ -1697,14 +2192,14 @@ function StudentOS() {
 
   return (
     <StoreCtx.Provider value={ctx}>
-      <PencilDefs />
+      <PencilDefs /><style>{accentCss(state.settings.accent)}</style>
       <div className="flex min-h-full bg-bg text-fg">
         <aside className="sticky top-0 hidden h-screen w-[76px] shrink-0 flex-col overflow-y-auto p-3 md:flex lg:w-60 2xl:w-64">
           <div className="mb-6 flex items-center gap-2.5 px-1 pt-2 lg:px-2"><div className="sticker grid h-9 w-9 place-items-center rounded-xl border-2 border-fg bg-pink text-white shadow-[3px_3px_0_0_rgb(var(--ink))]"><ListChecks size={17} /></div><span className="hidden font-display text-[19px] font-extrabold leading-none tracking-tight lg:inline">Étudiant<span className="text-accent">.</span>OS</span></div>
           <nav className="relative flex flex-col gap-0.5">
             <span aria-hidden className="absolute inset-x-0 top-0 h-10 rounded-xl border-2 border-fg bg-hi shadow-[3px_3px_0_0_rgb(var(--ink))] transition-transform duration-500 [transition-timing-function:var(--spring)]"
-              style={{ transform: `translateY(${NAV.findIndex((n) => n.key === view) * 42}px) rotate(-1deg)` }} />
-            {NAV.map((n) => (<button key={n.key} onClick={() => setView(n.key)} title={n.label} aria-label={n.label} className={cx("nav-item group relative flex h-10 items-center gap-2.5 rounded-xl px-3 text-[13px] transition-colors duration-300", view === n.key ? "font-bold text-[rgb(24_22_46)]" : "text-muted hover:text-fg")}>
+              style={{ transform: `translateY(${Math.max(0, navItems.findIndex((n) => n.key === view)) * 42}px) rotate(-1deg)`, opacity: navItems.some((n) => n.key === view) ? 1 : 0 }} />
+            {navItems.map((n) => (<button key={n.key} onClick={() => setView(n.key)} title={n.label} aria-label={n.label} className={cx("nav-item group relative flex h-10 items-center gap-2.5 rounded-xl px-3 text-[13px] transition-colors duration-300", view === n.key ? "font-bold text-[rgb(24_22_46)]" : "text-muted hover:text-fg")}>
               <span className="grid w-full place-items-center lg:w-auto"><n.icon size={17} /></span><span className="hidden flex-1 text-left lg:inline">{n.label}</span><span className="hidden font-mono text-[10px] text-muted opacity-0 group-hover:opacity-100 lg:inline">{n.short}</span></button>))}
           </nav>
           <div className="mt-auto flex flex-col gap-2">
@@ -1737,7 +2232,7 @@ function StudentOS() {
         </div>
         <nav className="fixed inset-x-0 bottom-0 z-30 flex gap-0.5 overflow-x-auto border-t-2 border-fg bg-panel/95 px-2 pt-2 backdrop-blur-xl md:hidden"
           style={{ paddingBottom: "calc(6px + env(safe-area-inset-bottom, 0px))", paddingLeft: "max(8px, env(safe-area-inset-left, 0px))", paddingRight: "max(8px, env(safe-area-inset-right, 0px))" }}>
-          {NAV.map((n) => (<button key={n.key} onClick={() => setView(n.key)} className={cx("nav-item flex min-w-[64px] flex-1 flex-col items-center gap-0.5 rounded-xl border-2 py-1.5 text-[10px] font-semibold transition-all duration-300 [transition-timing-function:var(--spring)]", view === n.key ? "-translate-y-1 -rotate-2 border-fg bg-hi text-[rgb(24_22_46)] shadow-[2px_2px_0_0_rgb(var(--ink))]" : "border-transparent text-muted")}><n.icon size={18} />{n.key === "dashboard" ? "Accueil" : n.label}</button>))}
+          {navItems.map((n) => (<button key={n.key} onClick={() => setView(n.key)} className={cx("nav-item flex min-w-[64px] flex-1 flex-col items-center gap-0.5 rounded-xl border-2 py-1.5 text-[10px] font-semibold transition-all duration-300 [transition-timing-function:var(--spring)]", view === n.key ? "-translate-y-1 -rotate-2 border-fg bg-hi text-[rgb(24_22_46)] shadow-[2px_2px_0_0_rgb(var(--ink))]" : "border-transparent text-muted")}><n.icon size={18} />{n.key === "dashboard" ? "Accueil" : n.label}</button>))}
         </nav>
       </div>
 
@@ -1771,5 +2266,6 @@ function StudentOS() {
 })();
 </script>
 
+<script>if ("serviceWorker" in navigator) addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));</script>
 </body>
 </html>
