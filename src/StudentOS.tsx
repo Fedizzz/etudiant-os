@@ -827,7 +827,7 @@ const Academic: React.FC<{ openNewTask: () => void }> = ({ openNewTask }) => {
         <span className="text-xs text-muted">Glissez une carte d'une colonne à l'autre, ou utilisez les flèches.</span>
         <Btn variant="primary" className="ml-auto" onClick={openNewTask}><Plus size={14} />Nouvelle tâche <Kbd>N</Kbd></Btn>
       </div>
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 md:grid-cols-2 min-[1100px]:grid-cols-4">
         {ORDER.map((s) => { const col = tasks.filter((t) => t.status === s).sort((a, b) => a.deadline.localeCompare(b.deadline)); return (
           <div key={s} className={cx("flex min-w-0 flex-col rounded-2xl border-2 border-dashed border-line bg-sunken/40 p-2 transition-colors duration-300", dragId && "border-accent bg-accent/5")}
             onDragOver={(e) => e.preventDefault()} onDrop={() => { const t = state.tasks.find((x) => x.id === dragId); if (t && t.status !== s) { dispatch({ type: "task/update", id: t.id, patch: { status: s } }); toast(`Déplacé vers « ${STATUS[s].label} »`, s === "done" ? "ok" : "info"); } setDragId(null); }}>
@@ -836,11 +836,11 @@ const Academic: React.FC<{ openNewTask: () => void }> = ({ openNewTask }) => {
               {col.map((t) => { const c = state.courses.find((x) => x.id === t.courseId); const left = daysBetween(today, t.deadline); const pct = Math.min(100, (t.spent / t.estimate) * 100); return (
                 <article key={t.id} draggable onDragStart={() => setDragId(t.id)} onDragEnd={() => setDragId(null)}
                   className={cx("group cursor-grab rounded-xl border-2 border-fg/80 bg-panel p-3 shadow-[3px_3px_0_0_rgb(var(--ink))] transition-all duration-300 [transition-timing-function:var(--spring)] hover:-translate-y-0.5 hover:rotate-[-.6deg] active:cursor-grabbing", dragId === t.id && "rotate-2 opacity-60")}>
-                  <div className="mb-1.5 flex items-center gap-1.5">
-                    <span className="truncate text-[10px] font-semibold uppercase tracking-wider" style={{ color: c?.color }}>{c?.code ?? "Libre"}</span>
+                  <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: c?.color }}>{c?.code ?? "Libre"}</span>
                     <Pill>{KIND_LABEL[t.kind]}</Pill>{t.priority === 3 && <Flame size={12} className="text-bad" aria-label="Priorité haute" />}
-                    <button className="ml-auto text-muted opacity-60 transition hover:text-accent group-hover:opacity-100" aria-label="Modifier la tâche" onClick={() => openTask(t.id)}><Pencil size={12} /></button>
-                    <button className="text-muted opacity-60 transition hover:text-bad group-hover:opacity-100" aria-label="Supprimer la tâche" onClick={() => undoable({ type: "task/remove", id: t.id }, `Tâche « ${t.title} » supprimée`)}><Trash2 size={12} /></button>
+                    <span className="ml-auto flex shrink-0 items-center gap-1"><button className="text-muted opacity-60 transition hover:text-accent group-hover:opacity-100" aria-label="Modifier la tâche" onClick={() => openTask(t.id)}><Pencil size={12} /></button>
+                    <button className="text-muted opacity-60 transition hover:text-bad group-hover:opacity-100" aria-label="Supprimer la tâche" onClick={() => undoable({ type: "task/remove", id: t.id }, `Tâche « ${t.title} » supprimée`)}><Trash2 size={12} /></button></span>
                   </div>
                   <p className={cx("text-[13px] font-medium leading-snug", s === "done" && "text-muted line-through")}>{t.title}</p>
                   <div className="mt-2 h-1 rounded-full bg-sunken"><div className="h-full rounded-full bg-accent" style={{ width: `${pct}%` }} /></div>

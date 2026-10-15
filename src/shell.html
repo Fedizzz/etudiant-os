@@ -96,6 +96,19 @@ button, a, input, select { -webkit-tap-highlight-color: transparent; touch-actio
 .bg-hi .sketch-fill, .bg-pink .sketch-fill, .bg-accent .sketch-fill, [class*="bg-hi"] .sketch-fill { fill: rgb(255 255 255); opacity: .45; }
 button:hover > .sketch-icon, button:hover .sketch-icon { transform: rotate(-6deg) scale(1.08); }
 .sketch-icon { transition: transform .35s var(--spring); }
+
+/* Écrans tactiles (iPad, téléphone) : cibles d'au moins 40 px pour les boutons, 32 px pour les petites icônes. Rien ne change à la souris. */
+@media (pointer: coarse) {
+  .press { min-height: 40px; }
+  .press:not(:has(> span)):empty, .press[aria-label] { min-width: 40px; }
+  main button[aria-label]:not(.press):not(.absolute), [role="dialog"] button[aria-label]:not(.press) { min-width: 32px; min-height: 32px; display: inline-grid; place-items: center; }
+  main input[type="checkbox"] { width: 20px; height: 20px; }
+  .nav-item { min-height: 40px; }
+  main button.rounded-full, main span.rounded-full > button, main button.rounded-md { min-height: 36px; }
+  main li > button.truncate { padding-block: 10px; }
+  main button.absolute[aria-label] { min-width: 26px; min-height: 26px; font-size: 14px; display: grid; place-items: center; top: auto; bottom: 2px; right: 2px; }
+  main td > button.h-10 { height: 56px; justify-content: flex-start; padding-top: 8px; }
+}
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important }
   .marker path { stroke-dashoffset: 0 } ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important }
