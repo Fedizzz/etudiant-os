@@ -26,8 +26,8 @@ jobs:
       - name: Build
         run: node scripts/build.mjs
         env:
-          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+          SUPABASE_URL: ${{ vars.SUPABASE_URL || 'https://vcmlyydehmtelxkiorbr.supabase.co' }}
+          SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY || 'sb_publishable_-9R_9nO6QCcuEpbgM8KzNQ_4DlZld4A' }}
           BASE_PATH: ${{ vars.BASE_PATH || '/etudiant-os/' }}
           SITE_URL: ${{ vars.SITE_URL || 'https://fedizzz.github.io/etudiant-os/' }}
           GOOGLE_AUTH: ${{ vars.GOOGLE_AUTH || '0' }}
