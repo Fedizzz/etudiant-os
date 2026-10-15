@@ -1295,7 +1295,13 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
   const plan = days7[0];
   const fs = useMemo(() => focusStats(state.focus, today), [state.focus, today]);
   const ss = useMemo(() => sleepStats(state.sleep, state.settings.sleepGoal, today), [state.sleep, state.settings.sleepGoal, today]);
-  const os = overallStats(state.courses);
+  // Ménage du jour : toutes les corvées prévues aujourd'hui, pour chaque colocataire (rotation automatique).
+  const todayDate = parseISO(today);
+  const chores = state.chores.filter((c) => choreScheduledOn(c, todayDate)).map((c) => ({ c, who: choreAssignee(c, todayDate), done: c.done.includes(today), skipped: (c.skipped ?? []).includes(today) }))
+    .sort((a, b) => Number(a.done || a.skipped) - Number(b.done || b.skipped) || Number(b.who === "Moi") - Number(a.who === "Moi"));
+  const choresLeft = chores.filter((x) => !x.done && !x.skipped);
+  const myLeft = choresLeft.filter((x) => x.who === "Moi").length;
+  const lateChores = state.chores.reduce((n, c) => n + [1, 2, 3].filter((i) => { const d = addDays(todayDate, -i), k = iso(d); return choreScheduledOn(c, d) && !c.done.includes(k) && !(c.skipped ?? []).includes(k); }).length, 0);
   const bs = budgetStats(state.budget, monthKey(today), today, CATS);
   const open = state.tasks.filter((t) => t.status !== "done");
   const late = open.filter((t) => t.deadline < today).sort((a, b) => a.deadline.localeCompare(b.deadline));
@@ -1314,7 +1320,7 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
   const postpone = (t: Task, n: number) => { const from = t.deadline < today ? today : t.deadline; dispatch({ type: "task/update", id: t.id, patch: { deadline: iso(addDays(parseISO(from), n)) } }); toast(`Échéance reportée au ${fmtDate(iso(addDays(parseISO(from), n)))}`, "info"); };
 
   const steps: { done: boolean; label: string; run: () => void }[] = [
-    { done: state.courses.length > 0, label: "Ajouter vos modules et coefficients", run: () => go("academic") },
+    { done: state.courses.length > 0, label: "Ajouter vos modules", run: () => go("academic") },
     { done: state.classes.length > 0, label: "Saisir votre emploi du temps fixe", run: () => go("planning") },
     { done: state.tasks.length > 0, label: "Créer vos devoirs, examens et projets", run: openNewTask },
     { done: state.budget.expenses.length > 0 || state.budget.recurring.length > 0, label: "Noter une première dépense", run: () => go("budget") },
@@ -1344,7 +1350,7 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
         <button onClick={() => go("focus")} className="text-left"><Stat label="Focus · 7 jours" value={fmtDur(fs.week)} sub={delta === null ? (fs.week ? "pas de semaine précédente" : "aucune session") : `${delta >= 0 ? "+" : ""}${delta} % vs semaine précédente`} tone={delta === null ? undefined : delta >= 0 ? "ok" : "warn"} /></button>
         <button onClick={() => go("academic")} className="text-left"><Stat label="Terminées · 7 j" value={String(doneWeek)} sub={`${open.length} ouvertes · ${late.length} en retard`} tone={late.length ? "bad" : undefined} /></button>
         <button onClick={() => go("sleep")} className="text-left"><Stat label="Sommeil · 7 jours" value={ss.avg7 === null ? "—" : fmtDur(ss.avg7)} sub={ss.nights7 ? `moyenne sur ${ss.nights7} nuit${ss.nights7 > 1 ? "s" : ""} · dette ${ss.debt7 > 0 ? fmtDur(ss.debt7) : "0"}` : "aucune nuit saisie"} tone={debtTone} /></button>
-        <button onClick={() => go("academic")} className="text-left"><Stat label="Moyenne pondérée" value={os.avg === null ? "—" : os.avg.toFixed(2)} sub={os.avg === null ? "aucune note saisie" : `sur 20 · ${os.included.length} module${os.included.length > 1 ? "s" : ""} noté${os.included.length > 1 ? "s" : ""}${state.settings.gradeTarget ? ` · objectif ${state.settings.gradeTarget}` : ""}`} tone={os.avg === null ? undefined : state.settings.gradeTarget ? (os.avg >= state.settings.gradeTarget ? "ok" : "warn") : os.avg < 10 ? "bad" : undefined} /></button>
+        <button onClick={() => go("chores")} className="text-left"><Stat label="Ménage aujourd'hui" value={chores.length ? `${chores.length - choresLeft.length}/${chores.length}` : "—"} sub={!chores.length ? "aucune corvée prévue" : choresLeft.length ? `${myLeft ? `${myLeft} pour vous` : "rien pour vous"} · ${choresLeft.length} à faire` : "tout est fait"} tone={!chores.length ? undefined : choresLeft.length ? (lateChores ? "warn" : undefined) : "ok"} /></button>
         <button onClick={() => go("budget")} className="text-left min-[360px]:col-span-2"><Stat label="Budget restant" value={money(bs.remaining, cur)} sub={`${money(bs.spent, cur)} dépensés ce mois${bs.overCats.length ? ` · ${bs.overCats.length} plafond${bs.overCats.length > 1 ? "s" : ""} dépassé${bs.overCats.length > 1 ? "s" : ""}` : ""}`} tone={bs.remaining < 0 || bs.overCats.length ? "bad" : bs.remaining < state.budget.monthly * 0.15 ? "warn" : "ok"} /></button>
       </div>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -1404,7 +1410,7 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
           </div>
           <p className="mt-2 text-[11px] text-muted">Cours, indisponibilités, tâches et corvées ; le travail planifié un jour n'est pas recompté les jours suivants.</p>
         </Card>
-        <Card title="Prochaines échéances" className="md:col-span-2 xl:col-span-3" action={<Btn size="sm" variant="ghost" onClick={() => go("academic")}>Tout voir</Btn>}>
+        <Card title="Prochaines échéances" className="md:col-span-2" action={<Btn size="sm" variant="ghost" onClick={() => go("academic")}>Tout voir</Btn>}>
           {upcoming.length ? (
             <ul className="flex flex-col divide-y divide-line">
               {upcoming.map((t) => { const left = daysBetween(today, t.deadline); const c = courseOf(t.courseId); return (
@@ -1415,6 +1421,23 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
                 </li>); })}
             </ul>
           ) : <Empty icon={<Check size={18} />} title={late.length ? "Rien d'autre à venir" : "Rien à rendre"} hint={late.length ? "Seules des tâches en retard restent ouvertes." : "Aucune échéance à venir."} />}
+        </Card>
+        <Card title={<span className="flex items-center gap-2"><Home size={15} />Ménage du jour</span>} className="md:col-span-2 xl:col-span-1" action={<Btn size="sm" variant="ghost" onClick={() => go("chores")}>Tout voir</Btn>}>
+          {chores.length ? (
+            <ul className="flex flex-col divide-y divide-line">
+              {chores.map(({ c, who, done, skipped }) => (
+                <li key={c.id} className="flex items-center gap-2 py-2 first:pt-0 last:pb-0 text-[13px]">
+                  <button onClick={() => { if (skipped) return; dispatch({ type: "chore/toggle", id: c.id, date: today, who }); if (!done) toast(`${c.name} : fait par ${who}`); }} disabled={skipped}
+                    aria-label={done ? `Annuler ${c.name}` : `Marquer ${c.name} comme faite`}
+                    className={cx("grid h-5 w-5 shrink-0 place-items-center rounded border-2 transition", done ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-fg/40 hover:border-accent", skipped && "opacity-40")}>{done && <Check className="tick" size={11} strokeWidth={3} />}</button>
+                  <span className={cx("min-w-0 flex-1 truncate", (done || skipped) && "text-muted line-through")}>{c.name}</span>
+                  <Pill tone={who === "Moi" ? "info" : "muted"}>{who}</Pill>
+                  {!done && !skipped && <Btn size="sm" variant="ghost" title="Reporter" aria-label={`Reporter ${c.name}`} onClick={() => { dispatch({ type: "chore/skip", id: c.id, date: today }); toast(`${c.name} reportée`, "info"); }}>↷</Btn>}
+                  {skipped && <span className="text-[11px] text-muted">reportée</span>}
+                </li>))}
+            </ul>
+          ) : <Empty icon={<Home size={18} />} title={state.chores.length ? "Rien aujourd'hui" : "Aucune corvée"} hint={state.chores.length ? "Aucune corvée n'est prévue aujourd'hui dans la rotation." : "Créez vos corvées et la rotation entre colocataires dans Ménage."} action={!state.chores.length ? <Btn onClick={() => go("chores")}><Plus size={13} />Créer une corvée</Btn> : undefined} />}
+          {lateChores > 0 && <p className="mt-2 text-[11px] text-warn">{lateChores} corvée{lateChores > 1 ? "s" : ""} non faite{lateChores > 1 ? "s" : ""} ces 3 derniers jours.</p>}
         </Card>
       </div>
     </div>
@@ -1533,7 +1556,7 @@ const TimetableImport: React.FC = () => {
     };
     const sessions = sel.map((r) => ({ id: uid(), courseId: courseFor(r.title), day: r.day, start: r.start, end: r.end, room: r.room }));
     dispatch({ type: "class/addMany", sessions, courses: newCourses });
-    toast(`${sessions.length} cours ajoutés${newCourses.length ? ` · ${newCourses.length} nouveaux modules` : ""}. Ajustez les coefficients dans Académique.`);
+    toast(`${sessions.length} cours ajoutés${newCourses.length ? ` · ${newCourses.length} nouveaux modules` : ""}. Retrouvez-les dans Académique.`);
     setRows(null);
   };
   return (
@@ -1688,18 +1711,11 @@ const KIND_LABEL: Record<TaskKind, string> = { devoir: "Devoir", examen: "Examen
 
 const Academic: React.FC<{ openNewTask: () => void }> = ({ openNewTask }) => {
   const { state, dispatch, toast, undoable, openTask } = useStore();
-  const [nextW, setNextW] = useState<Record<ID, string>>({});
   const [filter, setFilter] = useState<string>("");
   const [dragId, setDragId] = useState<ID | null>(null);
-  const [courseForm, setCourseForm] = useState({ name: "", code: "", coef: 3 });
-  const [gradeDraft, setGradeDraft] = useState<Record<ID, { label: string; score: string; weight: string }>>({});
+  const [courseForm, setCourseForm] = useState({ name: "", code: "", coef: 1 });
   const today = todayISO();
   const tasks = state.tasks.filter((t) => !filter || t.courseId === filter);
-  const os = overallStats(state.courses);
-  const avg = os.avg;
-  const totalCoef = state.courses.reduce((n, c) => n + (c.coef > 0 ? c.coef : 0), 0);
-  const target = state.settings.gradeTarget;
-  const needRest = target !== null ? neededOnUngraded(state.courses, target) : null;
   const move = (t: Task, dir: 1 | -1) => { const i = ORDER.indexOf(t.status) + dir; if (i < 0 || i >= ORDER.length) return; dispatch({ type: "task/update", id: t.id, patch: { status: ORDER[i] } }); if (ORDER[i] === "done") toast(`« ${t.title} » terminé`); };
   const palette = ["#2f6fed", "#0f9d76", "#d9822b", "#c2417a", "#7a5af5", "#1d9bb5", "#b5651d"];
 
@@ -1744,67 +1760,24 @@ const Academic: React.FC<{ openNewTask: () => void }> = ({ openNewTask }) => {
 
 
       {!state.tasks.length && <Empty icon={<GraduationCap size={18} />} title="Aucune tâche pour l'instant" hint="Ajoutez vos devoirs, examens et projets : ils seront répartis automatiquement dans votre planning." action={<Btn variant="primary" onClick={openNewTask}><Plus size={14} />Première tâche</Btn>} />}
-      <Card title="Modules & coefficients" action={<span className="font-mono text-xs text-muted">Moyenne générale <span className="text-fg">{avg === null ? "—" : avg.toFixed(2)}</span> /20 · Σ coef {totalCoef}</span>}>
-        <div className="mb-3 flex flex-wrap items-end gap-3 rounded-xl bg-sunken/60 p-3 text-xs">
-          <Field label="Objectif de moyenne générale" htmlFor="ac-target"><Input id="ac-target" inputMode="decimal" placeholder="Ex. 12" className="w-24" defaultValue={target ?? ""} key={String(target)}
-            onBlur={(e) => { const v = e.target.value.trim() ? parseAmount(e.target.value) : null; if (v !== null && !(v >= 0 && v <= 20)) { toast("Objectif entre 0 et 20.", "bad"); return; } dispatch({ type: "settings", patch: { gradeTarget: v } }); }} /></Field>
-          <div className="min-w-[min(14rem,100%)] flex-1 text-muted">
-            {avg === null ? <p>Aucune moyenne : ajoutez des notes à vos modules.</p>
-              : <p>Moyenne calculée sur {os.included.length} module{os.included.length > 1 ? "s" : ""} noté{os.included.length > 1 ? "s" : ""} (Σ coef {os.coefSum}).{os.noGrades.length ? ` Sans note, non comptés : ${os.noGrades.map((c) => c.code || c.name).join(", ")}.` : ""}{os.zeroCoef.length ? ` Coefficient 0, exclus : ${os.zeroCoef.map((c) => c.code || c.name).join(", ")}.` : ""}</p>}
-            {target !== null && avg !== null && <p className={cx("mt-1 font-semibold", avg >= target ? "text-ok" : "text-warn")}>{avg >= target ? `Objectif ${target} atteint (+${(avg - target).toFixed(2)}).` : `Il manque ${(target - avg).toFixed(2)} point${target - avg >= 2 ? "s" : ""} pour atteindre ${target}.`}
-              {needRest !== null && ` Moyenne nécessaire sur les modules non notés : ${needRest > 20 ? "hors d'atteinte (> 20)" : needRest <= 0 ? "déjà acquis" : needRest.toFixed(2)}.`}</p>}
-          </div>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px] text-left text-[13px]">
-            <thead><tr className="text-[11px] uppercase tracking-wider text-muted"><th className="pb-2 font-medium">Module</th><th className="pb-2 font-medium">Coef</th><th className="pb-2 font-medium">Poids</th><th className="pb-2 font-medium">Notes (pondération)</th><th className="pb-2 text-right font-medium">Moyenne</th><th /></tr></thead>
-            <tbody className="divide-y divide-line">
-              {!state.courses.length && <tr><td colSpan={6} className="py-6 text-center text-xs text-muted">Ajoutez vos modules ci-dessous pour suivre coefficients et notes.</td></tr>}
-              {state.courses.map((c) => { const st = courseStats(c); const a = st.avg; const w = parseAmount(nextW[c.id] ?? String(Math.max(5, Math.min(100, 100 - st.weightSum)) || 50)); const need = c.target != null ? neededGrade(c, c.target, w) : null; const d = gradeDraft[c.id] ?? { label: "", score: "", weight: "" }; return (
-                <tr key={c.id} className="align-top">
-                  <td className="py-2.5 pr-3"><div className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-sm" style={{ background: c.color }} /><span className="font-medium">{c.name}</span></div><span className="font-mono text-[11px] text-muted">{c.code}</span></td>
-                  <td className="py-2.5 pr-3"><Input id={`coef-${c.id}`} aria-label={`Coefficient ${c.name}`} type="number" min={0} step={0.5} className="h-7 w-16" value={c.coef} onChange={(e) => { const v = Number(e.target.value); if (isFinite(v) && v >= 0) dispatch({ type: "course/update", id: c.id, patch: { coef: v } }); }} />{!(c.coef > 0) && <p className="mt-1 text-[10px] text-warn">exclu</p>}</td>
-                  <td className="py-2.5 pr-3 font-mono text-xs tabular-nums text-muted">{totalCoef && c.coef > 0 ? Math.round((c.coef / totalCoef) * 100) : 0} %</td>
-                  <td className="py-2.5 pr-3">
-                    <div className="flex flex-wrap gap-1">{c.grades.map((g) => (
-                      <span key={g.id} className="group inline-flex items-center gap-1 rounded bg-sunken px-1.5 py-0.5 text-[11px]">{g.label} <b className="font-mono">{g.score}</b><span className="text-muted">({g.weight} %)</span>
-                        <button aria-label="Retirer la note" className="text-muted hover:text-bad" onClick={() => undoable({ type: "course/update", id: c.id, patch: { grades: c.grades.filter((x) => x.id !== g.id) } }, `Note « ${g.label} » retirée`)}><X size={10} /></button></span>))}</div>
-                    <form className="mt-1.5 flex gap-1" onSubmit={(e) => { e.preventDefault(); const score = parseAmount(d.score), weight = parseAmount(d.weight);
-                      if (!d.label.trim()) { toast("Donnez un intitulé à l'évaluation.", "bad"); return; }
-                      if (!(score >= 0 && score <= 20)) { toast("La note doit être comprise entre 0 et 20.", "bad"); return; }
-                      if (!(weight > 0 && weight <= 100)) { toast("La pondération doit être comprise entre 0 et 100 %.", "bad"); return; }
-                      const st = courseStats(c); if (st.weightSum + weight > 100.01) toast(`Attention : les pondérations de ce module dépassent 100 % (${st.weightSum + weight} %).`, "info");
-                      dispatch({ type: "course/update", id: c.id, patch: { grades: [...c.grades, { id: uid(), label: d.label.trim(), score, weight }] } }); setGradeDraft({ ...gradeDraft, [c.id]: { label: "", score: "", weight: "" } }); toast("Note enregistrée"); }}>
-                      <Input id={`gl-${c.id}`} aria-label="Intitulé" placeholder="Intitulé" className="h-7 w-24 text-xs" value={d.label} onChange={(e) => setGradeDraft({ ...gradeDraft, [c.id]: { ...d, label: e.target.value } })} />
-                      <Input id={`gs-${c.id}`} aria-label="Note" placeholder="/20" className="h-7 w-14 text-xs" value={d.score} onChange={(e) => setGradeDraft({ ...gradeDraft, [c.id]: { ...d, score: e.target.value } })} />
-                      <Input id={`gw-${c.id}`} aria-label="Pondération" placeholder="%" className="h-7 w-12 text-xs" value={d.weight} onChange={(e) => setGradeDraft({ ...gradeDraft, [c.id]: { ...d, weight: e.target.value } })} />
-                      <Btn size="sm" type="submit" aria-label="Ajouter la note"><Plus size={12} /></Btn></form>
-                  </td>
-                  <td className="py-2.5 text-right">
-                    <p className={cx("font-mono font-semibold tabular-nums", a !== null && a < 10 ? "text-bad" : "", c.target != null && a !== null && a >= c.target && "text-ok")}>{a === null ? "—" : a.toFixed(2)}</p>
-                    {a !== null && st.normalized && <p className="text-[10px] text-muted" title="La moyenne est calculée sur les évaluations déjà notées">sur {Math.round(st.weightSum)} % notés</p>}
-                    {st.invalid > 0 && <p className="text-[10px] text-warn">{st.invalid} note{st.invalid > 1 ? "s" : ""} invalide{st.invalid > 1 ? "s" : ""} ignorée{st.invalid > 1 ? "s" : ""}</p>}
-                    <div className="mt-1.5 flex items-center justify-end gap-1 text-[10px] text-muted">
-                      <label htmlFor={`tg-${c.id}`}>Obj.</label>
-                      <input id={`tg-${c.id}`} inputMode="decimal" placeholder="—" defaultValue={c.target ?? ""} key={String(c.target)} className="w-10 rounded-md border border-line bg-panel px-1 text-right font-mono text-[11px] outline-none focus:border-accent"
-                        onBlur={(e) => { const v = e.target.value.trim() ? parseAmount(e.target.value) : null; if (v !== null && !(v >= 0 && v <= 20)) { toast("Objectif entre 0 et 20.", "bad"); return; } dispatch({ type: "course/update", id: c.id, patch: { target: v } }); }} />
-                    </div>
-                    {need && <div className="mt-1 text-right text-[10px] leading-tight text-muted">
-                      prochaine éval <input aria-label="Pondération de la prochaine évaluation" inputMode="decimal" value={nextW[c.id] ?? String(w)} onChange={(e) => setNextW({ ...nextW, [c.id]: e.target.value })} className="w-8 rounded border border-line bg-panel px-0.5 text-right font-mono outline-none focus:border-accent" /> % :
-                      <b className={cx("ml-1 font-mono", need.status === "impossible" ? "text-bad" : need.status === "acquis" ? "text-ok" : "text-fg")}>{need.status === "impossible" ? `${need.grade.toFixed(1)} (impossible)` : need.status === "acquis" ? "acquis" : `${need.grade.toFixed(1)}/20`}</b></div>}
-                  </td>
-                  <td className="py-2.5 pl-2 text-right"><Btn size="sm" variant="danger" aria-label={`Supprimer ${c.name}`} onClick={() => undoable({ type: "course/remove", id: c.id }, `Module « ${c.name} » supprimé (notes et créneaux inclus)`)}><Trash2 size={12} /></Btn></td>
-                </tr>); })}
-            </tbody>
-          </table>
-        </div>
+      <Card title="Modules" action={<span className="font-mono text-xs text-muted">{state.courses.length}</span>}>
+        {state.courses.length ? (
+          <ul className="flex flex-col divide-y divide-line text-[13px]">
+            {state.courses.map((c) => { const open = state.tasks.filter((t) => t.courseId === c.id && t.status !== "done").length; const slots = state.classes.filter((x) => x.courseId === c.id).length; return (
+              <li key={c.id} className="group flex flex-wrap items-center gap-2 py-2">
+                <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: c.color }} />
+                <span className="min-w-0 flex-1 truncate font-medium">{c.name}</span>
+                <span className="font-mono text-[11px] text-muted">{c.code}</span>
+                <span className="text-[11px] text-muted">{open} tâche{open > 1 ? "s" : ""} · {slots} créneau{slots > 1 ? "x" : ""}</span>
+                <Btn size="sm" variant="danger" aria-label={`Supprimer ${c.name}`} onClick={() => undoable({ type: "course/remove", id: c.id }, `Module « ${c.name} » supprimé (créneaux inclus)`)}><Trash2 size={12} /></Btn>
+              </li>); })}
+          </ul>
+        ) : <p className="py-4 text-center text-xs text-muted">Ajoutez vos modules pour les relier à vos tâches et à votre emploi du temps.</p>}
         <form className="mt-3 flex flex-wrap gap-2 border-t border-line pt-3" onSubmit={(e) => { e.preventDefault(); if (!courseForm.name.trim()) { toast("Nommez le module.", "bad"); return; }
-          if (!(courseForm.coef >= 0)) { toast("Le coefficient doit être positif ou nul.", "bad"); return; }
-          dispatch({ type: "course/add", course: { id: uid(), name: courseForm.name.trim(), code: courseForm.code.trim().toUpperCase() || courseForm.name.slice(0, 4).toUpperCase(), coef: courseForm.coef, color: palette[state.courses.length % palette.length], grades: [] } });
-          setCourseForm({ name: "", code: "", coef: 3 }); toast(courseForm.coef > 0 ? "Module ajouté" : "Module ajouté avec un coefficient 0 : il ne compte pas dans la moyenne.", courseForm.coef > 0 ? "ok" : "info"); }}>
-          <Input id="cf-name" aria-label="Nom du module" placeholder="Nouveau module" className="flex-1" value={courseForm.name} onChange={(e) => setCourseForm({ ...courseForm, name: e.target.value })} />
+          dispatch({ type: "course/add", course: { id: uid(), name: courseForm.name.trim(), code: courseForm.code.trim().toUpperCase() || courseForm.name.slice(0, 4).toUpperCase(), coef: 1, color: palette[state.courses.length % palette.length], grades: [] } });
+          setCourseForm({ name: "", code: "", coef: 1 }); toast("Module ajouté"); }}>
+          <Input id="cf-name" aria-label="Nom du module" placeholder="Nouveau module" className="min-w-[10rem] flex-1" value={courseForm.name} onChange={(e) => setCourseForm({ ...courseForm, name: e.target.value })} />
           <Input id="cf-code" aria-label="Code" placeholder="Code" className="w-28" value={courseForm.code} onChange={(e) => setCourseForm({ ...courseForm, code: e.target.value })} />
-          <Input id="cf-coef" aria-label="Coefficient" type="number" min={0} step={0.5} className="w-20" value={courseForm.coef} onChange={(e) => setCourseForm({ ...courseForm, coef: Number(e.target.value) })} />
           <Btn type="submit"><Plus size={14} />Module</Btn>
         </form>
       </Card>

@@ -29,9 +29,8 @@ L'application fonctionne ensuite hors ligne.
 - Aucune synchronisation entre appareils ni entre colocataires dans cette version.
 
 ## Règles de calcul
-- **Moyenne d'un module** : Σ(note × pondération) / Σ pondérations des notes valides (0–20, pondération > 0). Si les pondérations ne totalisent pas 100 %, la base est affichée (« sur 40 % notés »).
-- **Moyenne générale** : Σ(moyenne module × coef) / Σ coef, sur les modules notés de coefficient > 0. Les modules sans note ou de coef 0 sont listés comme exclus.
-- **Note nécessaire** pour viser T avec une prochaine évaluation de poids w : x = (T·(W + w) − Σ wᵢnᵢ) / w.
+- **Moyennes** : retirées de l'interface (les notes déjà saisies restent dans les sauvegardes).
+- **Ménage du jour** (tableau de bord) : corvées prévues aujourd'hui selon la rotation, avec qui les fait ; cocher ou reporter met à jour la page Ménage.
 - **Planning** : reste à faire ÷ jours avant l'échéance (veille visée), ajusté par la priorité ; simulation sur plusieurs jours sans double comptage ; une tâche en retard est répartie sur 3 jours ; cours et indisponibilités ne sont jamais déplacés, les chevauchements sont signalés.
 - **Focus** : une session terminée ou interrompue (≥ 1 min) est enregistrée une seule fois (identifiant de session) et ajoute ses minutes à la tâche liée.
 - **Budget** : projection = récurrentes du mois + dépenses variables extrapolées ; les récurrentes ne sont ajoutées qu'une fois par mois.
