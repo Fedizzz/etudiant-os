@@ -95,6 +95,13 @@ h1, h2, h3 { text-wrap: balance; font-family: var(--font-display); }
 @media (hover: none) { .group .opacity-0, .group .opacity-60 { opacity: 1 !important; } .lift:hover, .btn-ink:hover { transform: none; } }
 @media (max-width: 639px) { input, select, textarea { font-size: 16px !important; } .sheet { padding-bottom: env(safe-area-inset-bottom, 0px); } }
 button, a, input, select { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+/* Icônes crayon : aplat feutre décalé, petit coup de crayon au survol */
+.sketch-fill { fill: rgb(var(--hi)); opacity: .95; }
+:root[data-theme="dark"] .sketch-fill { fill: rgb(var(--pink)); opacity: .55; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .sketch-fill { fill: rgb(var(--pink)); opacity: .55; } }
+.bg-hi .sketch-fill, .bg-pink .sketch-fill, .bg-accent .sketch-fill, [class*="bg-hi"] .sketch-fill { fill: rgb(255 255 255); opacity: .45; }
+button:hover > .sketch-icon, button:hover .sketch-icon { transform: rotate(-6deg) scale(1.08); }
+.sketch-icon { transition: transform .35s var(--spring); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important }
   .marker path { stroke-dashoffset: 0 } ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important }
@@ -112,24 +119,171 @@ tailwind.config = { theme: { extend: {
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/lucide-react@0.263.1/dist/umd/lucide-react.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
 </head>
 <body>
 <div id="root"><div id="boot">Chargement d'Étudiant OS…</div></div>
 <script type="text/plain" id="app-src">
 const { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState } = React;
-const {
-  LayoutDashboard, CalendarClock, GraduationCap, Timer, ShoppingCart, Home, Moon, Settings, Plus, Trash2, Check,
-  Download, Upload, Sun, Search, AlertTriangle, Play, Pause, RotateCcw, SkipForward, X, Keyboard, Zap, Coffee,
-  BedDouble, ChevronLeft, ChevronRight, Repeat, Users, Flame, ListChecks, Wallet, Pencil, TrendingUp, Receipt, Sparkles,
-} = Icons;
 const { flushSync } = ReactDOM;
 
 /* ============================================================================
  * Étudiant OS — un seul composant racine, modules découpés, état typé,
  * persistance localStorage, export/import JSON.
  * ========================================================================== */
+
+/* ============================================================================
+ * Icônes « cartoon au crayon » dessinées à la main : trait irrégulier, léger
+ * tremblé (filtre SVG), aplat coloré décalé comme un coup de feutre.
+ * Aucune dépendance externe.
+ * ========================================================================== */
+type IconProps = { size?: number; className?: string; strokeWidth?: number; "aria-label"?: string };
+/** f = forme remplie d'un aplat (cartoon), sinon simple trait de crayon. */
+type Stroke = { d: string; f?: boolean };
+function sketch(name: string, strokes: Stroke[]): React.FC<IconProps> {
+  const Icon: React.FC<IconProps> = ({ size = 16, className, strokeWidth = 2.4, ...rest }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth}
+      strokeLinecap="round" strokeLinejoin="round" className={cx("sketch-icon shrink-0", className)} aria-hidden={rest["aria-label"] ? undefined : true}
+      role={rest["aria-label"] ? "img" : undefined} aria-label={rest["aria-label"]}>
+      {strokes.some((x) => x.f) && (
+        <g className="sketch-fill" stroke="none" transform="translate(1.6 1.4)">
+          {strokes.filter((x) => x.f).map((x, k) => <path key={k} d={x.d} />)}
+        </g>
+      )}
+      <g filter="url(#pencil)">{strokes.map((x, k) => <path key={k} d={x.d} />)}</g>
+    </svg>
+  );
+  Icon.displayName = name;
+  return Icon;
+}
+/** Filtre global de tremblé crayon, monté une fois à la racine. */
+const PencilDefs: React.FC = () => (
+  <svg width="0" height="0" style={{ position: "absolute" }} aria-hidden>
+    <filter id="pencil" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="3" result="n" />
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="1.5" xChannelSelector="R" yChannelSelector="G" />
+    </filter>
+  </svg>
+);
+const LayoutDashboard = sketch("LayoutDashboard", [
+  { d: "M3.6 4.2c1.9-.4 4.1-.3 6 .1.3 1.9.2 4.3-.1 6.2-1.9.3-4 .3-5.9-.1-.3-2-.3-4.2 0-6.2Z", f: true },
+  { d: "M13.9 3.8c2.2-.2 4.4 0 6.3.3.2 1.3.2 2.5 0 3.7-2 .3-4.2.2-6.2-.1-.3-1.3-.3-2.7-.1-3.9Z" },
+  { d: "M14 11.2c2-.3 4.2-.2 6.2.1.3 2.9.2 5.9-.1 8.7-2 .3-4.1.2-6-.1-.3-2.9-.4-5.9-.1-8.7Z" },
+  { d: "M3.8 14.1c1.9-.2 4-.2 6 .1.2 2 .2 3.9-.1 5.8-2 .2-4 .2-5.9-.1-.2-1.9-.2-3.9 0-5.8Z" },
+]);
+const CalendarClock = sketch("CalendarClock", [
+  { d: "M3.3 6.2c.1-1.4 1-2 2.3-2.1 3.6-.2 7.3-.2 10.9 0 1.3.1 2.1.8 2.2 2.1l.1 3.3" },
+  { d: "M11.2 20.3c-1.9.1-3.8.1-5.6 0-1.3-.1-2.2-.9-2.3-2.2-.2-3.9-.2-7.9 0-11.8" },
+  { d: "M7.5 2.6v3.2M15 2.5v3.3M3.4 9.6c3.8-.2 7.6-.2 11.4 0" },
+  { d: "M17 12.1c2.7.1 4.6 2.1 4.6 4.7-.1 2.6-2.2 4.6-4.8 4.5-2.6-.1-4.5-2.2-4.4-4.8.1-2.5 2.1-4.5 4.6-4.4Z", f: true },
+  { d: "M17 14.6v2.4l1.5 1" },
+]);
+const GraduationCap = sketch("GraduationCap", [
+  { d: "M2.4 9.3c3.1-1.6 6.4-3 9.7-4.3 3.2 1.2 6.4 2.6 9.5 4.2-3.1 1.6-6.3 3-9.6 4.3-3.3-1.2-6.5-2.6-9.6-4.2Z", f: true },
+  { d: "M6.2 11.4c-.1 1.6-.1 3.1.1 4.6 3.6 2.6 8 2.6 11.6 0 .2-1.5.2-3 .1-4.6" },
+  { d: "M21.5 9.4c.1 1.9.1 3.9-.1 5.8" },
+]);
+const Timer = sketch("Timer", [
+  { d: "M12 6.1c4.2-.1 7.7 3.2 7.8 7.4.1 4.3-3.3 7.8-7.6 7.9-4.3.1-7.8-3.3-7.9-7.6-.1-4.3 3.4-7.7 7.7-7.7Z", f: true },
+  { d: "M9.6 2.5c1.6-.1 3.3-.1 4.9.1M12 2.6v3.3M12 10.2v3.6l2.3-1.2M18.4 6.5l1.4-1.4" },
+]);
+const ShoppingCart = sketch("ShoppingCart", [
+  { d: "M2.3 3.2c.9-.1 1.9 0 2.8.2l2.4 11.1c.1.6.6 1 1.2 1h8.6c.6 0 1.1-.4 1.3-1l1.6-7.2c-4.8-.3-9.7-.4-14.5-.3" },
+  { d: "M6.4 7.1c4.6-.2 9.2-.1 13.8.2l-1.5 7.2c-.1.6-.6 1-1.2 1H8.7c-.6 0-1.1-.4-1.2-1L6.4 7.1Z", f: true },
+  { d: "M9.4 20.6a.9.9 0 1 0 .1 0M17.6 20.5a.9.9 0 1 0 .1 0" },
+]);
+const Home = sketch("Home", [
+  { d: "M3.3 10.6c2.8-2.5 5.6-4.9 8.6-7.2 3 2.3 5.9 4.7 8.7 7.3" },
+  { d: "M5.2 9.2c-.2 3.6-.2 7.3 0 10.9 4.5.3 9.1.3 13.6 0 .2-3.6.2-7.3 0-10.9", f: true },
+  { d: "M10 20.1c-.1-1.9-.1-3.8.1-5.6 1.3-.2 2.6-.2 3.9 0 .2 1.9.2 3.7 0 5.6" },
+]);
+const Moon = sketch("Moon", [
+  { d: "M20.6 14.1c-1.1 4.1-5.2 6.9-9.5 6.4-4.6-.6-7.9-4.7-7.4-9.3.4-4 3.6-7.1 7.5-7.6-2.4 3.2-1.9 7.8 1.2 10.4 2.4 2 5.6 2.2 8.2.1Z", f: true },
+  { d: "M17.5 3.4v2.4M16.3 4.6h2.4" },
+]);
+const Sun = sketch("Sun", [
+  { d: "M12 7.7c2.5-.1 4.4 1.9 4.4 4.3 0 2.4-1.9 4.4-4.4 4.4-2.4 0-4.4-2-4.4-4.4 0-2.4 2-4.3 4.4-4.3Z", f: true },
+  { d: "M12 2.3v2.1M12 19.6v2.1M4.9 4.9l1.5 1.5M17.6 17.6l1.5 1.5M2.3 12h2.1M19.6 12h2.1M4.9 19.1l1.5-1.5M17.6 6.4l1.5-1.5" },
+]);
+const Settings = sketch("Settings", [
+  { d: "M10.3 2.6c1.1-.2 2.3-.2 3.4 0l.5 2.3c.7.3 1.3.6 1.9 1.1l2.2-.7c.8.8 1.4 1.8 1.7 2.9l-1.7 1.6c.1.8.1 1.5 0 2.3l1.7 1.6c-.3 1.1-.9 2.1-1.7 2.9l-2.2-.7c-.6.5-1.2.8-1.9 1.1l-.5 2.3c-1.1.2-2.3.2-3.4 0l-.5-2.3c-.7-.3-1.3-.6-1.9-1.1l-2.2.7c-.8-.8-1.4-1.8-1.7-2.9l1.7-1.6c-.1-.8-.1-1.5 0-2.3L3.9 8.2c.3-1.1.9-2.1 1.7-2.9l2.2.7c.6-.5 1.2-.8 1.9-1.1l.6-2.3Z", f: true },
+  { d: "M12 9.3c1.5 0 2.7 1.2 2.7 2.7 0 1.5-1.2 2.7-2.7 2.7-1.5 0-2.7-1.2-2.7-2.7 0-1.5 1.2-2.7 2.7-2.7Z" },
+]);
+const Plus = sketch("Plus", [{ d: "M12.1 4.6c-.2 5-.2 9.9.1 14.8M4.7 12.2c4.9-.3 9.8-.3 14.7 0" }]);
+const X = sketch("X", [{ d: "M5.6 5.4c4.4 4.2 8.6 8.6 12.8 13.1M18.3 5.6c-4.3 4.2-8.5 8.5-12.6 12.9" }]);
+const Check = sketch("Check", [{ d: "M4.2 12.8c1.6 1.4 3.2 3 4.6 4.6 3.3-4.1 6.8-7.9 10.8-11.3" }]);
+const ChevronLeft = sketch("ChevronLeft", [{ d: "M14.8 5.2c-2.3 2.2-4.6 4.5-6.6 6.9 2.1 2.3 4.3 4.5 6.7 6.6" }]);
+const ChevronRight = sketch("ChevronRight", [{ d: "M9.2 5.3c2.4 2.1 4.6 4.3 6.6 6.7-2 2.4-4.2 4.6-6.6 6.7" }]);
+const Trash2 = sketch("Trash2", [
+  { d: "M3.6 6.3c5.6-.3 11.2-.3 16.8 0M9.1 6.1c0-1.1.1-2.1.3-3.1 1.7-.2 3.5-.2 5.2 0 .2 1 .3 2 .3 3.1" },
+  { d: "M5.6 6.4c.3 4.3.6 8.6 1.1 12.9.1.9.8 1.5 1.7 1.5h7.2c.9 0 1.6-.6 1.7-1.5.5-4.3.8-8.6 1.1-12.9", f: true },
+  { d: "M10.1 10.6c.1 2.4.2 4.8.4 7.1M13.9 10.6c-.1 2.4-.2 4.8-.4 7.1" },
+]);
+const Download = sketch("Download", [
+  { d: "M12 3.2c-.1 4.2-.1 8.4.1 12.6M7.4 11.4c1.6 1.5 3.1 3.1 4.6 4.7 1.6-1.6 3.1-3.2 4.6-4.7" },
+  { d: "M3.6 15.9c-.1 1.3-.1 2.6.2 3.9 5.4.4 10.9.4 16.3 0 .2-1.3.3-2.6.2-3.9", f: true },
+]);
+const Upload = sketch("Upload", [
+  { d: "M12 16.1c-.1-4.2-.1-8.4.1-12.6M7.4 7.9c1.6-1.5 3.1-3.1 4.6-4.7 1.6 1.6 3.1 3.2 4.6 4.7" },
+  { d: "M3.6 15.9c-.1 1.3-.1 2.6.2 3.9 5.4.4 10.9.4 16.3 0 .2-1.3.3-2.6.2-3.9", f: true },
+]);
+const Search = sketch("Search", [
+  { d: "M10.6 3.6c3.9-.1 7 3 7.1 6.8 0 3.9-3.1 7-6.9 7.1-3.9 0-7-3.1-7.1-6.9 0-3.9 3.1-7 6.9-7Z", f: true },
+  { d: "M15.8 15.9c1.5 1.4 3 2.9 4.4 4.5" },
+]);
+const AlertTriangle = sketch("AlertTriangle", [
+  { d: "M10.4 4.2c.7-1.3 2.5-1.3 3.2 0 2.6 4.6 5.1 9.2 7.4 13.9.6 1.2-.3 2.6-1.6 2.6-4.9.2-9.9.2-14.8 0-1.3 0-2.2-1.4-1.6-2.6 2.3-4.7 4.8-9.3 7.4-13.9Z", f: true },
+  { d: "M12 9.1c-.1 1.6-.1 3.1.1 4.6M12 17.1v.2" },
+]);
+const Play = sketch("Play", [{ d: "M6.6 4.4c4.4 2.3 8.6 4.8 12.6 7.6-4 2.8-8.2 5.4-12.6 7.6-.3-5.1-.3-10.1 0-15.2Z", f: true }]);
+const Pause = sketch("Pause", [{ d: "M6.4 4.6c1.2-.2 2.4-.2 3.6 0 .2 4.9.2 9.9 0 14.8-1.2.2-2.4.2-3.6 0-.2-4.9-.2-9.9 0-14.8ZM14 4.6c1.2-.2 2.4-.2 3.6 0 .2 4.9.2 9.9 0 14.8-1.2.2-2.4.2-3.6 0-.2-4.9-.2-9.9 0-14.8Z", f: true }]);
+const RotateCcw = sketch("RotateCcw", [{ d: "M3.4 4.3c-.1 1.8 0 3.6.2 5.3 1.7.1 3.4.1 5.1-.1M3.8 9.4c1.4-3.6 5.1-5.8 9-5.3 4.4.6 7.6 4.6 7.1 9-.5 4.4-4.5 7.6-8.9 7.1-2.6-.3-4.8-1.8-6-4" }]);
+const SkipForward = sketch("SkipForward", [
+  { d: "M5.1 5c3.5 2.2 6.9 4.5 10.1 7-3.2 2.5-6.6 4.8-10.1 7-.2-4.7-.2-9.3 0-14Z", f: true },
+  { d: "M19.2 5.2c.2 4.5.2 9.1 0 13.6" },
+]);
+const Keyboard = sketch("Keyboard", [
+  { d: "M2.6 7.1c.1-1.1.8-1.8 1.9-1.9 5-.3 10-.3 15 0 1.1.1 1.8.8 1.9 1.9.2 3.3.2 6.5 0 9.8-.1 1.1-.8 1.8-1.9 1.9-5 .3-10 .3-15 0-1.1-.1-1.8-.8-1.9-1.9-.2-3.3-.2-6.5 0-9.8Z", f: true },
+  { d: "M6.4 9.6h.2M10 9.6h.2M13.8 9.6h.2M17.5 9.6h.2M6.4 12.6h.2M17.5 12.6h.2M8.3 15.5c2.5-.2 5-.2 7.4 0" },
+]);
+const Zap = sketch("Zap", [{ d: "M13.4 2.6c-2.8 3.4-5.4 7-7.9 10.6 2.1.1 4.1.1 6.2 0-.5 2.8-1 5.6-1.2 8.3 2.8-3.5 5.4-7.1 7.8-10.8-2.1-.1-4.1-.1-6.2 0 .4-2.7.9-5.4 1.3-8.1Z", f: true }]);
+const Coffee = sketch("Coffee", [
+  { d: "M4.3 9.1c4.3-.2 8.5-.2 12.8 0 .2 3 .1 6-.3 8.9-.2 1.3-1.2 2.2-2.5 2.3-2.4.2-4.8.2-7.2 0-1.3-.1-2.3-1-2.5-2.3-.4-2.9-.5-5.9-.3-8.9Z", f: true },
+  { d: "M17.2 10.2c1.7-.2 3.4.6 3.5 2.2.1 1.7-1.6 2.8-3.7 2.7M8 2.9c-.6.9-.6 2.1 0 3M11.7 2.6c-.6 1-.6 2.2 0 3.2" },
+]);
+const BedDouble = sketch("BedDouble", [
+  { d: "M3.1 19.7c-.2-3.1-.2-6.1 0-9.2 6-.3 11.9-.3 17.9 0 .2 3.1.2 6.1 0 9.2" },
+  { d: "M3.2 15.2c5.9-.3 11.8-.3 17.7 0", f: true },
+  { d: "M5 10.3c-.1-1.6-.1-3.2.1-4.8 4.6-.3 9.2-.3 13.8 0 .2 1.6.2 3.2.1 4.8M7.4 10.3c0-.8.1-1.5.3-2.2 1.2-.2 2.4-.2 3.5 0 .1.7.2 1.4.2 2.2M12.7 10.3c0-.8.1-1.5.3-2.2 1.2-.2 2.4-.2 3.5 0 .1.7.2 1.4.2 2.2" },
+]);
+const Repeat = sketch("Repeat", [{ d: "M16.6 2.7c1.3 1 2.5 2.1 3.6 3.3-1.1 1.2-2.3 2.3-3.6 3.3M4 11.1c-.1-1.4 0-2.8.2-4.1 5.2-.4 10.5-.4 15.7-.1M7.4 21.3c-1.3-1-2.5-2.1-3.6-3.3 1.1-1.2 2.3-2.3 3.6-3.3M20 12.9c.1 1.4 0 2.8-.2 4.1-5.2.4-10.5.4-15.7.1" }]);
+const Users = sketch("Users", [
+  { d: "M9 3.9c2.1-.1 3.7 1.6 3.7 3.7 0 2.1-1.7 3.7-3.8 3.7-2 0-3.7-1.7-3.7-3.7.1-2.1 1.8-3.7 3.8-3.7Z", f: true },
+  { d: "M2.6 20.5c-.2-3.4 2.6-6 6.4-6 3.8 0 6.6 2.6 6.4 6M16 4.2c1.8.4 3 2 2.9 3.8-.1 1.6-1.2 2.9-2.8 3.3M18.3 14.7c2 .7 3.3 2.9 3.1 5.8" },
+]);
+const Flame = sketch("Flame", [{ d: "M12.3 2.6c.6 2.6 2.2 4 3.7 5.8 1.7 2 2.7 4.1 2.3 6.7-.5 3.3-3.3 5.8-6.6 5.7-3.4-.1-6.1-2.9-6.1-6.4 0-1.8.7-3.2 1.9-4.6.3 1.4 1 2.4 2.1 2.9-.6-3.6.6-7.4 2.7-10.1Z", f: true }]);
+const ListChecks = sketch("ListChecks", [
+  { d: "M3.3 6.1c.6.5 1.2 1.1 1.7 1.8 1.1-1.4 2.2-2.7 3.5-3.9M3.3 13.6c.6.5 1.2 1.1 1.7 1.8 1.1-1.4 2.2-2.7 3.5-3.9" },
+  { d: "M11.6 6.6c3.1-.2 6.2-.2 9.2 0M11.6 13.6c3.1-.2 6.2-.2 9.2 0M4 19.7c5.6-.2 11.2-.2 16.8 0" },
+]);
+const Wallet = sketch("Wallet", [
+  { d: "M3.2 7.5c.1-1.5 1.1-2.5 2.6-2.6 4.6-.3 9.2-.3 13.8 0 .1 1 .1 2 0 3" },
+  { d: "M3.2 7.6c.1 1 1 1.6 2 1.6 4.8-.2 9.6-.2 14.4 0 .9 0 1.4.6 1.4 1.4.1 2.8.1 5.6-.1 8.4-.1.8-.7 1.3-1.5 1.4-4.9.2-9.7.2-14.6 0-1-.1-1.7-.8-1.8-1.8-.2-3.7-.2-7.3.2-11Z", f: true },
+  { d: "M16.3 14.4h.3" },
+]);
+const Pencil = sketch("Pencil", [
+  { d: "M15.8 3.7c1.1-1 2.7-1 3.7 0l.8.8c1 1 1 2.6 0 3.7-3.8 3.9-7.7 7.6-11.7 11.2-1.6.4-3.3.7-5 .9.2-1.7.5-3.4.9-5 3.7-3.9 7.4-7.8 11.3-11.6Z", f: true },
+  { d: "M14 5.6c1.6 1.2 3 2.7 4.3 4.3" },
+]);
+const TrendingUp = sketch("TrendingUp", [{ d: "M2.7 17.6c2.2-2.4 4.5-4.7 6.9-6.9 1.5 1.3 2.9 2.7 4.3 4.2 2.4-2.6 4.8-5.1 7.4-7.5M15.3 7.2c1.9-.1 3.8-.1 5.8.1.2 1.9.2 3.8.1 5.7" }]);
+const Receipt = sketch("Receipt", [
+  { d: "M4.9 2.7c.2 6.2.2 12.4 0 18.6 1-.6 2-1.2 3-1.7 1 .6 2 1.1 3 1.6 1-.5 2-1.1 3-1.6 1 .6 2 1.1 3 1.7.2-6.2.2-12.4 0-18.6-1 .6-2 1.1-3 1.7-1-.6-2-1.1-3-1.7-1 .6-2 1.1-3 1.7-1-.6-2-1.1-3-1.7Z", f: true },
+  { d: "M8.4 8.6c2.4-.2 4.8-.2 7.2 0M8.4 12.3c2.4-.2 4.8-.2 7.2 0M8.4 16c1.4-.1 2.7-.1 4 0" },
+]);
+const Sparkles = sketch("Sparkles", [
+  { d: "M10.5 3.2c.6 3.2 2.3 5 5.5 5.8-3.2.7-4.9 2.6-5.5 5.8-.6-3.2-2.4-5.1-5.6-5.8 3.2-.8 5-2.6 5.6-5.8Z", f: true },
+  { d: "M18.4 13.6c.3 1.5 1.1 2.3 2.6 2.7-1.5.3-2.3 1.2-2.6 2.7-.3-1.5-1.2-2.4-2.7-2.7 1.5-.4 2.4-1.2 2.7-2.7ZM5.6 16.4c.2 1 .8 1.6 1.8 1.8-1 .2-1.6.8-1.8 1.8-.2-1-.8-1.6-1.8-1.8 1-.2 1.6-.8 1.8-1.8Z" },
+]);
 
 // ---------------------------------------------------------------- Types
 type ID = string;
@@ -1535,6 +1689,7 @@ function StudentOS() {
 
   if (!state.settings.onboarded) return (
     <StoreCtx.Provider value={ctx}>
+      <PencilDefs />
       <Onboarding onDone={(s) => { dispatch({ type: "replace", state: s }); setView("dashboard"); toast(`Bienvenue ${s.settings.name} ! Commencez par ajouter vos cours dans Académique et Planning.`); }} />
       <ToastStack toasts={toasts} />
     </StoreCtx.Provider>
@@ -1542,6 +1697,7 @@ function StudentOS() {
 
   return (
     <StoreCtx.Provider value={ctx}>
+      <PencilDefs />
       <div className="flex min-h-full bg-bg text-fg">
         <aside className="sticky top-0 hidden h-screen w-[76px] shrink-0 flex-col p-3 md:flex lg:w-60">
           <div className="mb-6 flex items-center gap-2.5 px-1 pt-2 lg:px-2"><div className="sticker grid h-9 w-9 place-items-center rounded-xl border-2 border-fg bg-pink text-white shadow-[3px_3px_0_0_rgb(var(--ink))]"><ListChecks size={17} /></div><span className="hidden font-display text-[19px] font-extrabold leading-none tracking-tight lg:inline">Étudiant<span className="text-accent">.</span>OS</span></div>
@@ -1603,9 +1759,7 @@ function StudentOS() {
 </script>
 <script>
 (function () {
-  // Icônes : Lucide si chargé, sinon un pictogramme neutre pour ne jamais casser l'interface.
-  const Fallback = (p) => React.createElement("span", { style: { display: "inline-block", width: p.size || 16, height: p.size || 16, borderRadius: 4, border: "1.5px solid currentColor", opacity: .6 } });
-  window.Icons = new Proxy({}, { get: (_, k) => (window.LucideReact && window.LucideReact[k]) || Fallback });
+  window.Icons = {};
   try {
     const src = document.getElementById("app-src").textContent;
     const out = Babel.transform(src, { filename: "StudentOS.tsx", presets: [["typescript", { isTSX: true, allExtensions: true }], "react"] }).code;

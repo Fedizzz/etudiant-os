@@ -89,6 +89,13 @@ h1, h2, h3 { text-wrap: balance; font-family: var(--font-display); }
 @media (hover: none) { .group .opacity-0, .group .opacity-60 { opacity: 1 !important; } .lift:hover, .btn-ink:hover { transform: none; } }
 @media (max-width: 639px) { input, select, textarea { font-size: 16px !important; } .sheet { padding-bottom: env(safe-area-inset-bottom, 0px); } }
 button, a, input, select { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+/* Icônes crayon : aplat feutre décalé, petit coup de crayon au survol */
+.sketch-fill { fill: rgb(var(--hi)); opacity: .95; }
+:root[data-theme="dark"] .sketch-fill { fill: rgb(var(--pink)); opacity: .55; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .sketch-fill { fill: rgb(var(--pink)); opacity: .55; } }
+.bg-hi .sketch-fill, .bg-pink .sketch-fill, .bg-accent .sketch-fill, [class*="bg-hi"] .sketch-fill { fill: rgb(255 255 255); opacity: .45; }
+button:hover > .sketch-icon, button:hover .sketch-icon { transform: rotate(-6deg) scale(1.08); }
+.sketch-icon { transition: transform .35s var(--spring); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important }
   .marker path { stroke-dashoffset: 0 } ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important }
@@ -106,7 +113,6 @@ tailwind.config = { theme: { extend: {
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/lucide-react@0.263.1/dist/umd/lucide-react.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
 <div id="root"><div id="boot">Chargement d'Étudiant OS…</div></div>
 <script type="text/plain" id="app-src">
@@ -114,9 +120,7 @@ tailwind.config = { theme: { extend: {
 </script>
 <script>
 (function () {
-  // Icônes : Lucide si chargé, sinon un pictogramme neutre pour ne jamais casser l'interface.
-  const Fallback = (p) => React.createElement("span", { style: { display: "inline-block", width: p.size || 16, height: p.size || 16, borderRadius: 4, border: "1.5px solid currentColor", opacity: .6 } });
-  window.Icons = new Proxy({}, { get: (_, k) => (window.LucideReact && window.LucideReact[k]) || Fallback });
+  window.Icons = {};
   try {
     const src = document.getElementById("app-src").textContent;
     const out = Babel.transform(src, { filename: "StudentOS.tsx", presets: [["typescript", { isTSX: true, allExtensions: true }], "react"] }).code;
