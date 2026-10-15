@@ -1,9 +1,12 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { flushSync } from "react-dom";
+import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, pad, parseAmount, parseISO, parseReceipt, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
+import type { Action, Aisle, AppState, Block, Budget, Course, DayPlan, Expense, ExpenseCat, GroceryTemplate, ID, Phase, PomodoroCfg, Priority, ReceiptResult, Recurrence, SettingsState, SleepLog, Task, TaskKind, TaskStatus, TemplateItem, ViewKey } from "./core.ts";
+import type { AppEnv } from "./env.ts";
 
 /* ============================================================================
- * Étudiant OS — un seul composant racine, modules découpés, état typé,
- * persistance localStorage, export/import JSON.
+ * Étudiant.OS — interface de l'application. La logique métier est dans core.ts ;
+ * le stockage (local ou compte synchronisé) est fourni par l'environnement (env.ts).
  * ========================================================================== */
 
 /* ============================================================================
@@ -31,7 +34,7 @@ function sketch(name: string, strokes: Stroke[]): React.FC<IconProps> {
   return Icon;
 }
 /** Filtre global de tremblé crayon, monté une fois à la racine. */
-const PencilDefs: React.FC = () => (
+export const PencilDefs: React.FC = () => (
   <svg width="0" height="0" style={{ position: "absolute" }} aria-hidden>
     <filter id="pencil" x="-10%" y="-10%" width="120%" height="120%">
       <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="3" result="n" />
@@ -39,162 +42,163 @@ const PencilDefs: React.FC = () => (
     </filter>
   </svg>
 );
-const LayoutDashboard = sketch("LayoutDashboard", [
+export const LayoutDashboard = sketch("LayoutDashboard", [
   { d: "M3.6 4.2c1.9-.4 4.1-.3 6 .1.3 1.9.2 4.3-.1 6.2-1.9.3-4 .3-5.9-.1-.3-2-.3-4.2 0-6.2Z", f: true },
   { d: "M13.9 3.8c2.2-.2 4.4 0 6.3.3.2 1.3.2 2.5 0 3.7-2 .3-4.2.2-6.2-.1-.3-1.3-.3-2.7-.1-3.9Z" },
   { d: "M14 11.2c2-.3 4.2-.2 6.2.1.3 2.9.2 5.9-.1 8.7-2 .3-4.1.2-6-.1-.3-2.9-.4-5.9-.1-8.7Z" },
   { d: "M3.8 14.1c1.9-.2 4-.2 6 .1.2 2 .2 3.9-.1 5.8-2 .2-4 .2-5.9-.1-.2-1.9-.2-3.9 0-5.8Z" },
 ]);
-const CalendarClock = sketch("CalendarClock", [
+export const CalendarClock = sketch("CalendarClock", [
   { d: "M3.3 6.2c.1-1.4 1-2 2.3-2.1 3.6-.2 7.3-.2 10.9 0 1.3.1 2.1.8 2.2 2.1l.1 3.3" },
   { d: "M11.2 20.3c-1.9.1-3.8.1-5.6 0-1.3-.1-2.2-.9-2.3-2.2-.2-3.9-.2-7.9 0-11.8" },
   { d: "M7.5 2.6v3.2M15 2.5v3.3M3.4 9.6c3.8-.2 7.6-.2 11.4 0" },
   { d: "M17 12.1c2.7.1 4.6 2.1 4.6 4.7-.1 2.6-2.2 4.6-4.8 4.5-2.6-.1-4.5-2.2-4.4-4.8.1-2.5 2.1-4.5 4.6-4.4Z", f: true },
   { d: "M17 14.6v2.4l1.5 1" },
 ]);
-const GraduationCap = sketch("GraduationCap", [
+export const GraduationCap = sketch("GraduationCap", [
   { d: "M2.4 9.3c3.1-1.6 6.4-3 9.7-4.3 3.2 1.2 6.4 2.6 9.5 4.2-3.1 1.6-6.3 3-9.6 4.3-3.3-1.2-6.5-2.6-9.6-4.2Z", f: true },
   { d: "M6.2 11.4c-.1 1.6-.1 3.1.1 4.6 3.6 2.6 8 2.6 11.6 0 .2-1.5.2-3 .1-4.6" },
   { d: "M21.5 9.4c.1 1.9.1 3.9-.1 5.8" },
 ]);
-const Timer = sketch("Timer", [
+export const Timer = sketch("Timer", [
   { d: "M12 6.1c4.2-.1 7.7 3.2 7.8 7.4.1 4.3-3.3 7.8-7.6 7.9-4.3.1-7.8-3.3-7.9-7.6-.1-4.3 3.4-7.7 7.7-7.7Z", f: true },
   { d: "M9.6 2.5c1.6-.1 3.3-.1 4.9.1M12 2.6v3.3M12 10.2v3.6l2.3-1.2M18.4 6.5l1.4-1.4" },
 ]);
-const ShoppingCart = sketch("ShoppingCart", [
+export const ShoppingCart = sketch("ShoppingCart", [
   { d: "M2.3 3.2c.9-.1 1.9 0 2.8.2l2.4 11.1c.1.6.6 1 1.2 1h8.6c.6 0 1.1-.4 1.3-1l1.6-7.2c-4.8-.3-9.7-.4-14.5-.3" },
   { d: "M6.4 7.1c4.6-.2 9.2-.1 13.8.2l-1.5 7.2c-.1.6-.6 1-1.2 1H8.7c-.6 0-1.1-.4-1.2-1L6.4 7.1Z", f: true },
   { d: "M9.4 20.6a.9.9 0 1 0 .1 0M17.6 20.5a.9.9 0 1 0 .1 0" },
 ]);
-const Home = sketch("Home", [
+export const Home = sketch("Home", [
   { d: "M3.3 10.6c2.8-2.5 5.6-4.9 8.6-7.2 3 2.3 5.9 4.7 8.7 7.3" },
   { d: "M5.2 9.2c-.2 3.6-.2 7.3 0 10.9 4.5.3 9.1.3 13.6 0 .2-3.6.2-7.3 0-10.9", f: true },
   { d: "M10 20.1c-.1-1.9-.1-3.8.1-5.6 1.3-.2 2.6-.2 3.9 0 .2 1.9.2 3.7 0 5.6" },
 ]);
-const Moon = sketch("Moon", [
+export const Moon = sketch("Moon", [
   { d: "M20.6 14.1c-1.1 4.1-5.2 6.9-9.5 6.4-4.6-.6-7.9-4.7-7.4-9.3.4-4 3.6-7.1 7.5-7.6-2.4 3.2-1.9 7.8 1.2 10.4 2.4 2 5.6 2.2 8.2.1Z", f: true },
   { d: "M17.5 3.4v2.4M16.3 4.6h2.4" },
 ]);
-const Sun = sketch("Sun", [
+export const Sun = sketch("Sun", [
   { d: "M12 7.7c2.5-.1 4.4 1.9 4.4 4.3 0 2.4-1.9 4.4-4.4 4.4-2.4 0-4.4-2-4.4-4.4 0-2.4 2-4.3 4.4-4.3Z", f: true },
   { d: "M12 2.3v2.1M12 19.6v2.1M4.9 4.9l1.5 1.5M17.6 17.6l1.5 1.5M2.3 12h2.1M19.6 12h2.1M4.9 19.1l1.5-1.5M17.6 6.4l1.5-1.5" },
 ]);
-const Settings = sketch("Settings", [
+export const Settings = sketch("Settings", [
   { d: "M10.3 2.6c1.1-.2 2.3-.2 3.4 0l.5 2.3c.7.3 1.3.6 1.9 1.1l2.2-.7c.8.8 1.4 1.8 1.7 2.9l-1.7 1.6c.1.8.1 1.5 0 2.3l1.7 1.6c-.3 1.1-.9 2.1-1.7 2.9l-2.2-.7c-.6.5-1.2.8-1.9 1.1l-.5 2.3c-1.1.2-2.3.2-3.4 0l-.5-2.3c-.7-.3-1.3-.6-1.9-1.1l-2.2.7c-.8-.8-1.4-1.8-1.7-2.9l1.7-1.6c-.1-.8-.1-1.5 0-2.3L3.9 8.2c.3-1.1.9-2.1 1.7-2.9l2.2.7c.6-.5 1.2-.8 1.9-1.1l.6-2.3Z", f: true },
   { d: "M12 9.3c1.5 0 2.7 1.2 2.7 2.7 0 1.5-1.2 2.7-2.7 2.7-1.5 0-2.7-1.2-2.7-2.7 0-1.5 1.2-2.7 2.7-2.7Z" },
 ]);
-const Plus = sketch("Plus", [{ d: "M12.1 4.6c-.2 5-.2 9.9.1 14.8M4.7 12.2c4.9-.3 9.8-.3 14.7 0" }]);
-const X = sketch("X", [{ d: "M5.6 5.4c4.4 4.2 8.6 8.6 12.8 13.1M18.3 5.6c-4.3 4.2-8.5 8.5-12.6 12.9" }]);
-const Check = sketch("Check", [{ d: "M4.2 12.8c1.6 1.4 3.2 3 4.6 4.6 3.3-4.1 6.8-7.9 10.8-11.3" }]);
-const ChevronLeft = sketch("ChevronLeft", [{ d: "M14.8 5.2c-2.3 2.2-4.6 4.5-6.6 6.9 2.1 2.3 4.3 4.5 6.7 6.6" }]);
-const ChevronRight = sketch("ChevronRight", [{ d: "M9.2 5.3c2.4 2.1 4.6 4.3 6.6 6.7-2 2.4-4.2 4.6-6.6 6.7" }]);
+export const Plus = sketch("Plus", [{ d: "M12.1 4.6c-.2 5-.2 9.9.1 14.8M4.7 12.2c4.9-.3 9.8-.3 14.7 0" }]);
+export const X = sketch("X", [{ d: "M5.6 5.4c4.4 4.2 8.6 8.6 12.8 13.1M18.3 5.6c-4.3 4.2-8.5 8.5-12.6 12.9" }]);
+export const Check = sketch("Check", [{ d: "M4.2 12.8c1.6 1.4 3.2 3 4.6 4.6 3.3-4.1 6.8-7.9 10.8-11.3" }]);
+export const ChevronLeft = sketch("ChevronLeft", [{ d: "M14.8 5.2c-2.3 2.2-4.6 4.5-6.6 6.9 2.1 2.3 4.3 4.5 6.7 6.6" }]);
+export const ChevronRight = sketch("ChevronRight", [{ d: "M9.2 5.3c2.4 2.1 4.6 4.3 6.6 6.7-2 2.4-4.2 4.6-6.6 6.7" }]);
 const Trash2 = sketch("Trash2", [
   { d: "M3.6 6.3c5.6-.3 11.2-.3 16.8 0M9.1 6.1c0-1.1.1-2.1.3-3.1 1.7-.2 3.5-.2 5.2 0 .2 1 .3 2 .3 3.1" },
   { d: "M5.6 6.4c.3 4.3.6 8.6 1.1 12.9.1.9.8 1.5 1.7 1.5h7.2c.9 0 1.6-.6 1.7-1.5.5-4.3.8-8.6 1.1-12.9", f: true },
   { d: "M10.1 10.6c.1 2.4.2 4.8.4 7.1M13.9 10.6c-.1 2.4-.2 4.8-.4 7.1" },
 ]);
-const Download = sketch("Download", [
+export const Download = sketch("Download", [
   { d: "M12 3.2c-.1 4.2-.1 8.4.1 12.6M7.4 11.4c1.6 1.5 3.1 3.1 4.6 4.7 1.6-1.6 3.1-3.2 4.6-4.7" },
   { d: "M3.6 15.9c-.1 1.3-.1 2.6.2 3.9 5.4.4 10.9.4 16.3 0 .2-1.3.3-2.6.2-3.9", f: true },
 ]);
-const Upload = sketch("Upload", [
+export const Upload = sketch("Upload", [
   { d: "M12 16.1c-.1-4.2-.1-8.4.1-12.6M7.4 7.9c1.6-1.5 3.1-3.1 4.6-4.7 1.6 1.6 3.1 3.2 4.6 4.7" },
   { d: "M3.6 15.9c-.1 1.3-.1 2.6.2 3.9 5.4.4 10.9.4 16.3 0 .2-1.3.3-2.6.2-3.9", f: true },
 ]);
-const Search = sketch("Search", [
+export const Search = sketch("Search", [
   { d: "M10.6 3.6c3.9-.1 7 3 7.1 6.8 0 3.9-3.1 7-6.9 7.1-3.9 0-7-3.1-7.1-6.9 0-3.9 3.1-7 6.9-7Z", f: true },
   { d: "M15.8 15.9c1.5 1.4 3 2.9 4.4 4.5" },
 ]);
-const AlertTriangle = sketch("AlertTriangle", [
+export const AlertTriangle = sketch("AlertTriangle", [
   { d: "M10.4 4.2c.7-1.3 2.5-1.3 3.2 0 2.6 4.6 5.1 9.2 7.4 13.9.6 1.2-.3 2.6-1.6 2.6-4.9.2-9.9.2-14.8 0-1.3 0-2.2-1.4-1.6-2.6 2.3-4.7 4.8-9.3 7.4-13.9Z", f: true },
   { d: "M12 9.1c-.1 1.6-.1 3.1.1 4.6M12 17.1v.2" },
 ]);
-const Play = sketch("Play", [{ d: "M6.6 4.4c4.4 2.3 8.6 4.8 12.6 7.6-4 2.8-8.2 5.4-12.6 7.6-.3-5.1-.3-10.1 0-15.2Z", f: true }]);
-const Pause = sketch("Pause", [{ d: "M6.4 4.6c1.2-.2 2.4-.2 3.6 0 .2 4.9.2 9.9 0 14.8-1.2.2-2.4.2-3.6 0-.2-4.9-.2-9.9 0-14.8ZM14 4.6c1.2-.2 2.4-.2 3.6 0 .2 4.9.2 9.9 0 14.8-1.2.2-2.4.2-3.6 0-.2-4.9-.2-9.9 0-14.8Z", f: true }]);
-const RotateCcw = sketch("RotateCcw", [{ d: "M3.4 4.3c-.1 1.8 0 3.6.2 5.3 1.7.1 3.4.1 5.1-.1M3.8 9.4c1.4-3.6 5.1-5.8 9-5.3 4.4.6 7.6 4.6 7.1 9-.5 4.4-4.5 7.6-8.9 7.1-2.6-.3-4.8-1.8-6-4" }]);
-const SkipForward = sketch("SkipForward", [
+export const Play = sketch("Play", [{ d: "M6.6 4.4c4.4 2.3 8.6 4.8 12.6 7.6-4 2.8-8.2 5.4-12.6 7.6-.3-5.1-.3-10.1 0-15.2Z", f: true }]);
+export const Pause = sketch("Pause", [{ d: "M6.4 4.6c1.2-.2 2.4-.2 3.6 0 .2 4.9.2 9.9 0 14.8-1.2.2-2.4.2-3.6 0-.2-4.9-.2-9.9 0-14.8ZM14 4.6c1.2-.2 2.4-.2 3.6 0 .2 4.9.2 9.9 0 14.8-1.2.2-2.4.2-3.6 0-.2-4.9-.2-9.9 0-14.8Z", f: true }]);
+export const RotateCcw = sketch("RotateCcw", [{ d: "M3.4 4.3c-.1 1.8 0 3.6.2 5.3 1.7.1 3.4.1 5.1-.1M3.8 9.4c1.4-3.6 5.1-5.8 9-5.3 4.4.6 7.6 4.6 7.1 9-.5 4.4-4.5 7.6-8.9 7.1-2.6-.3-4.8-1.8-6-4" }]);
+export const SkipForward = sketch("SkipForward", [
   { d: "M5.1 5c3.5 2.2 6.9 4.5 10.1 7-3.2 2.5-6.6 4.8-10.1 7-.2-4.7-.2-9.3 0-14Z", f: true },
   { d: "M19.2 5.2c.2 4.5.2 9.1 0 13.6" },
 ]);
-const Keyboard = sketch("Keyboard", [
+export const Keyboard = sketch("Keyboard", [
   { d: "M2.6 7.1c.1-1.1.8-1.8 1.9-1.9 5-.3 10-.3 15 0 1.1.1 1.8.8 1.9 1.9.2 3.3.2 6.5 0 9.8-.1 1.1-.8 1.8-1.9 1.9-5 .3-10 .3-15 0-1.1-.1-1.8-.8-1.9-1.9-.2-3.3-.2-6.5 0-9.8Z", f: true },
   { d: "M6.4 9.6h.2M10 9.6h.2M13.8 9.6h.2M17.5 9.6h.2M6.4 12.6h.2M17.5 12.6h.2M8.3 15.5c2.5-.2 5-.2 7.4 0" },
 ]);
-const Zap = sketch("Zap", [{ d: "M13.4 2.6c-2.8 3.4-5.4 7-7.9 10.6 2.1.1 4.1.1 6.2 0-.5 2.8-1 5.6-1.2 8.3 2.8-3.5 5.4-7.1 7.8-10.8-2.1-.1-4.1-.1-6.2 0 .4-2.7.9-5.4 1.3-8.1Z", f: true }]);
-const Coffee = sketch("Coffee", [
+export const Zap = sketch("Zap", [{ d: "M13.4 2.6c-2.8 3.4-5.4 7-7.9 10.6 2.1.1 4.1.1 6.2 0-.5 2.8-1 5.6-1.2 8.3 2.8-3.5 5.4-7.1 7.8-10.8-2.1-.1-4.1-.1-6.2 0 .4-2.7.9-5.4 1.3-8.1Z", f: true }]);
+export const Coffee = sketch("Coffee", [
   { d: "M4.3 9.1c4.3-.2 8.5-.2 12.8 0 .2 3 .1 6-.3 8.9-.2 1.3-1.2 2.2-2.5 2.3-2.4.2-4.8.2-7.2 0-1.3-.1-2.3-1-2.5-2.3-.4-2.9-.5-5.9-.3-8.9Z", f: true },
   { d: "M17.2 10.2c1.7-.2 3.4.6 3.5 2.2.1 1.7-1.6 2.8-3.7 2.7M8 2.9c-.6.9-.6 2.1 0 3M11.7 2.6c-.6 1-.6 2.2 0 3.2" },
 ]);
-const BedDouble = sketch("BedDouble", [
+export const BedDouble = sketch("BedDouble", [
   { d: "M3.1 19.7c-.2-3.1-.2-6.1 0-9.2 6-.3 11.9-.3 17.9 0 .2 3.1.2 6.1 0 9.2" },
   { d: "M3.2 15.2c5.9-.3 11.8-.3 17.7 0", f: true },
   { d: "M5 10.3c-.1-1.6-.1-3.2.1-4.8 4.6-.3 9.2-.3 13.8 0 .2 1.6.2 3.2.1 4.8M7.4 10.3c0-.8.1-1.5.3-2.2 1.2-.2 2.4-.2 3.5 0 .1.7.2 1.4.2 2.2M12.7 10.3c0-.8.1-1.5.3-2.2 1.2-.2 2.4-.2 3.5 0 .1.7.2 1.4.2 2.2" },
 ]);
-const Repeat = sketch("Repeat", [{ d: "M16.6 2.7c1.3 1 2.5 2.1 3.6 3.3-1.1 1.2-2.3 2.3-3.6 3.3M4 11.1c-.1-1.4 0-2.8.2-4.1 5.2-.4 10.5-.4 15.7-.1M7.4 21.3c-1.3-1-2.5-2.1-3.6-3.3 1.1-1.2 2.3-2.3 3.6-3.3M20 12.9c.1 1.4 0 2.8-.2 4.1-5.2.4-10.5.4-15.7.1" }]);
-const Users = sketch("Users", [
+export const Repeat = sketch("Repeat", [{ d: "M16.6 2.7c1.3 1 2.5 2.1 3.6 3.3-1.1 1.2-2.3 2.3-3.6 3.3M4 11.1c-.1-1.4 0-2.8.2-4.1 5.2-.4 10.5-.4 15.7-.1M7.4 21.3c-1.3-1-2.5-2.1-3.6-3.3 1.1-1.2 2.3-2.3 3.6-3.3M20 12.9c.1 1.4 0 2.8-.2 4.1-5.2.4-10.5.4-15.7.1" }]);
+export const Users = sketch("Users", [
   { d: "M9 3.9c2.1-.1 3.7 1.6 3.7 3.7 0 2.1-1.7 3.7-3.8 3.7-2 0-3.7-1.7-3.7-3.7.1-2.1 1.8-3.7 3.8-3.7Z", f: true },
   { d: "M2.6 20.5c-.2-3.4 2.6-6 6.4-6 3.8 0 6.6 2.6 6.4 6M16 4.2c1.8.4 3 2 2.9 3.8-.1 1.6-1.2 2.9-2.8 3.3M18.3 14.7c2 .7 3.3 2.9 3.1 5.8" },
 ]);
-const Flame = sketch("Flame", [{ d: "M12.3 2.6c.6 2.6 2.2 4 3.7 5.8 1.7 2 2.7 4.1 2.3 6.7-.5 3.3-3.3 5.8-6.6 5.7-3.4-.1-6.1-2.9-6.1-6.4 0-1.8.7-3.2 1.9-4.6.3 1.4 1 2.4 2.1 2.9-.6-3.6.6-7.4 2.7-10.1Z", f: true }]);
-const ListChecks = sketch("ListChecks", [
+export const Flame = sketch("Flame", [{ d: "M12.3 2.6c.6 2.6 2.2 4 3.7 5.8 1.7 2 2.7 4.1 2.3 6.7-.5 3.3-3.3 5.8-6.6 5.7-3.4-.1-6.1-2.9-6.1-6.4 0-1.8.7-3.2 1.9-4.6.3 1.4 1 2.4 2.1 2.9-.6-3.6.6-7.4 2.7-10.1Z", f: true }]);
+export const ListChecks = sketch("ListChecks", [
   { d: "M3.3 6.1c.6.5 1.2 1.1 1.7 1.8 1.1-1.4 2.2-2.7 3.5-3.9M3.3 13.6c.6.5 1.2 1.1 1.7 1.8 1.1-1.4 2.2-2.7 3.5-3.9" },
   { d: "M11.6 6.6c3.1-.2 6.2-.2 9.2 0M11.6 13.6c3.1-.2 6.2-.2 9.2 0M4 19.7c5.6-.2 11.2-.2 16.8 0" },
 ]);
-const Wallet = sketch("Wallet", [
+export const Wallet = sketch("Wallet", [
   { d: "M3.2 7.5c.1-1.5 1.1-2.5 2.6-2.6 4.6-.3 9.2-.3 13.8 0 .1 1 .1 2 0 3" },
   { d: "M3.2 7.6c.1 1 1 1.6 2 1.6 4.8-.2 9.6-.2 14.4 0 .9 0 1.4.6 1.4 1.4.1 2.8.1 5.6-.1 8.4-.1.8-.7 1.3-1.5 1.4-4.9.2-9.7.2-14.6 0-1-.1-1.7-.8-1.8-1.8-.2-3.7-.2-7.3.2-11Z", f: true },
   { d: "M16.3 14.4h.3" },
 ]);
-const Pencil = sketch("Pencil", [
+export const Pencil = sketch("Pencil", [
   { d: "M15.8 3.7c1.1-1 2.7-1 3.7 0l.8.8c1 1 1 2.6 0 3.7-3.8 3.9-7.7 7.6-11.7 11.2-1.6.4-3.3.7-5 .9.2-1.7.5-3.4.9-5 3.7-3.9 7.4-7.8 11.3-11.6Z", f: true },
   { d: "M14 5.6c1.6 1.2 3 2.7 4.3 4.3" },
 ]);
-const TrendingUp = sketch("TrendingUp", [{ d: "M2.7 17.6c2.2-2.4 4.5-4.7 6.9-6.9 1.5 1.3 2.9 2.7 4.3 4.2 2.4-2.6 4.8-5.1 7.4-7.5M15.3 7.2c1.9-.1 3.8-.1 5.8.1.2 1.9.2 3.8.1 5.7" }]);
-const Receipt = sketch("Receipt", [
+export const TrendingUp = sketch("TrendingUp", [{ d: "M2.7 17.6c2.2-2.4 4.5-4.7 6.9-6.9 1.5 1.3 2.9 2.7 4.3 4.2 2.4-2.6 4.8-5.1 7.4-7.5M15.3 7.2c1.9-.1 3.8-.1 5.8.1.2 1.9.2 3.8.1 5.7" }]);
+export const Receipt = sketch("Receipt", [
   { d: "M4.9 2.7c.2 6.2.2 12.4 0 18.6 1-.6 2-1.2 3-1.7 1 .6 2 1.1 3 1.6 1-.5 2-1.1 3-1.6 1 .6 2 1.1 3 1.7.2-6.2.2-12.4 0-18.6-1 .6-2 1.1-3 1.7-1-.6-2-1.1-3-1.7-1 .6-2 1.1-3 1.7-1-.6-2-1.1-3-1.7Z", f: true },
   { d: "M8.4 8.6c2.4-.2 4.8-.2 7.2 0M8.4 12.3c2.4-.2 4.8-.2 7.2 0M8.4 16c1.4-.1 2.7-.1 4 0" },
 ]);
-const Camera = sketch("Camera", [
+export const Camera = sketch("Camera", [
   { d: "M3.2 8.4c.1-1.2.9-2 2.1-2.1h2.2l1.4-2.1c2.2-.2 4.4-.2 6.6 0l1.4 2.1h2.2c1.2.1 2 .9 2.1 2.1.2 3.5.2 7 0 10.5-.1 1.2-.9 2-2.1 2.1-4.4.3-8.9.3-13.3 0-1.2-.1-2-.9-2.1-2.1-.2-3.5-.2-7-.1-10.5Z", f: true },
   { d: "M12 9.6c2 0 3.6 1.6 3.6 3.6 0 2-1.6 3.6-3.6 3.6-2 0-3.6-1.6-3.6-3.6 0-2 1.6-3.6 3.6-3.6Z" },
 ]);
-const FileText = sketch("FileText", [
+export const FileText = sketch("FileText", [
   { d: "M5.2 3.3c3-.2 6-.2 9 0l4.6 4.7c.2 4.1.2 8.3 0 12.4-4.5.3-9 .3-13.5 0-.3-5.7-.3-11.4-.1-17.1Z", f: true },
   { d: "M14 3.4c0 1.6 0 3.1.2 4.7 1.5.1 3 .1 4.6 0M8.4 12.4c2.4-.2 4.8-.2 7.2 0M8.4 16c2.4-.2 4.8-.2 7.2 0" },
 ]);
-const Maximize = sketch("Maximize", [{ d: "M3.6 8.4c-.1-1.6-.1-3.2.1-4.8 1.6-.2 3.2-.2 4.8 0M15.6 3.6c1.6-.2 3.2-.2 4.8 0 .2 1.6.2 3.2.1 4.8M20.4 15.6c.1 1.6.1 3.2-.1 4.8-1.6.2-3.2.2-4.8 0M8.4 20.4c-1.6.2-3.2.2-4.8 0-.2-1.6-.2-3.2-.1-4.8" }]);
-const Volume = sketch("Volume", [
+export const Maximize = sketch("Maximize", [{ d: "M3.6 8.4c-.1-1.6-.1-3.2.1-4.8 1.6-.2 3.2-.2 4.8 0M15.6 3.6c1.6-.2 3.2-.2 4.8 0 .2 1.6.2 3.2.1 4.8M20.4 15.6c.1 1.6.1 3.2-.1 4.8-1.6.2-3.2.2-4.8 0M8.4 20.4c-1.6.2-3.2.2-4.8 0-.2-1.6-.2-3.2-.1-4.8" }]);
+export const Volume = sketch("Volume", [
   { d: "M3.4 9.3c1.1-.2 2.3-.2 3.4 0 1.9-1.7 3.9-3.3 6-4.8.3 5 .3 10 0 15-2.1-1.5-4.1-3.1-6-4.8-1.1.2-2.3.2-3.4 0-.2-1.8-.2-3.6 0-5.4Z", f: true },
   { d: "M16.4 9c1.2 1.9 1.2 4.1 0 6M19 6.4c2.4 3.4 2.4 7.8 0 11.2" },
 ]);
-const Palette = sketch("Palette", [
+export const Palette = sketch("Palette", [
   { d: "M12 3.1c5 0 9 3.6 9 8.1 0 2.6-2.1 3.9-4.2 3.6-1.5-.2-2.5.9-1.9 2.3.6 1.4-.3 3.7-2.9 3.7-5 0-8.9-4-8.9-8.9 0-4.9 4-8.8 8.9-8.8Z", f: true },
   { d: "M7.6 11.2h.2M10.2 7.4h.2M14.6 7.4h.2" },
 ]);
-const Bookmark = sketch("Bookmark", [{ d: "M6.2 3.4c3.9-.2 7.7-.2 11.6 0 .3 5.8.3 11.6 0 17.4-2-1.6-3.9-3.1-5.8-4.5-1.9 1.4-3.8 2.9-5.8 4.5-.3-5.8-.3-11.6 0-17.4Z", f: true }]);
-const Database = sketch("Database", [
+export const Bookmark = sketch("Bookmark", [{ d: "M6.2 3.4c3.9-.2 7.7-.2 11.6 0 .3 5.8.3 11.6 0 17.4-2-1.6-3.9-3.1-5.8-4.5-1.9 1.4-3.8 2.9-5.8 4.5-.3-5.8-.3-11.6 0-17.4Z", f: true }]);
+export const Database = sketch("Database", [
   { d: "M12 3c4.4 0 8 1.3 8 3s-3.6 3-8 3-8-1.3-8-3 3.6-3 8-3Z", f: true },
   { d: "M4 6.1c-.1 4-.1 7.9.1 11.9.4 1.7 3.8 3 7.9 3s7.5-1.3 7.9-3c.2-4 .2-7.9.1-11.9M4.1 12c.4 1.6 3.8 2.9 7.9 2.9s7.5-1.3 7.9-2.9" },
 ]);
-const MoreVertical = sketch("MoreVertical", [{ d: "M12 4.6h.2M12 12h.2M12 19.4h.2" }]);
-const Sparkles = sketch("Sparkles", [
+export const MoreVertical = sketch("MoreVertical", [{ d: "M12 4.6h.2M12 12h.2M12 19.4h.2" }]);
+export const Sparkles = sketch("Sparkles", [
   { d: "M10.5 3.2c.6 3.2 2.3 5 5.5 5.8-3.2.7-4.9 2.6-5.5 5.8-.6-3.2-2.4-5.1-5.6-5.8 3.2-.8 5-2.6 5.6-5.8Z", f: true },
   { d: "M18.4 13.6c.3 1.5 1.1 2.3 2.6 2.7-1.5.3-2.3 1.2-2.6 2.7-.3-1.5-1.2-2.4-2.7-2.7 1.5-.4 2.4-1.2 2.7-2.7ZM5.6 16.4c.2 1 .8 1.6 1.8 1.8-1 .2-1.6.8-1.8 1.8-.2-1-.8-1.6-1.8-1.8 1-.2 1.6-.8 1.8-1.8Z" },
 ]);
 
 // ---------------------------------------------------------------- Primitives UI
-interface ToastAction { label: string; run: () => void }
-interface Toast { id: ID; text: string; tone: "ok" | "info" | "bad"; action?: ToastAction }
+export interface ToastAction { label: string; run: () => void }
+export interface Toast { id: ID; text: string; tone: "ok" | "info" | "bad"; action?: ToastAction }
 interface Ctx {
   state: AppState; dispatch: React.Dispatch<Action>; toast: (text: string, tone?: Toast["tone"], action?: ToastAction) => void;
   /** Exécute une action destructrice et propose « Annuler » pendant quelques secondes (restaure l'état précédent). */
   undoable: (a: Action, text: string) => void;
   go: (v: ViewKey) => void; openTask: (id: ID | null) => void; now: number;
+  env: AppEnv;
 }
 const StoreCtx = createContext<Ctx | null>(null);
 const useStore = () => { const c = useContext(StoreCtx); if (!c) throw new Error("StoreCtx manquant"); return c; };
 
-const Card: React.FC<{ title?: React.ReactNode; action?: React.ReactNode; className?: string; children: React.ReactNode }> = ({ title, action, className, children }) => (
+export const Card: React.FC<{ title?: React.ReactNode; action?: React.ReactNode; className?: string; children: React.ReactNode }> = ({ title, action, className, children }) => (
   <section className={cx("inked min-w-0 rounded-[20px] bg-panel", className)}>
     {(title || action) && (
       <header className="flex flex-wrap items-center justify-between gap-3 px-5 pt-4">
@@ -205,7 +209,7 @@ const Card: React.FC<{ title?: React.ReactNode; action?: React.ReactNode; classN
     <div className="p-5">{children}</div>
   </section>
 );
-const Btn: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "ghost" | "soft" | "danger"; size?: "sm" | "md" }> =
+export const Btn: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "ghost" | "soft" | "danger"; size?: "sm" | "md" }> =
   ({ variant = "soft", size = "md", className, ...p }) => (
     <button {...p} className={cx(
       "press inline-flex items-center justify-center gap-1.5 rounded-xl font-semibold disabled:pointer-events-none disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent",
@@ -216,37 +220,37 @@ const Btn: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 
       variant === "danger" && "text-bad hover:bg-bad/10",
       className)} />
   );
-const inputCls = "h-9 w-full min-w-0 rounded-xl border-2 border-line bg-panel transition-colors hover:border-fg/50 px-3 text-[13px] text-fg placeholder:text-muted/70 outline-none focus:border-accent focus:ring-2 focus:ring-accent/20";
-const Input = (p: React.InputHTMLAttributes<HTMLInputElement>) => <input {...p} className={cx(inputCls, p.className)} />;
-const Select = (p: React.SelectHTMLAttributes<HTMLSelectElement>) => <select {...p} className={cx(inputCls, "pr-7", p.className)} />;
-const Field: React.FC<{ label: string; htmlFor: string; children: React.ReactNode; className?: string }> = ({ label, htmlFor, children, className }) => (
+export const inputCls = "h-9 w-full min-w-0 rounded-xl border-2 border-line bg-panel transition-colors hover:border-fg/50 px-3 text-[13px] text-fg placeholder:text-muted/70 outline-none focus:border-accent focus:ring-2 focus:ring-accent/20";
+export const Input = (p: React.InputHTMLAttributes<HTMLInputElement>) => <input {...p} className={cx(inputCls, p.className)} />;
+export const Select = (p: React.SelectHTMLAttributes<HTMLSelectElement>) => <select {...p} className={cx(inputCls, "pr-7", p.className)} />;
+export const Field: React.FC<{ label: string; htmlFor: string; children: React.ReactNode; className?: string }> = ({ label, htmlFor, children, className }) => (
   <label htmlFor={htmlFor} className={cx("flex min-w-0 flex-col gap-1", className)}>
     <span className="text-[11px] font-medium uppercase tracking-wider text-muted">{label}</span>{children}
   </label>
 );
-const Pill: React.FC<{ tone?: "ok" | "warn" | "bad" | "info" | "muted"; children: React.ReactNode }> = ({ tone = "muted", children }) => (
+export const Pill: React.FC<{ tone?: "ok" | "warn" | "bad" | "info" | "muted"; children: React.ReactNode }> = ({ tone = "muted", children }) => (
   <span className={cx("inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-current/30 px-2 py-0.5 text-[11px] font-semibold",
     tone === "ok" && "bg-ok/12 text-ok", tone === "warn" && "bg-warn/15 text-warn", tone === "bad" && "bg-bad/12 text-bad",
     tone === "info" && "bg-accent/12 text-accent", tone === "muted" && "bg-sunken text-muted")}>{children}</span>
 );
-const Empty: React.FC<{ icon: React.ReactNode; title: string; hint: string; action?: React.ReactNode }> = ({ icon, title, hint, action }) => (
+export const Empty: React.FC<{ icon: React.ReactNode; title: string; hint: string; action?: React.ReactNode }> = ({ icon, title, hint, action }) => (
   <div className="flex flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-line px-6 py-10 text-center">
     <div className="sticker grid h-12 w-12 place-items-center rounded-2xl border-2 border-fg bg-hi text-[rgb(24_22_46)]">{icon}</div>
     <p className="font-display text-base font-bold text-fg">{title}</p>
     <p className="max-w-xs text-xs text-muted">{hint}</p>{action}
   </div>
 );
-const Kbd: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+export const Kbd: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <kbd className="rounded border border-line bg-sunken px-1.5 py-px font-mono text-[10px] text-muted">{children}</kbd>
 );
-const Stat: React.FC<{ label: string; value: string; sub?: string; tone?: "ok" | "warn" | "bad" }> = ({ label, value, sub, tone }) => (
+export const Stat: React.FC<{ label: string; value: string; sub?: string; tone?: "ok" | "warn" | "bad" }> = ({ label, value, sub, tone }) => (
   <div className="inked lift h-full min-w-0 rounded-[20px] bg-panel p-4">
     <p className="text-[11px] font-semibold uppercase tracking-[.12em] text-muted">{label}</p>
     <p key={value} className={cx("bump mt-1 font-display text-[22px] leading-tight min-[400px]:text-[26px] lg:text-[28px] font-extrabold tabular-nums tracking-tight", tone === "ok" ? "text-ok" : tone === "warn" ? "text-warn" : tone === "bad" ? "text-bad" : "text-fg")}>{value}</p>
     {sub && <p className="mt-0.5 truncate text-xs text-muted">{sub}</p>}
   </div>
 );
-const LoadMeter: React.FC<{ load: number; level: DayPlan["level"] }> = ({ load, level }) => {
+export const LoadMeter: React.FC<{ load: number; level: DayPlan["level"] }> = ({ load, level }) => {
   const tone = level === "surcharge" ? "bg-bad" : level === "chargé" ? "bg-warn" : "bg-ok";
   return (
     <div className="flex items-center gap-2">
@@ -258,7 +262,7 @@ const LoadMeter: React.FC<{ load: number; level: DayPlan["level"] }> = ({ load, 
 const levelTone = (l: DayPlan["level"]) => (l === "surcharge" ? "bad" : l === "chargé" ? "warn" : l === "équilibré" ? "info" : "ok") as "bad" | "warn" | "info" | "ok";
 
 /** Graphique en barres SVG à l'échelle, avec ligne d'objectif optionnelle. */
-const BarChart: React.FC<{ data: { label: string; value: number; missing?: boolean; tone?: "ok" | "warn" | "bad" | "accent" }[]; max?: number; goal?: number; unit?: (v: number) => string; height?: number }> =
+export const BarChart: React.FC<{ data: { label: string; value: number; missing?: boolean; tone?: "ok" | "warn" | "bad" | "accent" }[]; max?: number; goal?: number; unit?: (v: number) => string; height?: number }> =
   ({ data, max, goal, unit = (v) => String(Math.round(v)), height = 140 }) => {
     const W = 320, H = height, padL = 34, padB = 20, padT = 8;
     const top = Math.max(max ?? 0, goal ?? 0, ...data.map((d) => d.value), 1);
@@ -320,7 +324,7 @@ const TaskForm: React.FC<{ onDone: () => void; task?: Task }> = ({ onDone, task 
   );
 };
 
-const Modal: React.FC<{ title: string; onClose: () => void; children: React.ReactNode }> = ({ title, onClose, children }) => {
+export const Modal: React.FC<{ title: string; onClose: () => void; children: React.ReactNode }> = ({ title, onClose, children }) => {
   useEffect(() => { const k = (e: KeyboardEvent) => e.key === "Escape" && onClose(); window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, [onClose]);
   return (
     <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/40 backdrop-blur-[2px] animate-fade sm:items-start sm:px-4 sm:pt-[12vh]" onMouseDown={onClose}>
@@ -371,9 +375,9 @@ function idb<T>(mode: IDBTransactionMode, run: (st: IDBObjectStore) => IDBReques
     open.onsuccess = () => { const tx = open.result.transaction("files", mode); const rq = run(tx.objectStore("files")); rq.onsuccess = () => ok(rq.result as T); rq.onerror = () => ko(rq.error); };
   });
 }
-const fileSave = (k: string, v: Blob) => idb<void>("readwrite", (st) => st.put(v, k));
-const fileLoad = (k: string) => idb<Blob | undefined>("readonly", (st) => st.get(k));
-const fileDelete = (k: string) => idb<void>("readwrite", (st) => st.delete(k));
+export const fileSave = (k: string, v: Blob) => idb<void>("readwrite", (st) => st.put(v, k));
+export const fileLoad = (k: string) => idb<Blob | undefined>("readonly", (st) => st.get(k));
+export const fileDelete = (k: string) => idb<void>("readwrite", (st) => st.delete(k));
 
 // ---------------------------------------------------------------- Lecture de ticket de caisse
 const ReceiptScanner: React.FC<{ onResult: (r: ReceiptResult) => void; label?: string; className?: string }> = ({ onResult, label = "Scanner un ticket", className }) => {
@@ -637,22 +641,23 @@ async function renderPdf(blob: Blob, el: HTMLElement) {
   }
 }
 const TimetableImport: React.FC = () => {
-  const { state, dispatch, toast, undoable } = useStore();
+  const { state, dispatch, toast, undoable, env } = useStore();
+  const { files } = env;
   const ref = useRef<HTMLInputElement>(null);
   const [rows, setRows] = useState<Detected[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [hasPdf, setHasPdf] = useState(false);
   const [viewing, setViewing] = useState(false);
   const viewer = useRef<HTMLDivElement>(null);
-  useEffect(() => { fileLoad("timetable.pdf").then((b) => setHasPdf(!!b)).catch(() => {}); }, []);
+  useEffect(() => { files.load("timetable.pdf").then((b) => setHasPdf(!!b)).catch(() => {}); }, []);
   useEffect(() => {
     if (!viewing) return;
-    fileLoad("timetable.pdf").then((b) => b && viewer.current && renderPdf(b, viewer.current)).catch(() => toast("Affichage du PDF impossible ici.", "bad"));
+    files.load("timetable.pdf").then((b) => b && viewer.current && renderPdf(b, viewer.current)).catch(() => toast("Affichage du PDF impossible ici.", "bad"));
   }, [viewing]);
   const onFile = async (f: File) => {
     setBusy(true);
     try {
-      await fileSave("timetable.pdf", f).then(() => setHasPdf(true)).catch(() => {});
+      await files.save("timetable.pdf", f).then(() => setHasPdf(true)).catch(() => {});
       const found = await extractTimetable(await f.arrayBuffer());
       setRows(found);
       toast(found.length ? `${found.length} créneaux détectés : vérifiez-les avant d'importer.` : "Aucun horaire reconnu. Le PDF est gardé pour consultation ; ajoutez les cours à la main.", found.length ? "ok" : "info");
@@ -682,7 +687,7 @@ const TimetableImport: React.FC = () => {
       <div className="mt-3 flex flex-wrap gap-2">
         <Btn variant="primary" disabled={busy} onClick={() => ref.current?.click()}><Upload size={14} />{busy ? "Lecture…" : "Importer un PDF"}</Btn>
         {hasPdf && <Btn onClick={() => setViewing(true)}><FileText size={14} />Voir mon PDF</Btn>}
-        {hasPdf && <Btn variant="danger" onClick={() => fileDelete("timetable.pdf").then(() => { setHasPdf(false); toast("PDF retiré", "info"); })} aria-label="Retirer le PDF"><Trash2 size={13} /></Btn>}
+        {hasPdf && <Btn variant="danger" onClick={() => files.remove("timetable.pdf").then(() => { setHasPdf(false); toast("PDF retiré", "info"); })} aria-label="Retirer le PDF"><Trash2 size={13} /></Btn>}
         <input ref={ref} type="file" accept="application/pdf,.pdf" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); e.target.value = ""; }} />
       </div>
       {rows && rows.length > 0 && (
@@ -819,7 +824,7 @@ const Planning: React.FC = () => {
 };
 
 // ---------------------------------------------------------------- Module : Académique
-const STATUS: Record<TaskStatus, { label: string; color: string }> = {
+export const STATUS: Record<TaskStatus, { label: string; color: string }> = {
   todo: { label: "À faire", color: "rgb(var(--muted))" }, doing: { label: "En cours", color: "rgb(var(--accent))" },
   review: { label: "En révision", color: "rgb(var(--warn))" }, done: { label: "Terminé", color: "rgb(var(--ok))" },
 };
@@ -1590,7 +1595,7 @@ const ACCENTS: { k: string; label: string; light: string; dark: string }[] = [
   { k: "ocre", label: "Ocre", light: "176 110 0", dark: "245 180 60" },
   { k: "fuchsia", label: "Fuchsia", light: "212 30 120", dark: "255 110 170" },
 ];
-const accentCss = (k: string) => {
+export const accentCss = (k: string) => {
   const a = ACCENTS.find((x) => x.k === k) ?? ACCENTS[0];
   return `:root{--accent:${a.light}}@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--accent:${a.dark}}}:root[data-theme="dark"]{--accent:${a.dark}}`;
 };
@@ -1637,8 +1642,84 @@ const Personalize: React.FC = () => {
   );
 };
 
+// ---------------------------------------------------------------- Mon compte (mode connecté)
+export const SYNC_LABEL: Record<string, string> = { loading: "Chargement…", saving: "Enregistrement…", saved: "Enregistré", pending: "Modifications en attente", offline: "Hors ligne", error: "Erreur de synchronisation" };
+export const syncTone = (st: string) => (st === "saved" ? "ok" : st === "error" ? "bad" : st === "offline" ? "warn" : "info") as "ok" | "bad" | "warn" | "info";
+const AccountCard: React.FC = () => {
+  const { env, toast, state } = useStore();
+  const acc = env.account!, sync = env.sync;
+  const [name, setName] = useState(acc.displayName);
+  const [email, setEmail] = useState("");
+  const [pw, setPw] = useState({ a: "", b: "" });
+  const [busy, setBusy] = useState<string | null>(null);
+  const [confirmDel, setConfirmDel] = useState("");
+  const [askDel, setAskDel] = useState(false);
+  const run = async (key: string, fn: () => Promise<string | null>, ok: string) => {
+    setBusy(key); const err = await fn(); setBusy(null);
+    if (err) toast(err, "bad"); else toast(ok);
+    return !err;
+  };
+  const exportAll = () => {
+    const data = JSON.stringify({ exportedAt: new Date().toISOString(), account: { id: acc.id, email: acc.email, displayName: acc.displayName }, data: state }, null, 2);
+    try { const url = URL.createObjectURL(new Blob([data], { type: "application/json" })); const a = document.createElement("a"); a.href = url; a.download = `etudiant-os-mes-donnees-${todayISO()}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 2000); toast("Export téléchargé"); }
+    catch { navigator.clipboard?.writeText(data).then(() => toast("Export copié dans le presse-papiers"), () => toast("Export impossible dans ce navigateur", "bad")); }
+  };
+  const pwError = pw.a && (pw.a.length < 8 || !/[a-zA-Z]/.test(pw.a) || !/\d/.test(pw.a)) ? "8 caractères minimum, avec au moins une lettre et un chiffre." : pw.b && pw.a !== pw.b ? "Les deux mots de passe ne correspondent pas." : null;
+  return (
+    <Card title={<span className="flex items-center gap-2"><Users size={15} />Mon compte</span>} className="lg:col-span-2" action={sync && <Pill tone={syncTone(sync.status)}>{SYNC_LABEL[sync.status]}{sync.pending && sync.status !== "saved" ? ` · ${sync.pending}` : ""}</Pill>}>
+      <div className="grid gap-6 lg:grid-cols-3">
+        <div className="flex min-w-0 flex-col gap-3">
+          <div><p className="text-[11px] font-semibold uppercase tracking-[.12em] text-muted">Connecté en tant que</p><p className="mt-1 truncate font-semibold" data-testid="account-email">{acc.email}</p>
+            {acc.pendingEmail && <p className="mt-0.5 text-xs text-warn">Changement vers {acc.pendingEmail} en attente de confirmation (vérifiez vos deux boîtes mail).</p>}</div>
+          <form className="flex items-end gap-2" onSubmit={(e) => { e.preventDefault(); const n = name.trim(); if (!n || n.length > 80) { toast("Nom entre 1 et 80 caractères.", "bad"); return; } void run("name", () => acc.updateName(n), "Nom d'affichage mis à jour"); }}>
+            <Field label="Nom d'affichage" htmlFor="ac-name" className="flex-1"><Input id="ac-name" autoComplete="name" maxLength={80} value={name} onChange={(e) => setName(e.target.value)} /></Field>
+            <Btn type="submit" disabled={busy === "name" || name.trim() === acc.displayName}>{busy === "name" ? "…" : "Enregistrer"}</Btn>
+          </form>
+          <form className="flex items-end gap-2" onSubmit={(e) => { e.preventDefault(); const v = email.trim(); if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) { toast("Adresse e-mail invalide.", "bad"); return; }
+            void run("email", () => acc.updateEmail(v), "Lien de confirmation envoyé : validez le changement depuis vos boîtes mail.").then((ok) => { if (ok) setEmail(""); }); }}>
+            <Field label="Nouvelle adresse e-mail" htmlFor="ac-email" className="flex-1"><Input id="ac-email" type="email" autoComplete="email" placeholder="nouvelle@adresse.fr" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
+            <Btn type="submit" disabled={busy === "email" || !email}>{busy === "email" ? "…" : "Changer"}</Btn>
+          </form>
+        </div>
+        <form className="flex min-w-0 flex-col gap-3" onSubmit={(e) => { e.preventDefault(); if (!pw.a || !pw.b || pwError) { toast(pwError ?? "Remplissez les deux champs.", "bad"); return; }
+          void run("pw", () => acc.updatePassword(pw.a), "Mot de passe modifié").then((ok) => { if (ok) setPw({ a: "", b: "" }); }); }}>
+          <p className="text-[11px] font-semibold uppercase tracking-[.12em] text-muted">Mot de passe</p>
+          <Field label="Nouveau mot de passe" htmlFor="ac-pw"><Input id="ac-pw" type="password" autoComplete="new-password" value={pw.a} onChange={(e) => setPw({ ...pw, a: e.target.value })} aria-describedby="ac-pw-help" /></Field>
+          <Field label="Confirmer" htmlFor="ac-pw2"><Input id="ac-pw2" type="password" autoComplete="new-password" value={pw.b} onChange={(e) => setPw({ ...pw, b: e.target.value })} /></Field>
+          <p id="ac-pw-help" className={cx("text-[11px]", pwError ? "text-bad" : "text-muted")} aria-live="polite">{pwError ?? "8 caractères minimum, lettres et chiffres."}</p>
+          <Btn type="submit" disabled={busy === "pw"}>{busy === "pw" ? "Modification…" : "Changer le mot de passe"}</Btn>
+        </form>
+        <div className="flex min-w-0 flex-col gap-3">
+          <p className="text-[11px] font-semibold uppercase tracking-[.12em] text-muted">Synchronisation</p>
+          {sync && <div className="text-xs text-muted" data-testid="sync-detail">
+            <p>{sync.status === "saved" ? "Toutes vos modifications sont enregistrées dans votre compte." : sync.status === "offline" ? `Hors ligne : ${sync.pending} modification${sync.pending > 1 ? "s" : ""} en attente, envoyée${sync.pending > 1 ? "s" : ""} au retour de la connexion.` : sync.status === "error" ? sync.error : sync.status === "saving" ? "Enregistrement en cours…" : `${sync.pending} modification${sync.pending > 1 ? "s" : ""} en attente d'envoi.`}</p>
+            <p className="mt-1">Dernière synchronisation : {sync.lastSyncedAt ? new Date(sync.lastSyncedAt).toLocaleString("fr-FR") : "—"}</p>
+            {sync.conflicts > 0 && <p className="mt-1">{sync.conflicts} modification{sync.conflicts > 1 ? "s" : ""} simultanée{sync.conflicts > 1 ? "s" : ""} d'un autre appareil fusionnée{sync.conflicts > 1 ? "s" : ""} sans perte.</p>}
+            {(sync.status === "error" || sync.status === "offline" || sync.status === "pending") && <Btn size="sm" className="mt-2" onClick={sync.retry}><RotateCcw size={12} />Réessayer maintenant</Btn>}
+          </div>}
+          <div className="flex flex-wrap gap-2">
+            <Btn onClick={exportAll}><Download size={14} />Exporter mes données</Btn>
+            <Btn variant="ghost" onClick={() => void acc.signOut()}><X size={14} />Se déconnecter</Btn>
+          </div>
+          {!askDel ? <Btn variant="danger" className="self-start" onClick={() => setAskDel(true)}><Trash2 size={14} />Supprimer mon compte</Btn> : (
+            <div className="rounded-xl border-2 border-bad/50 bg-bad/5 p-3 text-xs">
+              <p className="font-semibold text-bad">Suppression définitive</p>
+              <p className="mt-1 text-muted">Votre compte, toutes vos données synchronisées et vos fichiers seront supprimés. Cette action est irréversible. Exportez vos données avant si besoin.</p>
+              <Field label="Tapez SUPPRIMER pour confirmer" htmlFor="ac-del" className="mt-2"><Input id="ac-del" value={confirmDel} onChange={(e) => setConfirmDel(e.target.value)} autoComplete="off" /></Field>
+              <div className="mt-2 flex gap-2">
+                <Btn size="sm" variant="danger" disabled={confirmDel !== "SUPPRIMER" || busy === "del"} onClick={() => void run("del", acc.deleteAccount, "Compte supprimé")}>{busy === "del" ? "Suppression…" : "Supprimer définitivement"}</Btn>
+                <Btn size="sm" variant="ghost" onClick={() => { setAskDel(false); setConfirmDel(""); }}>Annuler</Btn>
+              </div>
+            </div>)}
+        </div>
+      </div>
+    </Card>
+  );
+};
+
 const SettingsView: React.FC = () => {
-  const { state, dispatch, toast, undoable } = useStore();
+  const { state, dispatch, toast, undoable, env } = useStore();
+  const BKEY = `${env.ns}:backup`, CKEY = `${env.ns}:corrupt`;
   const s = state.settings;
   const [json, setJson] = useState("");
   const [confirmReset, setConfirmReset] = useState(false);
@@ -1647,13 +1728,13 @@ const SettingsView: React.FC = () => {
     navigator.clipboard?.writeText(text).then(() => toast("Sauvegarde JSON copiée dans le presse-papiers"), () => toast("Sauvegarde générée ci-dessous : sélectionnez et copiez", "info")); };
   const [pending, setPending] = useState<{ state: AppState; repaired: string | null } | null>(null);
   const readStore = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
-  const [backup, setBackup] = useState(() => readStore(BACKUP_KEY));
-  const corrupt = readStore(CORRUPT_KEY);
+  const [backup, setBackup] = useState(() => readStore(BKEY));
+  const corrupt = readStore(CKEY);
   const download = (text: string, name: string) => {
     try { const url = URL.createObjectURL(new Blob([text], { type: "application/json" })); const a = document.createElement("a"); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 2000); } catch { /* téléchargement bloqué : le texte reste copiable */ }
   };
   /** Copie de sécurité de l'état actuel avant toute opération qui le remplace. */
-  const snapshot = () => { try { const t = JSON.stringify({ ...state, savedAt: new Date().toISOString() }); localStorage.setItem(BACKUP_KEY, t); setBackup(t); return true; } catch { return false; } };
+  const snapshot = () => { try { const t = JSON.stringify({ ...state, savedAt: new Date().toISOString() }); localStorage.setItem(BKEY, t); setBackup(t); return true; } catch { return false; } };
   // Étape 1 : lecture et validation ; étape 2 : confirmation explicite avant de remplacer les données.
   const importJson = (text: string) => {
     let parsed: unknown;
@@ -1674,12 +1755,13 @@ const SettingsView: React.FC = () => {
     if (!r || !r.ok) { toast("La copie de sécurité est illisible.", "bad"); return; }
     const current = JSON.stringify(state);
     dispatch({ type: "replace", state: r.state });
-    try { localStorage.setItem(BACKUP_KEY, current); setBackup(current); } catch { /* ignore */ }
+    try { localStorage.setItem(BKEY, current); setBackup(current); } catch { /* ignore */ }
     toast("Copie de sécurité restaurée. L'état précédent devient la nouvelle copie (échange possible).");
   };
   const set = (patch: Partial<SettingsState>) => dispatch({ type: "settings", patch });
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      {env.account && <AccountCard />}
       <Card title="Profil & rythme">
         <div className="grid grid-cols-2 gap-3">
           <Field label="Prénom" htmlFor="st-name"><Input id="st-name" value={s.name} onChange={(e) => set({ name: e.target.value })} /></Field>
@@ -1718,7 +1800,7 @@ const SettingsView: React.FC = () => {
         {backup && <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted"><span className="min-w-0 flex-1">Copie de sécurité disponible{(() => { try { const d = JSON.parse(backup).savedAt; return d ? ` (${new Date(d).toLocaleString("fr-FR")})` : ""; } catch { return ""; } })()}.</span><Btn size="sm" onClick={restoreBackup}><RotateCcw size={12} />Restaurer</Btn></div>}
         {corrupt && <div className="mt-3 rounded-xl border border-bad/30 bg-bad/5 p-3 text-xs"><p className="text-bad">Des données illisibles ont été conservées lors d'un chargement précédent.</p>
           <div className="mt-2 flex flex-wrap gap-2"><Btn size="sm" onClick={() => { setJson(corrupt); toast("Données brutes affichées ci-dessus : corrigez-les puis importez.", "info"); }}>Afficher</Btn><Btn size="sm" onClick={() => download(corrupt, "etudiant-os-illisible.json")}>Télécharger</Btn></div></div>}
-        <p className="mt-3 text-xs text-muted">Les données restent dans ce navigateur (localStorage), sur cet appareil uniquement. Exportez-les régulièrement ; l'import vérifie et répare le fichier avant de remplacer quoi que ce soit.</p>
+        <p className="mt-3 text-xs text-muted">{env.mode === "cloud" ? "Vos données sont enregistrées dans votre compte et synchronisées entre vos appareils. L'import vérifie et répare le fichier avant de remplacer quoi que ce soit ; une copie de sécurité reste sur cet appareil." : "Mode local : les données restent dans ce navigateur, sur cet appareil uniquement. Créez un compte pour les retrouver sur vos autres appareils. L'import vérifie et répare le fichier avant de remplacer quoi que ce soit."}</p>
       </Card>
     </div>
   );
@@ -1726,7 +1808,8 @@ const SettingsView: React.FC = () => {
 
 // ---------------------------------------------------------------- Premier lancement
 const Onboarding: React.FC<{ onDone: (s: AppState) => void }> = ({ onDone }) => {
-  const [f, setF] = useState({ name: "", roommates: "", budget: "600", wake: "07:30", bed: "23:30", sleepGoal: 8 });
+  const { env } = useStore();
+  const [f, setF] = useState({ name: env.account?.displayName ?? "", roommates: "", budget: "600", wake: "07:30", bed: "23:30", sleepGoal: 8 });
   const settings = (): Partial<SettingsState> => ({ name: f.name.trim() || "Moi", roommates: f.roommates.split(",").map((x) => x.trim()).filter(Boolean), wakeDefault: f.wake, bedDefault: f.bed, sleepGoal: f.sleepGoal });
   const start = (e: React.FormEvent) => { e.preventDefault(); onDone(blank(settings(), parseAmount(f.budget) || 600)); };
   const demo = () => { const s = seed(); onDone({ ...s, settings: { ...s.settings, onboarded: true } }); };
@@ -1798,7 +1881,7 @@ const NAV: { key: ViewKey; label: string; icon: React.FC<{ size?: number }>; sho
 ];
 
 /** Menu complet sur téléphone, ouvert depuis le bouton ⋮ de l'en-tête (remplace la barre du bas). */
-const MobileMenu: React.FC<{ items: typeof NAV; view: ViewKey; plan: DayPlan; onPick: (k: ViewKey) => void; onSearch: () => void; onTheme: () => void; isDark: boolean; onClose: () => void }> = ({ items, view, plan, onPick, onSearch, onTheme, isDark, onClose }) => {
+const MobileMenu: React.FC<{ items: typeof NAV; view: ViewKey; plan: DayPlan; onPick: (k: ViewKey) => void; onSearch: () => void; onTheme: () => void; isDark: boolean; onClose: () => void; extra?: React.ReactNode }> = ({ items, view, plan, onPick, onSearch, onTheme, isDark, onClose, extra }) => {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
@@ -1824,12 +1907,13 @@ const MobileMenu: React.FC<{ items: typeof NAV; view: ViewKey; plan: DayPlan; on
       <div className="mt-2 border-t-2 border-dashed border-line px-1 pt-2">
         <button role="menuitem" onClick={onSearch} className="flex w-full items-center gap-3 rounded-xl px-2 py-2.5 text-left text-[14px] text-muted hover:bg-sunken"><Search size={17} />Rechercher</button>
         <button role="menuitem" onClick={onTheme} className="flex w-full items-center gap-3 rounded-xl px-2 py-2.5 text-left text-[14px] text-muted hover:bg-sunken">{isDark ? <Sun size={17} /> : <Moon size={17} />}{isDark ? "Thème clair" : "Thème sombre"}</button>
+        {extra}
         <div className="px-2 pb-1 pt-2"><p className="mb-1.5 text-[11px] uppercase tracking-wider text-muted">Charge du jour</p><LoadMeter load={plan.load} level={plan.level} /></div>
       </div>
     </div>
   );
 };
-const ToastStack: React.FC<{ toasts: Toast[] }> = ({ toasts }) => (
+export const ToastStack: React.FC<{ toasts: Toast[] }> = ({ toasts }) => (
   <div className="pointer-events-none fixed z-[60] flex flex-col items-end gap-2" style={{ bottom: "calc(16px + env(safe-area-inset-bottom, 0px))", right: "calc(16px + env(safe-area-inset-right, 0px))", left: "calc(16px + env(safe-area-inset-left, 0px))" }}>
     {toasts.map((t) => (
       <div key={t.id} role="status" className={cx("inked pointer-events-auto flex max-w-sm items-center gap-2 rounded-2xl px-3.5 py-2.5 text-[13px] font-semibold animate-slide", t.tone === "bad" ? "bg-pink text-white" : "bg-hi text-[rgb(24_22_46)]")}>
@@ -1840,13 +1924,19 @@ const ToastStack: React.FC<{ toasts: Toast[] }> = ({ toasts }) => (
 );
 
 // ---------------------------------------------------------------- Application racine
-export default function StudentOS() {
-  const [boot] = useState(() => loadState());
-  const [state, dispatch] = useReducer(reducer, boot.state);
+export interface StudentOSProps {
+  state: AppState; dispatch: (a: Action) => void; env: AppEnv;
+  view: ViewKey; onView: (v: ViewKey) => void;
+  /** Message à afficher au démarrage (données réparées, stockage indisponible…). */
+  notice?: string | null;
+  /** Contenu ajouté sous l'en-tête (statut de synchronisation…) et dans le menu (déconnexion…). */
+  headerExtra?: React.ReactNode; menuExtra?: React.ReactNode;
+}
+export default function StudentOS({ state, dispatch, env, view, onView, notice, headerExtra, menuExtra }: StudentOSProps) {
   const stateRef = useRef(state); stateRef.current = state;
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [editTask, setEditTask] = useState<ID | null>(null);
-  const [view, setViewRaw] = useState<ViewKey>(() => { try { return (localStorage.getItem(STORAGE_KEY + ":view") as ViewKey) || "dashboard"; } catch { return "dashboard"; } });
+  const setViewRaw = onView;
   const [palette, setPalette] = useState(false);
   // Changement de module animé : View Transitions API si disponible, sinon simple entrée échelonnée.
   const setView = useCallback((v: ViewKey) => {
@@ -1855,18 +1945,12 @@ export default function StudentOS() {
     if (doc.startViewTransition && !reduce) doc.startViewTransition(() => flushSync(() => setViewRaw(v)));
     else setViewRaw(v);
     window.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" });
-  }, []);
+  }, [onView]);
   const [newTask, setNewTask] = useState(false);
   const [menu, setMenu] = useState(false);
   const [help, setHelp] = useState(false);
 
-  // Sauvegarde locale à chaque changement ; un échec (quota, mode privé) est signalé une fois au lieu d'être ignoré.
-  const saveFailed = useRef(false);
-  useEffect(() => {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); saveFailed.current = false; }
-    catch { if (!saveFailed.current) { saveFailed.current = true; toast("Enregistrement impossible dans ce navigateur (stockage plein ou bloqué). Exportez vos données depuis Réglages.", "bad"); } }
-  }, [state]);
-  useEffect(() => { if (boot.notice) toast(boot.notice, "bad"); }, []);
+  useEffect(() => { if (notice) toast(notice, "bad"); }, [notice]);
   // Dépenses récurrentes : ajoutées le jour venu (au chargement puis toutes les heures, sans doublon).
   // Relancé aussi quand la liste des récurrentes change (import, données d'exemple) ; l'opération est idempotente.
   useEffect(() => { const sync = () => dispatch({ type: "recurring/sync", today: todayISO() }); sync(); const id = window.setInterval(sync, 3600_000); return () => window.clearInterval(id); }, [state.budget.recurring]);
@@ -1892,10 +1976,10 @@ export default function StudentOS() {
     const t = state.timer, left = timerLeft(t, now);
     document.title = t.running ? `${pad(Math.floor(left / 60))}:${pad(left % 60)} · ${PHASE_LABEL[t.phase]}` : "Étudiant OS";
   }, [now, state.timer]);
-  useEffect(() => { try { localStorage.setItem(STORAGE_KEY + ":view", view); } catch { /* idem */ } }, [view]);
   useEffect(() => {
     const root = document.documentElement;
     if (state.settings.theme === "system") root.removeAttribute("data-theme"); else root.setAttribute("data-theme", state.settings.theme);
+    try { localStorage.setItem("etudiant-os/theme", JSON.stringify(state.settings.theme)); } catch { /* facultatif */ }
   }, [state.settings.theme]);
 
   const toast = useCallback((text: string, tone: Toast["tone"] = "ok", action?: ToastAction) => {
@@ -1908,8 +1992,8 @@ export default function StudentOS() {
     const prev = stateRef.current;
     dispatch(a);
     toast(text, "info", { label: "Annuler", run: () => { dispatch({ type: "replace", state: prev }); toast("Action annulée", "info"); } });
-  }, [toast]);
-  const ctx = useMemo(() => ({ state, dispatch, toast, undoable, go: setView, openTask: setEditTask, now }), [state, toast, undoable, setView, now]);
+  }, [toast, dispatch]);
+  const ctx = useMemo(() => ({ state, dispatch, toast, undoable, go: setView, openTask: setEditTask, now, env }), [state, dispatch, toast, undoable, setView, now, env]);
   const isDark = state.settings.theme === "dark" || (state.settings.theme === "system" && typeof matchMedia !== "undefined" && matchMedia("(prefers-color-scheme: dark)").matches);
   const toggleTheme = () => dispatch({ type: "settings", patch: { theme: isDark ? "light" : "dark" } });
 
@@ -1971,6 +2055,7 @@ export default function StudentOS() {
           <div className="mt-auto flex flex-col gap-2">
             <div className="inked hidden rounded-2xl bg-panel p-3 lg:block"><p className="mb-1.5 text-[11px] uppercase tracking-wider text-muted">Charge du jour</p><LoadMeter load={plan.load} level={plan.level} /></div>
             <button onClick={() => setPalette(true)} aria-label="Rechercher" className="flex items-center justify-center gap-2 lg:justify-start rounded-xl border border-line bg-panel px-2.5 py-1.5 text-xs text-muted hover:text-fg"><Search size={13} /><span className="hidden flex-1 text-left lg:inline">Rechercher</span><span className="hidden lg:inline"><Kbd>Ctrl K</Kbd></span></button>
+            {menuExtra && <div className="hidden lg:block">{menuExtra}</div>}
           </div>
         </aside>
         <div className="flex min-w-0 flex-1 flex-col">
@@ -1978,13 +2063,14 @@ export default function StudentOS() {
             <div className="mx-auto flex max-w-6xl 2xl:max-w-[1560px] min-[2200px]:max-w-[1880px] items-center gap-3 py-3 px-4 sm:px-6">
               <div className="min-w-0 flex-1"><p className="truncate text-xs text-muted">{greet} {state.settings.name}<span className="hidden min-[400px]:inline"> · {new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}</span></p>
                 <h1 className="truncate pb-0.5 font-display text-[19px] min-[400px]:text-[21px] sm:text-[26px] font-extrabold leading-tight tracking-tight"><span key={view} className="marker">{current.label}<svg viewBox="0 0 200 20" preserveAspectRatio="none" aria-hidden><path d="M2 12 C 40 6, 80 16, 120 9 S 180 6, 198 11" /></svg></span></h1></div>
-              <span className="hidden sm:inline-flex"><Pill tone={levelTone(plan.level)}>Journée {plan.level}</Pill></span>
+              {headerExtra}
+              <span className="hidden lg:inline-flex"><Pill tone={levelTone(plan.level)}>Journée {plan.level}</Pill></span>
               <Btn variant="ghost" size="sm" className="hidden lg:inline-flex" onClick={() => setHelp(true)} aria-label="Raccourcis"><Keyboard size={15} /></Btn>
               <Btn variant="ghost" size="sm" onClick={toggleTheme} aria-label="Changer de thème" className="hidden min-[400px]:inline-flex">{isDark ? <Sun size={15} /> : <Moon size={15} />}</Btn>
               <Btn variant="primary" size="sm" onClick={() => setNewTask(true)} aria-label="Nouvelle tâche"><Plus size={14} /><span className="hidden sm:inline">Tâche</span></Btn>
               <div className="relative md:hidden">
                 <Btn variant="soft" size="sm" aria-label="Menu" aria-expanded={menu} aria-haspopup="menu" onClick={() => setMenu(!menu)} className={cx(menu && "bg-hi/60")}><MoreVertical size={18} strokeWidth={3} /></Btn>
-                {menu && <MobileMenu items={navItems} view={view} plan={plan} onPick={(k) => { setMenu(false); setView(k); }} onSearch={() => { setMenu(false); setPalette(true); }} onTheme={toggleTheme} isDark={isDark} onClose={() => setMenu(false)} />}
+                {menu && <MobileMenu items={navItems} view={view} plan={plan} onPick={(k) => { setMenu(false); setView(k); }} onSearch={() => { setMenu(false); setPalette(true); }} onTheme={toggleTheme} isDark={isDark} onClose={() => setMenu(false)} extra={menuExtra} />}
               </div>
             </div>
           </header>

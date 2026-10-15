@@ -1,0 +1,48 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  checks:
+    name: Types, tests de logique, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: node scripts/build.mjs --local-only
+        env: { BASE_PATH: /etudiant-os/ }
+
+  backend:
+    name: Base de données, sécurité et parcours complets (Supabase local)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - uses: supabase/setup-cli@v1
+        with: { version: 2.45.5 }
+      - name: Démarrer Supabase
+        run: supabase start -x studio,imgproxy,vector,logflare,supavisor,postgres-meta,edge-runtime
+      - name: Variables locales (clé publique de la stack de test)
+        run: |
+          eval "$(supabase status -o env | sed 's/^/export /')"
+          echo "SUPABASE_URL=$API_URL" >> "$GITHUB_ENV"
+          echo "SUPABASE_ANON_KEY=$ANON_KEY" >> "$GITHUB_ENV"
+      - run: npm run test:db
+      - name: Navigateur
+        run: |
+          npx --yes playwright@1.47.0 install --with-deps chromium
+          echo "CHROMIUM_PATH=$(find ~/.cache/ms-playwright -path '*chrome-linux/chrome' | head -1)" >> "$GITHUB_ENV"
+      - name: Build de test et serveur
+        run: |
+          BASE_PATH=/etudiant-os/ SITE_URL=http://127.0.0.1:5173/etudiant-os/ node scripts/build.mjs --dev
+          (node scripts/serve.mjs &) && sleep 1
+      - run: npm run test:e2e

@@ -1,0 +1,44 @@
+# Publie le site sur GitHub Pages.
+# Prérequis (une fois) : Settings → Pages → Source : « GitHub Actions » ;
+# Settings → Secrets and variables → Actions → onglet Variables : SUPABASE_URL, SUPABASE_ANON_KEY (clé PUBLIQUE),
+# éventuellement SITE_URL, BASE_PATH, GOOGLE_AUTH. Aucun secret n'est nécessaire pour le site.
+name: Déploiement
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run typecheck && npm test
+      - name: Build
+        run: node scripts/build.mjs
+        env:
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+          BASE_PATH: ${{ vars.BASE_PATH || '/etudiant-os/' }}
+          SITE_URL: ${{ vars.SITE_URL || 'https://fedizzz.github.io/etudiant-os/' }}
+          GOOGLE_AUTH: ${{ vars.GOOGLE_AUTH || '0' }}
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: dist }
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

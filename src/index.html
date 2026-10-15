@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Étudiant.OS — Tes études, ton organisation, un seul espace</title>
+<meta name="description" content="Planning automatique, focus, budget, courses, ménage en colocation et sommeil : l'espace d'organisation des étudiants, gratuit, sur ordinateur, tablette et téléphone.">
+<link rel="canonical" href="%SITE_URL%">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Étudiant.OS">
+<meta property="og:title" content="Étudiant.OS — Tes études, ton organisation, un seul espace">
+<meta property="og:description" content="Planning automatique, focus, budget, courses, ménage et sommeil, au même endroit.">
+<meta property="og:url" content="%SITE_URL%">
+<meta property="og:image" content="%SITE_URL%og-image.jpg">
+<meta property="og:locale" content="fr_FR">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#eeecf4">
+<link rel="manifest" href="%BASE%manifest.webmanifest">
+<link rel="icon" href="%BASE%icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="%BASE%apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Étudiant.OS">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&amp;family=Instrument+Sans:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap">
+<link rel="stylesheet" href="%BASE%assets/app.css?v=%HASH%">
+<script>
+  window.__INITIAL_HASH__ = location.hash;
+  // Thème appliqué avant le premier rendu (évite un flash clair en mode sombre).
+  try { var t = JSON.parse(localStorage.getItem("etudiant-os/theme") || "null"); if (t === "dark" || t === "light") document.documentElement.setAttribute("data-theme", t); } catch (e) {}
+</script>
+</head>
+<body>
+<div id="root"><div id="boot" role="status">Chargement d'Étudiant.OS…</div></div>
+<noscript><p style="padding:24px;font-family:sans-serif">Étudiant.OS a besoin de JavaScript pour fonctionner.</p></noscript>
+<script type="module" src="%BASE%assets/app.js?v=%HASH%"></script>
+</body>
+</html>
