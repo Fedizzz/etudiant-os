@@ -1,7 +1,9 @@
 """Génère etudiant-os.html (artifact autonome) à partir de StudentOS.tsx."""
 import re, pathlib
 here = pathlib.Path(__file__).parent
-src = (here / "StudentOS.tsx").read_text()
+core = (here / "core.ts").read_text()
+core = re.sub(r"^export ", "", core, flags=re.M)
+src = core + "\n" + (here / "StudentOS.tsx").read_text()
 src = re.sub(r'^import React, \{([^}]*)\} from "react";', r'const {\1} = React;', src, flags=re.M)
 src = re.sub(r'^import \{([^}]*)\} from "lucide-react";', r'const {\1} = Icons;', src, flags=re.M | re.S)
 src = re.sub(r'^import \{([^}]*)\} from "react-dom";', r'const {\1} = ReactDOM;', src, flags=re.M)
