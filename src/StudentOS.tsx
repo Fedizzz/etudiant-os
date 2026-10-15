@@ -564,7 +564,7 @@ const Kbd: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 const Stat: React.FC<{ label: string; value: string; sub?: string; tone?: "ok" | "warn" | "bad" }> = ({ label, value, sub, tone }) => (
   <div className="inked lift h-full min-w-0 rounded-[20px] bg-panel p-4">
     <p className="text-[11px] font-semibold uppercase tracking-[.12em] text-muted">{label}</p>
-    <p key={value} className={cx("bump mt-1 font-display text-[28px] leading-tight font-extrabold tabular-nums tracking-tight", tone === "ok" ? "text-ok" : tone === "warn" ? "text-warn" : tone === "bad" ? "text-bad" : "text-fg")}>{value}</p>
+    <p key={value} className={cx("bump mt-1 font-display text-[22px] leading-tight min-[400px]:text-[26px] lg:text-[28px] font-extrabold tabular-nums tracking-tight", tone === "ok" ? "text-ok" : tone === "warn" ? "text-warn" : tone === "bad" ? "text-bad" : "text-fg")}>{value}</p>
     {sub && <p className="mt-0.5 truncate text-xs text-muted">{sub}</p>}
   </div>
 );
@@ -697,12 +697,12 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void }> = ({ go }) => {
           <Btn size="sm" className="ml-auto shrink-0" onClick={() => go("planning")}>Voir le planning</Btn>
         </div>
       )}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-6 md:[&>*]:col-span-2 md:[&>*:nth-child(n+4)]:col-span-3 xl:grid-cols-5 xl:[&>*]:col-span-1 xl:[&>*:nth-child(n+4)]:col-span-1">
+      <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2 md:grid-cols-6 md:[&>*]:col-span-2 md:[&>*:nth-child(n+4)]:col-span-3 xl:grid-cols-5 xl:[&>*]:col-span-1 xl:[&>*:nth-child(n+4)]:col-span-1">
         <Stat label="Focus · 7 jours" value={fmtDur(focusWeek)} sub={prevWeek ? `${delta >= 0 ? "+" : ""}${delta} % vs semaine précédente` : "Première semaine"} tone={delta >= 0 ? "ok" : "warn"} />
         <Stat label="Tâches terminées" value={String(doneWeek)} sub={`${open.length} ouvertes · ${late} en retard`} tone={late ? "bad" : undefined} />
         <Stat label="Dette de sommeil" value={`${debt > 0 ? "−" : "+"}${fmtDur(Math.abs(debt))}`} sub={`Objectif ${state.settings.sleepGoal} h / nuit`} tone={debt > 240 ? "bad" : debt > 60 ? "warn" : "ok"} />
         <Stat label="Moyenne pondérée" value={avg === null ? "—" : `${avg.toFixed(2)}`} sub="sur 20, coefficients inclus" tone={avg !== null && avg < 10 ? "bad" : undefined} />
-        <button onClick={() => go("budget")} className="col-span-2 text-left"><Stat label="Budget restant" value={money(budgetLeft, state.settings.currency)} sub={`${money(monthSpent, state.settings.currency)} dépensés ce mois`} tone={budgetLeft < 0 ? "bad" : budgetLeft < state.budget.monthly * 0.15 ? "warn" : "ok"} /></button>
+        <button onClick={() => go("budget")} className="text-left min-[360px]:col-span-2"><Stat label="Budget restant" value={money(budgetLeft, state.settings.currency)} sub={`${money(monthSpent, state.settings.currency)} dépensés ce mois`} tone={budgetLeft < 0 ? "bad" : budgetLeft < state.budget.monthly * 0.15 ? "warn" : "ok"} /></button>
       </div>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         <Card title="Temps de focus" className="md:col-span-2" action={<Pill tone="info">7 derniers jours</Pill>}>
@@ -1203,7 +1203,7 @@ const BudgetView: React.FC = () => {
             onBlur={(e) => { const v = parseAmount(e.target.value); if (v > 0 && v !== state.budget.monthly) { dispatch({ type: "budget/set", patch: { monthly: v } }); toast("Budget mensuel mis à jour"); } }} /><span className="text-xs text-muted">{cur}</span></div>
       </div>
       {isCurrent && remaining < 0 && <div className="flex items-center gap-2 rounded-2xl border border-bad/30 bg-bad/8 px-4 py-3 text-sm text-bad"><AlertTriangle size={16} />Budget dépassé de {money(-remaining, cur)} ce mois-ci.</div>}
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2 xl:grid-cols-4">
         <Stat label="Dépensé" value={money(spent, cur)} sub={`${Math.round((spent / Math.max(1, state.budget.monthly)) * 100)} % du budget`} />
         <Stat label="Restant" value={money(remaining, cur)} sub={isCurrent ? `${money(Math.max(0, perDayLeft), cur)} / jour jusqu'à la fin du mois` : undefined} tone={remaining < 0 ? "bad" : "ok"} />
         <Stat label="Projection fin de mois" value={elapsed ? money(projection, cur) : "—"} sub="au rythme actuel" tone={tone === "ok" ? undefined : tone} />
@@ -1573,7 +1573,7 @@ export default function StudentOS() {
     <StoreCtx.Provider value={ctx}>
       <PencilDefs />
       <div className="flex min-h-full bg-bg text-fg">
-        <aside className="sticky top-0 hidden h-screen w-[76px] shrink-0 flex-col p-3 md:flex lg:w-60">
+        <aside className="sticky top-0 hidden h-screen w-[76px] shrink-0 flex-col overflow-y-auto p-3 md:flex lg:w-60 2xl:w-64">
           <div className="mb-6 flex items-center gap-2.5 px-1 pt-2 lg:px-2"><div className="sticker grid h-9 w-9 place-items-center rounded-xl border-2 border-fg bg-pink text-white shadow-[3px_3px_0_0_rgb(var(--ink))]"><ListChecks size={17} /></div><span className="hidden font-display text-[19px] font-extrabold leading-none tracking-tight lg:inline">Étudiant<span className="text-accent">.</span>OS</span></div>
           <nav className="relative flex flex-col gap-0.5">
             <span aria-hidden className="absolute inset-x-0 top-0 h-10 rounded-xl border-2 border-fg bg-hi shadow-[3px_3px_0_0_rgb(var(--ink))] transition-transform duration-500 [transition-timing-function:var(--spring)]"
@@ -1588,7 +1588,7 @@ export default function StudentOS() {
         </aside>
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="sticky top-0 z-20 border-b-2 border-dashed border-line bg-bg/80 backdrop-blur-md" style={{ top: "env(safe-area-inset-top, 0px)" }}>
-            <div className="mx-auto flex max-w-6xl items-center gap-3 py-3 px-4 sm:px-6">
+            <div className="mx-auto flex max-w-6xl 2xl:max-w-[1560px] min-[2200px]:max-w-[1880px] items-center gap-3 py-3 px-4 sm:px-6">
               <div className="min-w-0 flex-1"><p className="text-xs text-muted">{greet} {state.settings.name} · {new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}</p>
                 <h1 className="truncate pb-0.5 font-display text-[21px] sm:text-[26px] font-extrabold leading-tight tracking-tight"><span key={view} className="marker">{current.label}<svg viewBox="0 0 200 20" preserveAspectRatio="none" aria-hidden><path d="M2 12 C 40 6, 80 16, 120 9 S 180 6, 198 11" /></svg></span></h1></div>
               <span className="hidden sm:inline-flex"><Pill tone={levelTone(plan.level)}>Journée {plan.level}</Pill></span>
@@ -1597,7 +1597,7 @@ export default function StudentOS() {
               <Btn variant="primary" size="sm" onClick={() => setNewTask(true)} aria-label="Nouvelle tâche"><Plus size={14} /><span className="hidden sm:inline">Tâche</span></Btn>
             </div>
           </header>
-          <main key={view} className="page stagger mx-auto w-full max-w-6xl flex-1 px-4 pb-28 pt-5 sm:px-6 md:pb-8">
+          <main key={view} className="page stagger mx-auto w-full max-w-6xl 2xl:max-w-[1560px] min-[2200px]:max-w-[1880px] flex-1 px-4 pb-28 pt-5 sm:px-6 md:pb-8">
             {view === "dashboard" && <Dashboard go={setView} />}
             {view === "planning" && <Planning />}
             {view === "academic" && <Academic openNewTask={() => setNewTask(true)} />}
