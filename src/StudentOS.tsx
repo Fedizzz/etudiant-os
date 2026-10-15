@@ -1,0 +1,1481 @@
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import {
+  LayoutDashboard, CalendarClock, GraduationCap, Timer, ShoppingCart, Home, Moon, Settings, Plus, Trash2, Check,
+  Download, Upload, Sun, Search, AlertTriangle, Play, Pause, RotateCcw, SkipForward, X, Keyboard, Zap, Coffee,
+  BedDouble, ChevronLeft, ChevronRight, Repeat, Users, Flame, ListChecks, Wallet, Pencil, TrendingUp, Receipt, Sparkles,
+} from "lucide-react";
+import { flushSync } from "react-dom";
+
+/* ============================================================================
+ * Étudiant OS — un seul composant racine, modules découpés, état typé,
+ * persistance localStorage, export/import JSON.
+ * ========================================================================== */
+
+// ---------------------------------------------------------------- Types
+type ID = string;
+type TaskStatus = "todo" | "doing" | "review" | "done";
+type TaskKind = "devoir" | "examen" | "projet";
+type Priority = 1 | 2 | 3;
+type Recurrence = "daily" | "weekly" | "biweekly";
+type Aisle = "Frais" | "Fruits & légumes" | "Épicerie" | "Boissons" | "Surgelés" | "Hygiène" | "Entretien";
+type ViewKey = "dashboard" | "planning" | "academic" | "focus" | "groceries" | "budget" | "chores" | "sleep" | "settings";
+type ExpenseCat = "Courses" | "Logement" | "Transport" | "Études" | "Restauration" | "Loisirs" | "Santé" | "Autre";
+
+interface Grade { id: ID; label: string; score: number; weight: number }
+interface Course { id: ID; name: string; code: string; coef: number; color: string; grades: Grade[] }
+interface ClassSession { id: ID; courseId: ID; day: number; start: string; end: string; room: string }
+interface Task {
+  id: ID; title: string; courseId: ID | null; kind: TaskKind; status: TaskStatus;
+  deadline: string; estimate: number; spent: number; priority: Priority; createdAt: string; doneAt?: string;
+}
+interface GroceryItem { id: ID; name: string; aisle: Aisle; qty: string; checked: boolean; price: number }
+interface Expense { id: ID; date: string; amount: number; category: ExpenseCat; label: string }
+interface Budget { monthly: number; limits: Partial<Record<ExpenseCat, number>>; expenses: Expense[] }
+interface Chore { id: ID; name: string; recurrence: Recurrence; day: number; minutes: number; assignees: string[]; done: string[] }
+interface SleepLog { date: string; bed: string; wake: string; quality: 1 | 2 | 3 | 4 | 5 }
+interface FocusEntry { date: string; minutes: number; taskId: ID | null }
+interface PomodoroCfg { work: number; short: number; long: number; longEvery: number }
+interface SettingsState {
+  name: string; sleepGoal: number; wakeDefault: string; bedDefault: string; prepMinutes: number;
+  fallAsleep: number; maxBlock: number; theme: "system" | "light" | "dark"; pomodoro: PomodoroCfg;
+  onboarded: boolean; roommates: string[]; currency: string;
+}
+interface AppState {
+  version: 1; courses: Course[]; classes: ClassSession[]; tasks: Task[]; groceries: GroceryItem[];
+  chores: Chore[]; sleep: SleepLog[]; focus: FocusEntry[]; budget: Budget; settings: SettingsState;
+}
+
+// ---------------------------------------------------------------- Utilitaires date / temps
+const uid = (): ID => Math.random().toString(36).slice(2, 10);
+const pad = (n: number) => String(n).padStart(2, "0");
+const iso = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const parseISO = (s: string) => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
+const addDays = (d: Date, n: number) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+const todayISO = () => iso(new Date());
+const toMin = (hhmm: string) => { const [h, m] = hhmm.split(":").map(Number); return h * 60 + m; };
+const toHHMM = (min: number) => { const m = ((Math.round(min) % 1440) + 1440) % 1440; return `${pad(Math.floor(m / 60))}:${pad(m % 60)}`; };
+const fmtDur = (min: number) => { const h = Math.floor(min / 60), m = Math.round(min % 60); return h ? `${h} h${m ? ` ${pad(m)}` : ""}` : `${m} min`; };
+const daysBetween = (a: string, b: string) => Math.round((parseISO(b).getTime() - parseISO(a).getTime()) / 86400000);
+const weekday = (d: Date) => (d.getDay() + 6) % 7; // 0 = lundi
+const DAYS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
+const DAYS_LONG = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"];
+const fmtDate = (s: string) => parseISO(s).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" });
+const isoWeek = (d: Date) => {
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const n = t.getUTCDay() || 7; t.setUTCDate(t.getUTCDate() + 4 - n);
+  const y0 = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+  return Math.ceil(((t.getTime() - y0.getTime()) / 86400000 + 1) / 7);
+};
+const sleepMinutes = (bed: string, wake: string) => { let d = toMin(wake) - toMin(bed); if (d <= 0) d += 1440; return d; };
+const money = (n: number, cur = "€") => `${n.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${cur}`;
+const parseAmount = (v: string) => Number(v.replace(/\s/g, "").replace(",", "."));
+const monthKey = (s: string) => s.slice(0, 7);
+const daysInMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ");
+
+// ---------------------------------------------------------------- Données initiales réalistes
+function seed(): AppState {
+  const t = new Date();
+  const d = (n: number) => iso(addDays(t, n));
+  const courses: Course[] = [
+    { id: "c-alg", name: "Algèbre linéaire", code: "MATH201", coef: 4, color: "#2f6fed", grades: [{ id: uid(), label: "Partiel", score: 13.5, weight: 40 }, { id: uid(), label: "TD noté", score: 16, weight: 20 }] },
+    { id: "c-algo", name: "Algorithmique avancée", code: "INFO210", coef: 5, color: "#0f9d76", grades: [{ id: uid(), label: "Projet 1", score: 15, weight: 30 }] },
+    { id: "c-eco", name: "Microéconomie", code: "ECO120", coef: 3, color: "#d9822b", grades: [{ id: uid(), label: "QCM", score: 11, weight: 25 }] },
+    { id: "c-ang", name: "Anglais scientifique", code: "LANG105", coef: 2, color: "#c2417a", grades: [{ id: uid(), label: "Oral", score: 14, weight: 50 }] },
+    { id: "c-phy", name: "Physique statistique", code: "PHYS230", coef: 4, color: "#7a5af5", grades: [] },
+  ];
+  const cls = (courseId: ID, day: number, start: string, end: string, room: string): ClassSession => ({ id: uid(), courseId, day, start, end, room });
+  const classes: ClassSession[] = [
+    cls("c-alg", 0, "08:30", "10:30", "Amphi B"), cls("c-algo", 0, "13:30", "16:30", "Salle 214"),
+    cls("c-eco", 1, "10:00", "12:00", "Amphi C"), cls("c-phy", 1, "14:00", "16:00", "Labo 3"),
+    cls("c-algo", 2, "08:00", "11:00", "Salle 214"), cls("c-ang", 2, "14:00", "15:30", "Salle 102"),
+    cls("c-alg", 3, "09:00", "12:00", "Amphi B"), cls("c-phy", 3, "13:30", "15:30", "Amphi A"),
+    cls("c-eco", 4, "08:30", "10:30", "Amphi C"), cls("c-ang", 4, "11:00", "12:30", "Salle 102"),
+  ];
+  const task = (title: string, courseId: ID, kind: TaskKind, status: TaskStatus, dl: number, estimate: number, priority: Priority, spent = 0): Task =>
+    ({ id: uid(), title, courseId, kind, status, deadline: d(dl), estimate, spent, priority, createdAt: d(-5) });
+  const tasks: Task[] = [
+    task("Feuille d'exercices 6 — diagonalisation", "c-alg", "devoir", "doing", 2, 150, 2, 60),
+    task("Partiel d'algorithmique (graphes, DP)", "c-algo", "examen", "todo", 6, 480, 3),
+    task("Projet : moteur de recherche (indexation)", "c-algo", "projet", "doing", 9, 720, 3, 180),
+    task("Fiche de lecture — théorie du consommateur", "c-eco", "devoir", "review", 3, 90, 1, 70),
+    task("Essay: AI and scientific writing", "c-ang", "devoir", "todo", 5, 120, 2),
+    task("TP Ising — rapport", "c-phy", "projet", "todo", 4, 240, 2),
+    task("Révisions chapitre 3 — espaces euclidiens", "c-alg", "examen", "todo", 11, 300, 2),
+    task("Exposé oral — préparation slides", "c-ang", "projet", "done", -1, 120, 1, 130),
+    task("Exercices élasticité-prix", "c-eco", "devoir", "done", -2, 60, 1, 55),
+  ];
+  tasks[7].doneAt = d(-1); tasks[8].doneAt = d(-3);
+  const g = (name: string, aisle: Aisle, qty: string, checked = false, price = 0): GroceryItem => ({ id: uid(), name, aisle, qty, checked, price });
+  const groceries: GroceryItem[] = [
+    g("Yaourts nature", "Frais", "x8", false, 2.1), g("Œufs", "Frais", "x12", false, 3.4), g("Emmental râpé", "Frais", "200 g", true, 2.3),
+    g("Bananes", "Fruits & légumes", "1 kg", false, 1.9), g("Épinards", "Fruits & légumes", "500 g", false, 2.5), g("Oignons", "Fruits & légumes", "x3", false, 1.2),
+    g("Pâtes complètes", "Épicerie", "2 paquets", false, 2.6), g("Riz basmati", "Épicerie", "1 kg", false, 3.2), g("Café moulu", "Épicerie", "250 g", false, 4.5),
+    g("Eau pétillante", "Boissons", "6 x 1 L", false, 2.9), g("Petits pois", "Surgelés", "1 sachet", false, 1.8),
+    g("Dentifrice", "Hygiène", "x1", false, 2.4), g("Liquide vaisselle", "Entretien", "x1", false, 1.7), g("Sacs poubelle 30 L", "Entretien", "1 rouleau", false, 2.2),
+  ];
+  const chore = (name: string, recurrence: Recurrence, day: number, minutes: number, assignees: string[]): Chore => ({ id: uid(), name, recurrence, day, minutes, assignees, done: [] });
+  const chores: Chore[] = [
+    chore("Vaisselle", "daily", 0, 15, ["Moi", "Inès", "Hugo"]),
+    chore("Sortir les poubelles", "weekly", 1, 10, ["Hugo", "Moi", "Inès"]),
+    chore("Aspirateur parties communes", "weekly", 5, 30, ["Inès", "Hugo", "Moi"]),
+    chore("Salle de bain", "weekly", 6, 40, ["Moi", "Inès", "Hugo"]),
+    chore("Lessive draps", "biweekly", 6, 20, ["Moi"]),
+    chore("Frigo : tri & nettoyage", "biweekly", 3, 25, ["Inès", "Hugo", "Moi"]),
+  ];
+  const sl: [string, string, 1 | 2 | 3 | 4 | 5][] = [
+    ["00:40", "07:10", 2], ["23:30", "07:30", 4], ["01:15", "08:00", 2], ["23:50", "07:00", 3],
+    ["00:20", "09:30", 4], ["23:10", "07:20", 5], ["00:05", "06:50", 3], ["23:40", "07:15", 4],
+    ["01:00", "07:00", 2], ["23:20", "07:30", 4], ["00:30", "07:10", 3], ["23:45", "07:00", 3], ["00:10", "07:20", 4],
+  ];
+  const sleep: SleepLog[] = sl.map(([bed, wake, quality], i) => ({ date: d(-(sl.length - i)), bed, wake, quality }));
+  const focus: FocusEntry[] = [];
+  [95, 140, 60, 175, 120, 30, 150, 110, 85, 160, 45, 130, 100].forEach((m, i) => focus.push({ date: d(-(13 - i)), minutes: m, taskId: null }));
+  const ex = (n: number, amount: number, category: ExpenseCat, label: string): Expense => ({ id: uid(), date: d(-n), amount, category, label });
+  const day = t.getDate();
+  const expenses: Expense[] = [
+    ex(day - 1, 420, "Logement", "Loyer (part)"), ex(Math.min(day - 1, 2), 38.4, "Courses", "Supermarché"), ex(Math.min(day - 1, 6), 24.9, "Courses", "Marché + boulangerie"),
+    ex(Math.min(day - 1, 3), 3.3, "Restauration", "Resto U"), ex(Math.min(day - 1, 1), 3.3, "Restauration", "Resto U"), ex(Math.min(day - 1, 4), 12, "Loisirs", "Cinéma"),
+    ex(Math.min(day - 1, 8), 25, "Transport", "Pass mensuel"), ex(Math.min(day - 1, 5), 17.5, "Études", "Photocopies + classeur"), ex(0, 4.2, "Restauration", "Café + viennoiserie"),
+  ];
+  return {
+    version: 1, courses, classes, tasks, groceries, chores, sleep, focus,
+    budget: { monthly: 750, limits: { Courses: 180, Restauration: 60, Loisirs: 50, Transport: 30 }, expenses },
+    settings: { ...DEFAULT_SETTINGS, name: "Camille", roommates: ["Inès", "Hugo"] },
+  };
+}
+const DEFAULT_SETTINGS: SettingsState = {
+  name: "", sleepGoal: 8, wakeDefault: "07:30", bedDefault: "23:30", prepMinutes: 50, fallAsleep: 14,
+  maxBlock: 90, theme: "system", pomodoro: { work: 50, short: 10, long: 25, longEvery: 3 }, onboarded: false, roommates: [], currency: "€",
+};
+/** Espace vierge personnalisé : rien d'inventé, seulement les réglages de l'utilisateur. */
+function blank(settings: Partial<SettingsState>, monthly: number): AppState {
+  return {
+    version: 1, courses: [], classes: [], tasks: [], groceries: [], chores: [], sleep: [], focus: [],
+    budget: { monthly, limits: {}, expenses: [] }, settings: { ...DEFAULT_SETTINGS, onboarded: true, ...settings },
+  };
+}
+
+// ---------------------------------------------------------------- Store (reducer + context)
+type Action =
+  | { type: "replace"; state: AppState }
+  | { type: "task/add"; task: Task } | { type: "task/update"; id: ID; patch: Partial<Task> } | { type: "task/remove"; id: ID }
+  | { type: "course/add"; course: Course } | { type: "course/update"; id: ID; patch: Partial<Course> } | { type: "course/remove"; id: ID }
+  | { type: "class/add"; session: ClassSession } | { type: "class/remove"; id: ID }
+  | { type: "grocery/add"; item: GroceryItem } | { type: "grocery/update"; id: ID; patch: Partial<GroceryItem> } | { type: "grocery/checkout"; amount: number; date: string } | { type: "grocery/toggle"; id: ID } | { type: "grocery/remove"; id: ID } | { type: "grocery/clearChecked" }
+  | { type: "chore/add"; chore: Chore } | { type: "chore/toggle"; id: ID; date: string } | { type: "chore/remove"; id: ID }
+  | { type: "sleep/upsert"; log: SleepLog } | { type: "sleep/remove"; date: string }
+  | { type: "focus/log"; entry: FocusEntry }
+  | { type: "expense/add"; expense: Expense } | { type: "expense/remove"; id: ID } | { type: "budget/set"; patch: Partial<Omit<Budget, "expenses">> }
+  | { type: "settings"; patch: Partial<SettingsState> };
+
+function reducer(s: AppState, a: Action): AppState {
+  switch (a.type) {
+    case "replace": return a.state;
+    case "task/add": return { ...s, tasks: [a.task, ...s.tasks] };
+    case "task/update": return {
+      ...s, tasks: s.tasks.map((t) => {
+        if (t.id !== a.id) return t;
+        const next = { ...t, ...a.patch };
+        if (a.patch.status === "done" && t.status !== "done") next.doneAt = todayISO();
+        if (a.patch.status && a.patch.status !== "done") delete next.doneAt;
+        return next;
+      }),
+    };
+    case "task/remove": return { ...s, tasks: s.tasks.filter((t) => t.id !== a.id) };
+    case "course/add": return { ...s, courses: [...s.courses, a.course] };
+    case "course/update": return { ...s, courses: s.courses.map((c) => (c.id === a.id ? { ...c, ...a.patch } : c)) };
+    case "course/remove": return {
+      ...s, courses: s.courses.filter((c) => c.id !== a.id), classes: s.classes.filter((c) => c.courseId !== a.id),
+      tasks: s.tasks.map((t) => (t.courseId === a.id ? { ...t, courseId: null } : t)),
+    };
+    case "class/add": return { ...s, classes: [...s.classes, a.session] };
+    case "class/remove": return { ...s, classes: s.classes.filter((c) => c.id !== a.id) };
+    case "grocery/add": return { ...s, groceries: [...s.groceries, a.item] };
+    case "grocery/toggle": return { ...s, groceries: s.groceries.map((g) => (g.id === a.id ? { ...g, checked: !g.checked } : g)) };
+    case "grocery/remove": return { ...s, groceries: s.groceries.filter((g) => g.id !== a.id) };
+    case "grocery/update": return { ...s, groceries: s.groceries.map((g) => (g.id === a.id ? { ...g, ...a.patch } : g)) };
+    case "grocery/checkout": {
+      const n = s.groceries.filter((g) => g.checked).length;
+      const expense: Expense = { id: uid(), date: a.date, amount: Math.round(a.amount * 100) / 100, category: "Courses", label: `Courses (${n} article${n > 1 ? "s" : ""})` };
+      return { ...s, groceries: s.groceries.filter((g) => !g.checked), budget: { ...s.budget, expenses: [...s.budget.expenses, expense] } };
+    }
+    case "expense/add": return { ...s, budget: { ...s.budget, expenses: [...s.budget.expenses, a.expense] } };
+    case "expense/remove": return { ...s, budget: { ...s.budget, expenses: s.budget.expenses.filter((e) => e.id !== a.id) } };
+    case "budget/set": return { ...s, budget: { ...s.budget, ...a.patch } };
+    case "grocery/clearChecked": return { ...s, groceries: s.groceries.filter((g) => !g.checked) };
+    case "chore/add": return { ...s, chores: [...s.chores, a.chore] };
+    case "chore/toggle": return {
+      ...s, chores: s.chores.map((c) => c.id !== a.id ? c : { ...c, done: c.done.includes(a.date) ? c.done.filter((x) => x !== a.date) : [...c.done, a.date] }),
+    };
+    case "chore/remove": return { ...s, chores: s.chores.filter((c) => c.id !== a.id) };
+    case "sleep/upsert": return { ...s, sleep: [...s.sleep.filter((l) => l.date !== a.log.date), a.log].sort((x, y) => x.date.localeCompare(y.date)) };
+    case "sleep/remove": return { ...s, sleep: s.sleep.filter((l) => l.date !== a.date) };
+    case "focus/log": return { ...s, focus: [...s.focus, a.entry] };
+    case "settings": return { ...s, settings: { ...s.settings, ...a.patch } };
+  }
+}
+
+const STORAGE_KEY = "etudiant-os/v1";
+function loadState(): AppState {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) { const p = JSON.parse(raw); if (isAppState(p)) return migrate(p); }
+  } catch { /* stockage indisponible : on repart de zéro */ }
+  return blank({ onboarded: false }, 600);
+}
+/** Complète une sauvegarde plus ancienne avec les champs ajoutés depuis. */
+function migrate(p: AppState): AppState {
+  return {
+    ...p,
+    groceries: p.groceries.map((g) => ({ ...g, price: g.price ?? 0 })),
+    budget: p.budget ?? { monthly: 600, limits: {}, expenses: [] },
+    settings: { ...DEFAULT_SETTINGS, ...p.settings, roommates: p.settings.roommates ?? [], onboarded: p.settings.onboarded ?? false },
+  };
+}
+function isAppState(x: unknown): x is AppState {
+  const o = x as AppState;
+  return !!o && o.version === 1 && Array.isArray(o.tasks) && Array.isArray(o.courses) && Array.isArray(o.classes)
+    && Array.isArray(o.groceries) && Array.isArray(o.chores) && Array.isArray(o.sleep) && Array.isArray(o.focus) && !!o.settings;
+}
+
+interface Toast { id: ID; text: string; tone: "ok" | "info" | "bad" }
+interface Ctx { state: AppState; dispatch: React.Dispatch<Action>; toast: (text: string, tone?: Toast["tone"]) => void }
+const StoreCtx = createContext<Ctx | null>(null);
+const useStore = () => { const c = useContext(StoreCtx); if (!c) throw new Error("StoreCtx manquant"); return c; };
+
+// ---------------------------------------------------------------- Moteur de planification
+interface Block { start: number; end: number; kind: "class" | "task" | "chore" | "meal" | "sleep"; label: string; color?: string; refId?: ID }
+interface DayPlan {
+  date: string; wake: number; bed: number; blocks: Block[]; classMin: number; taskMin: number; choreMin: number;
+  awakeMin: number; load: number; overflow: { task: Task; minutes: number }[]; level: "calme" | "équilibré" | "chargé" | "surcharge";
+}
+
+/** Durée restante d'une tâche, répartie sur les jours restants avant échéance, pondérée par la priorité. */
+function dailyQuota(t: Task, date: string): number {
+  const remaining = Math.max(0, t.estimate - t.spent);
+  if (!remaining) return 0;
+  const left = daysBetween(date, t.deadline);
+  if (left < 0) return remaining; // en retard : tout doit passer
+  const spread = Math.max(1, left); // on vise la veille de l'échéance
+  const factor = t.priority === 3 ? 1.25 : t.priority === 1 ? 0.85 : 1;
+  return Math.min(remaining, Math.ceil((remaining / spread) * factor / 5) * 5);
+}
+function choreScheduledOn(c: Chore, d: Date): boolean {
+  if (c.recurrence === "daily") return true;
+  if (weekday(d) !== c.day) return false;
+  return c.recurrence === "weekly" || isoWeek(d) % 2 === 0;
+}
+function choreAssignee(c: Chore, d: Date): string {
+  if (!c.assignees.length) return "—";
+  const idx = c.recurrence === "daily" ? Math.floor(d.getTime() / 86400000) : c.recurrence === "weekly" ? isoWeek(d) : Math.floor(isoWeek(d) / 2);
+  return c.assignees[idx % c.assignees.length];
+}
+
+function planDay(state: AppState, date: string): DayPlan {
+  const d = parseISO(date);
+  const { settings, classes, courses, tasks, chores } = state;
+  const wd = weekday(d);
+  const dayClasses = classes.filter((c) => c.day === wd).sort((a, b) => toMin(a.start) - toMin(b.start));
+  const nextDay = addDays(d, 1);
+  const tomorrowFirst = classes.filter((c) => c.day === weekday(nextDay)).map((c) => toMin(c.start)).sort((a, b) => a - b)[0];
+  const wake = dayClasses.length ? Math.min(toMin(settings.wakeDefault), toMin(dayClasses[0].start) - settings.prepMinutes) : toMin(settings.wakeDefault) + 60;
+  let bed = toMin(settings.bedDefault);
+  if (tomorrowFirst !== undefined) {
+    const idealBed = tomorrowFirst - settings.prepMinutes - 5 * 90 - settings.fallAsleep + 1440;
+    bed = Math.min(bed < 600 ? bed + 1440 : bed, idealBed);
+  } else if (bed < 600) bed += 1440;
+  const color = (id: ID | null) => courses.find((c) => c.id === id)?.color;
+
+  const fixed: Block[] = [
+    ...dayClasses.map((c): Block => ({ start: toMin(c.start), end: toMin(c.end), kind: "class", label: `${courses.find((x) => x.id === c.courseId)?.name ?? "Cours"} · ${c.room}`, color: color(c.courseId), refId: c.id })),
+    { start: 12 * 60 + 15, end: 13 * 60, kind: "meal", label: "Déjeuner" },
+    { start: 19 * 60 + 45, end: 20 * 60 + 30, kind: "meal", label: "Dîner" },
+  ].filter((b) => !(b.kind === "meal" && dayClasses.some((c) => toMin(c.start) < b.end && toMin(c.end) > b.start)));
+
+  // Créneaux libres = journée éveillée moins les blocs fixes, avec 10 min de tampon après chaque cours.
+  const busy = fixed.map((b) => [b.start, b.kind === "class" ? b.end + 10 : b.end] as [number, number]).sort((a, b) => a[0] - b[0]);
+  const free: [number, number][] = [];
+  let cursor = wake + 30;
+  for (const [s, e] of busy) { if (s > cursor) free.push([cursor, Math.min(s, bed)]); cursor = Math.max(cursor, e); }
+  if (cursor < bed - 30) free.push([cursor, bed - 30]);
+
+  const due = chores.filter((c) => choreScheduledOn(c, d) && choreAssignee(c, d) === "Moi" && !c.done.includes(date));
+  const queue = tasks
+    .filter((t) => t.status !== "done")
+    .map((t) => ({ t, q: dailyQuota(t, date) }))
+    .filter((x) => x.q > 0)
+    .sort((a, b) => daysBetween(date, a.t.deadline) - daysBetween(date, b.t.deadline) || b.t.priority - a.t.priority);
+
+  const blocks: Block[] = [...fixed];
+  const place = (minutes: number, mk: (s: number, e: number) => Block): number => {
+    let left = minutes;
+    for (const slot of free) {
+      while (left > 0 && slot[1] - slot[0] >= 15) {
+        const len = Math.min(left, settings.maxBlock, slot[1] - slot[0]);
+        blocks.push(mk(slot[0], slot[0] + len));
+        slot[0] += len + 10; left -= len;
+      }
+      if (left <= 0) break;
+    }
+    return Math.max(0, left);
+  };
+  let choreMin = 0;
+  for (const c of due) { const rest = place(c.minutes, (s, e) => ({ start: s, end: e, kind: "chore", label: c.name, refId: c.id })); choreMin += c.minutes - rest; }
+  const overflow: DayPlan["overflow"] = [];
+  let taskMin = 0;
+  for (const { t, q } of queue) {
+    const rest = place(q, (s, e) => ({ start: s, end: e, kind: "task", label: t.title, color: color(t.courseId), refId: t.id }));
+    taskMin += q - rest;
+    if (rest > 0) overflow.push({ task: t, minutes: rest });
+  }
+  blocks.sort((a, b) => a.start - b.start);
+  const classMin = dayClasses.reduce((n, c) => n + toMin(c.end) - toMin(c.start), 0);
+  const awakeMin = Math.max(1, bed - wake);
+  const overflowMin = overflow.reduce((n, o) => n + o.minutes, 0);
+  // Saturation : temps engagé / temps éveillé « productif » (on réserve 30 % à la récupération).
+  const load = (classMin + taskMin + choreMin + overflowMin) / (awakeMin * 0.7);
+  const level = load > 1 ? "surcharge" : load > 0.85 ? "chargé" : load > 0.5 ? "équilibré" : "calme";
+  return { date, wake, bed, blocks, classMin, taskMin, choreMin, awakeMin, load, overflow, level };
+}
+
+// ---------------------------------------------------------------- Calculs dérivés
+function courseAverage(c: Course): number | null {
+  const w = c.grades.reduce((n, g) => n + g.weight, 0);
+  return w ? c.grades.reduce((n, g) => n + g.score * g.weight, 0) / w : null;
+}
+function overallAverage(courses: Course[]): number | null {
+  const valid = courses.map((c) => [courseAverage(c), c.coef] as const).filter(([a]) => a !== null) as [number, number][];
+  const w = valid.reduce((n, [, c]) => n + c, 0);
+  return w ? valid.reduce((n, [a, c]) => n + a * c, 0) / w : null;
+}
+function lastNDays(n: number): string[] { const t = new Date(); return Array.from({ length: n }, (_, i) => iso(addDays(t, i - n + 1))); }
+function sleepDebt(state: AppState, days = 7): number {
+  const goal = state.settings.sleepGoal * 60;
+  return lastNDays(days).reduce((n, d) => {
+    const l = state.sleep.find((x) => x.date === d);
+    return l ? n + (goal - sleepMinutes(l.bed, l.wake)) : n;
+  }, 0);
+}
+function sleepRegularity(logs: SleepLog[]): number {
+  if (logs.length < 2) return 0;
+  const beds = logs.map((l) => { const m = toMin(l.bed); return m < 720 ? m + 1440 : m; });
+  const mean = beds.reduce((a, b) => a + b, 0) / beds.length;
+  return Math.sqrt(beds.reduce((n, b) => n + (b - mean) ** 2, 0) / beds.length);
+}
+function bedtimeOptions(wakeMin: number, fallAsleep: number) {
+  return [6, 5, 4].map((cycles) => ({ cycles, bed: wakeMin - cycles * 90 - fallAsleep, hours: (cycles * 90) / 60 }));
+}
+
+// ---------------------------------------------------------------- Primitives UI
+const Card: React.FC<{ title?: React.ReactNode; action?: React.ReactNode; className?: string; children: React.ReactNode }> = ({ title, action, className, children }) => (
+  <section className={cx("inked min-w-0 rounded-[20px] bg-panel", className)}>
+    {(title || action) && (
+      <header className="flex flex-wrap items-center justify-between gap-3 px-5 pt-4">
+        <h3 className="font-display text-[15px] font-bold tracking-tight text-fg">{title}</h3>
+        <div className="flex items-center gap-2">{action}</div>
+      </header>
+    )}
+    <div className="p-5">{children}</div>
+  </section>
+);
+const Btn: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "ghost" | "soft" | "danger"; size?: "sm" | "md" }> =
+  ({ variant = "soft", size = "md", className, ...p }) => (
+    <button {...p} className={cx(
+      "press inline-flex items-center justify-center gap-1.5 rounded-xl font-semibold disabled:pointer-events-none disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent",
+      size === "sm" ? "h-7 px-2.5 text-xs" : "h-9 px-3.5 text-[13px]",
+      variant === "primary" && "btn-ink bg-accent text-onaccent",
+      variant === "soft" && "border-2 border-fg/80 bg-panel text-fg hover:bg-hi/40",
+      variant === "ghost" && "text-muted hover:bg-sunken hover:text-fg",
+      variant === "danger" && "text-bad hover:bg-bad/10",
+      className)} />
+  );
+const inputCls = "h-9 w-full min-w-0 rounded-xl border-2 border-line bg-panel transition-colors hover:border-fg/50 px-3 text-[13px] text-fg placeholder:text-muted/70 outline-none focus:border-accent focus:ring-2 focus:ring-accent/20";
+const Input = (p: React.InputHTMLAttributes<HTMLInputElement>) => <input {...p} className={cx(inputCls, p.className)} />;
+const Select = (p: React.SelectHTMLAttributes<HTMLSelectElement>) => <select {...p} className={cx(inputCls, "pr-7", p.className)} />;
+const Field: React.FC<{ label: string; htmlFor: string; children: React.ReactNode; className?: string }> = ({ label, htmlFor, children, className }) => (
+  <label htmlFor={htmlFor} className={cx("flex min-w-0 flex-col gap-1", className)}>
+    <span className="text-[11px] font-medium uppercase tracking-wider text-muted">{label}</span>{children}
+  </label>
+);
+const Pill: React.FC<{ tone?: "ok" | "warn" | "bad" | "info" | "muted"; children: React.ReactNode }> = ({ tone = "muted", children }) => (
+  <span className={cx("inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-current/30 px-2 py-0.5 text-[11px] font-semibold",
+    tone === "ok" && "bg-ok/12 text-ok", tone === "warn" && "bg-warn/15 text-warn", tone === "bad" && "bg-bad/12 text-bad",
+    tone === "info" && "bg-accent/12 text-accent", tone === "muted" && "bg-sunken text-muted")}>{children}</span>
+);
+const Empty: React.FC<{ icon: React.ReactNode; title: string; hint: string; action?: React.ReactNode }> = ({ icon, title, hint, action }) => (
+  <div className="flex flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-line px-6 py-10 text-center">
+    <div className="sticker grid h-12 w-12 place-items-center rounded-2xl border-2 border-fg bg-hi text-[rgb(24_22_46)]">{icon}</div>
+    <p className="font-display text-base font-bold text-fg">{title}</p>
+    <p className="max-w-xs text-xs text-muted">{hint}</p>{action}
+  </div>
+);
+const Kbd: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <kbd className="rounded border border-line bg-sunken px-1.5 py-px font-mono text-[10px] text-muted">{children}</kbd>
+);
+const Stat: React.FC<{ label: string; value: string; sub?: string; tone?: "ok" | "warn" | "bad" }> = ({ label, value, sub, tone }) => (
+  <div className="inked lift h-full min-w-0 rounded-[20px] bg-panel p-4">
+    <p className="text-[11px] font-semibold uppercase tracking-[.12em] text-muted">{label}</p>
+    <p key={value} className={cx("bump mt-1 font-display text-[28px] leading-tight font-extrabold tabular-nums tracking-tight", tone === "ok" ? "text-ok" : tone === "warn" ? "text-warn" : tone === "bad" ? "text-bad" : "text-fg")}>{value}</p>
+    {sub && <p className="mt-0.5 truncate text-xs text-muted">{sub}</p>}
+  </div>
+);
+const LoadMeter: React.FC<{ load: number; level: DayPlan["level"] }> = ({ load, level }) => {
+  const tone = level === "surcharge" ? "bg-bad" : level === "chargé" ? "bg-warn" : "bg-ok";
+  return (
+    <div className="flex items-center gap-2">
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-sunken"><div className={cx("h-full rounded-full transition-all", tone)} style={{ width: `${Math.min(100, load * 100)}%` }} /></div>
+      <span className="w-10 shrink-0 text-right font-mono text-xs tabular-nums text-muted">{Math.round(load * 100)}%</span>
+    </div>
+  );
+};
+const levelTone = (l: DayPlan["level"]) => (l === "surcharge" ? "bad" : l === "chargé" ? "warn" : l === "équilibré" ? "info" : "ok") as "bad" | "warn" | "info" | "ok";
+
+/** Graphique en barres SVG à l'échelle, avec ligne d'objectif optionnelle. */
+const BarChart: React.FC<{ data: { label: string; value: number; tone?: "ok" | "warn" | "bad" | "accent" }[]; max?: number; goal?: number; unit?: (v: number) => string; height?: number }> =
+  ({ data, max, goal, unit = (v) => String(Math.round(v)), height = 140 }) => {
+    const W = 320, H = height, padL = 34, padB = 20, padT = 8;
+    const top = Math.max(max ?? 0, goal ?? 0, ...data.map((d) => d.value), 1);
+    const y = (v: number) => padT + (H - padT - padB) * (1 - v / top);
+    const bw = (W - padL) / data.length;
+    const ticks = [0, top / 2, top];
+    const fill = { ok: "rgb(var(--ok))", warn: "rgb(var(--warn))", bad: "rgb(var(--bad))", accent: "rgb(var(--accent))" };
+    return (
+      <svg viewBox={`0 0 ${W} ${H}`} className="mx-auto h-auto max-h-60 w-full" role="img">
+        {ticks.map((t) => (
+          <g key={t}><line x1={padL} x2={W} y1={y(t)} y2={y(t)} stroke="rgb(var(--line))" strokeWidth={1} />
+            <text x={padL - 6} y={y(t) + 3} textAnchor="end" fontSize={9} fill="rgb(var(--muted))" className="font-mono">{unit(t)}</text></g>
+        ))}
+        {goal !== undefined && <line x1={padL} x2={W} y1={y(goal)} y2={y(goal)} stroke="rgb(var(--fg))" strokeDasharray="3 3" strokeWidth={1} opacity={0.5} />}
+        {data.map((d, i) => (
+          <g key={i}>
+            <rect x={padL + i * bw + bw * 0.18} y={y(d.value)} width={bw * 0.64} height={Math.max(0, H - padB - y(d.value))} rx={3} fill={fill[d.tone ?? "accent"]} opacity={i === data.length - 1 ? 1 : 0.75}>
+              <title>{`${d.label} : ${unit(d.value)}`}</title>
+            </rect>
+            <text x={padL + i * bw + bw / 2} y={H - 6} textAnchor="middle" fontSize={9} fill="rgb(var(--muted))">{d.label}</text>
+          </g>
+        ))}
+      </svg>
+    );
+  };
+
+// ---------------------------------------------------------------- Formulaire tâche (partagé)
+const TaskForm: React.FC<{ onDone: () => void; task?: Task }> = ({ onDone, task }) => {
+  const { state, dispatch, toast } = useStore();
+  const [f, setF] = useState(task
+    ? { title: task.title, courseId: task.courseId ?? "", kind: task.kind, deadline: task.deadline, estimate: task.estimate, priority: task.priority, spent: task.spent }
+    : { title: "", courseId: state.courses[0]?.id ?? "", kind: "devoir" as TaskKind, deadline: iso(addDays(new Date(), 3)), estimate: 120, priority: 2 as Priority, spent: 0 });
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!f.title.trim()) { toast("Donnez un titre à la tâche.", "bad"); return; }
+    if (task) { dispatch({ type: "task/update", id: task.id, patch: { ...f, title: f.title.trim(), courseId: f.courseId || null } }); toast("Tâche mise à jour"); }
+    else { dispatch({ type: "task/add", task: { id: uid(), ...f, title: f.title.trim(), courseId: f.courseId || null, status: "todo", createdAt: todayISO() } }); toast("Tâche ajoutée et planifiée"); }
+    onDone();
+  };
+  return (
+    <form onSubmit={submit} className="grid grid-cols-2 gap-3 sm:grid-cols-6">
+      <Field label="Titre" htmlFor="tf-title" className="col-span-2 sm:col-span-6"><Input id="tf-title" autoFocus value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder="Ex. Fiche de révision chapitre 4" /></Field>
+      <Field label="Module" htmlFor="tf-course" className="col-span-2"><Select id="tf-course" value={f.courseId} onChange={(e) => setF({ ...f, courseId: e.target.value })}>
+        <option value="">Sans module</option>{state.courses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select></Field>
+      <Field label="Type" htmlFor="tf-kind"><Select id="tf-kind" value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value as TaskKind })}>
+        <option value="devoir">Devoir</option><option value="examen">Examen</option><option value="projet">Projet</option></Select></Field>
+      <Field label="Échéance" htmlFor="tf-dl"><Input id="tf-dl" type="date" value={f.deadline} onChange={(e) => setF({ ...f, deadline: e.target.value })} /></Field>
+      <Field label="Estimation (min)" htmlFor="tf-est"><Input id="tf-est" type="number" min={15} step={15} value={f.estimate} onChange={(e) => setF({ ...f, estimate: Math.max(15, Number(e.target.value)) })} /></Field>
+      <Field label="Priorité" htmlFor="tf-prio"><Select id="tf-prio" value={f.priority} onChange={(e) => setF({ ...f, priority: Number(e.target.value) as Priority })}>
+        <option value={1}>Basse</option><option value={2}>Normale</option><option value={3}>Haute</option></Select></Field>
+      {task && <Field label="Temps déjà passé (min)" htmlFor="tf-spent" className="col-span-2"><Input id="tf-spent" type="number" min={0} step={5} value={f.spent} onChange={(e) => setF({ ...f, spent: Math.max(0, Number(e.target.value)) })} /></Field>}
+      <div className="col-span-2 flex justify-end gap-2 sm:col-span-6"><Btn type="button" variant="ghost" onClick={onDone}>Annuler</Btn><Btn type="submit" variant="primary">{task ? <><Check size={14} />Enregistrer</> : <><Plus size={14} />Ajouter</>}</Btn></div>
+    </form>
+  );
+};
+
+const Modal: React.FC<{ title: string; onClose: () => void; children: React.ReactNode }> = ({ title, onClose, children }) => {
+  useEffect(() => { const k = (e: KeyboardEvent) => e.key === "Escape" && onClose(); window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, [onClose]);
+  return (
+    <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/40 backdrop-blur-[2px] animate-fade sm:items-start sm:px-4 sm:pt-[12vh]" onMouseDown={onClose}>
+      <div className="inked sheet max-h-[88vh] w-full max-w-xl overflow-y-auto rounded-t-[22px] bg-panel animate-pop sm:max-h-[80vh] sm:rounded-[22px]" onMouseDown={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={title}>
+        <header className="flex items-center justify-between border-b border-line px-5 py-3"><h2 className="font-display text-lg font-bold">{title}</h2><Btn variant="ghost" size="sm" onClick={onClose} aria-label="Fermer"><X size={14} /></Btn></header>
+        <div className="p-5">{children}</div>
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------- Module : Tableau de bord
+const Dashboard: React.FC<{ go: (v: ViewKey) => void }> = ({ go }) => {
+  const { state } = useStore();
+  const today = todayISO();
+  const plan = useMemo(() => planDay(state, today), [state, today]);
+  const week = useMemo(() => lastNDays(7), []);
+  const focusByDay = week.map((d) => state.focus.filter((f) => f.date === d).reduce((n, f) => n + f.minutes, 0));
+  const focusWeek = focusByDay.reduce((a, b) => a + b, 0);
+  const prevWeek = lastNDays(14).slice(0, 7).reduce((n, d) => n + state.focus.filter((f) => f.date === d).reduce((m, f) => m + f.minutes, 0), 0);
+  const doneWeek = state.tasks.filter((t) => t.doneAt && daysBetween(t.doneAt, today) < 7).length;
+  const open = state.tasks.filter((t) => t.status !== "done");
+  const late = open.filter((t) => t.deadline < today).length;
+  const debt = sleepDebt(state);
+  const avg = overallAverage(state.courses);
+  const sleepData = week.map((d) => { const l = state.sleep.find((x) => x.date === d); return l ? sleepMinutes(l.bed, l.wake) / 60 : 0; });
+  const loads = useMemo(() => Array.from({ length: 7 }, (_, i) => planDay(state, iso(addDays(new Date(), i)))), [state]);
+  const statusCount = (s: TaskStatus) => state.tasks.filter((t) => t.status === s).length;
+  const upcoming = [...open].sort((a, b) => a.deadline.localeCompare(b.deadline)).slice(0, 5);
+  const delta = prevWeek ? Math.round(((focusWeek - prevWeek) / prevWeek) * 100) : 0;
+  const courseName = (id: ID | null) => state.courses.find((c) => c.id === id);
+  const monthSpent = state.budget.expenses.filter((e) => monthKey(e.date) === monthKey(today)).reduce((n, e) => n + e.amount, 0);
+  const budgetLeft = state.budget.monthly - monthSpent;
+
+  const steps: { done: boolean; label: string; view: ViewKey }[] = [
+    { done: state.courses.length > 0, label: "Ajouter vos modules et coefficients", view: "academic" },
+    { done: state.classes.length > 0, label: "Saisir votre emploi du temps fixe", view: "planning" },
+    { done: state.tasks.length > 0, label: "Créer vos devoirs, examens et projets", view: "academic" },
+    { done: state.budget.expenses.length > 0, label: "Noter une première dépense", view: "budget" },
+    { done: state.sleep.length > 0, label: "Enregistrer votre dernière nuit", view: "sleep" },
+  ];
+  const stepsLeft = steps.filter((x) => !x.done).length;
+  return (
+    <div className="flex flex-col gap-4">
+      {stepsLeft > 0 && (
+        <Card title={<span className="flex items-center gap-2"><Sparkles size={15} className="text-accent" />Pour bien démarrer · {steps.length - stepsLeft}/{steps.length}</span>}>
+          <div className="mb-3 h-1.5 rounded-full bg-sunken"><div className="h-full rounded-full bg-accent transition-all" style={{ width: `${((steps.length - stepsLeft) / steps.length) * 100}%` }} /></div>
+          <ul className="grid gap-2 sm:grid-cols-2">{steps.map((x) => (
+            <li key={x.label}><button onClick={() => go(x.view)} disabled={x.done} className={cx("flex w-full items-center gap-2.5 rounded-xl border px-3 py-2 text-left text-[13px] transition", x.done ? "border-transparent text-muted line-through" : "border-line hover:border-accent hover:bg-accent/5")}>
+              <span className={cx("grid h-5 w-5 shrink-0 place-items-center rounded-full border", x.done ? "border-ok bg-ok text-onaccent" : "border-line")}>{x.done && <Check size={11} strokeWidth={3} />}</span>{x.label}{!x.done && <ChevronRight size={14} className="ml-auto text-muted" />}</button></li>))}</ul>
+        </Card>)}
+      {plan.level === "surcharge" && (
+        <div className="flex items-start gap-3 rounded-xl border border-bad/30 bg-bad/8 p-4 text-sm">
+          <AlertTriangle size={18} className="mt-0.5 shrink-0 text-bad" />
+          <div className="min-w-0"><p className="font-semibold text-bad">Risque de surcharge aujourd'hui ({Math.round(plan.load * 100)} %)</p>
+            <p className="text-muted">{fmtDur(plan.overflow.reduce((n, o) => n + o.minutes, 0))} de travail ne tient pas dans la journée. Repoussez une échéance ou découpez une tâche.</p></div>
+          <Btn size="sm" className="ml-auto shrink-0" onClick={() => go("planning")}>Voir le planning</Btn>
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-6 md:[&>*]:col-span-2 md:[&>*:nth-child(n+4)]:col-span-3 xl:grid-cols-5 xl:[&>*]:col-span-1 xl:[&>*:nth-child(n+4)]:col-span-1">
+        <Stat label="Focus · 7 jours" value={fmtDur(focusWeek)} sub={prevWeek ? `${delta >= 0 ? "+" : ""}${delta} % vs semaine précédente` : "Première semaine"} tone={delta >= 0 ? "ok" : "warn"} />
+        <Stat label="Tâches terminées" value={String(doneWeek)} sub={`${open.length} ouvertes · ${late} en retard`} tone={late ? "bad" : undefined} />
+        <Stat label="Dette de sommeil" value={`${debt > 0 ? "−" : "+"}${fmtDur(Math.abs(debt))}`} sub={`Objectif ${state.settings.sleepGoal} h / nuit`} tone={debt > 240 ? "bad" : debt > 60 ? "warn" : "ok"} />
+        <Stat label="Moyenne pondérée" value={avg === null ? "—" : `${avg.toFixed(2)}`} sub="sur 20, coefficients inclus" tone={avg !== null && avg < 10 ? "bad" : undefined} />
+        <button onClick={() => go("budget")} className="col-span-2 text-left"><Stat label="Budget restant" value={money(budgetLeft, state.settings.currency)} sub={`${money(monthSpent, state.settings.currency)} dépensés ce mois`} tone={budgetLeft < 0 ? "bad" : budgetLeft < state.budget.monthly * 0.15 ? "warn" : "ok"} /></button>
+      </div>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <Card title="Temps de focus" className="md:col-span-2" action={<Pill tone="info">7 derniers jours</Pill>}>
+          <BarChart data={week.map((d, i) => ({ label: DAYS[weekday(parseISO(d))], value: focusByDay[i] / 60, tone: "accent" }))} goal={3} unit={(v) => `${v.toFixed(v < 10 && v % 1 ? 1 : 0)}h`} />
+          <p className="mt-2 text-xs text-muted">Ligne pointillée : objectif de 3 h de travail personnel par jour.</p>
+        </Card>
+        <Card title="Avancement des tâches">
+          <div className="flex flex-col gap-3">
+            {(["todo", "doing", "review", "done"] as TaskStatus[]).map((s) => {
+              const n = statusCount(s), pct = state.tasks.length ? (n / state.tasks.length) * 100 : 0;
+              return (<div key={s}><div className="mb-1 flex justify-between text-xs"><span className="text-fg">{STATUS[s].label}</span><span className="font-mono tabular-nums text-muted">{n}</span></div>
+                <div className="h-1.5 rounded-full bg-sunken"><div className="h-full rounded-full" style={{ width: `${pct}%`, background: STATUS[s].color }} /></div></div>);
+            })}
+          </div>
+        </Card>
+        <Card title="Sommeil" action={<Btn size="sm" variant="ghost" onClick={() => go("sleep")}>Détails</Btn>}>
+          <BarChart data={week.map((d, i) => ({ label: DAYS[weekday(parseISO(d))], value: sleepData[i], tone: sleepData[i] === 0 ? "warn" : sleepData[i] >= state.settings.sleepGoal - 0.25 ? "ok" : sleepData[i] >= state.settings.sleepGoal - 1.25 ? "warn" : "bad" }))} goal={state.settings.sleepGoal} max={10} unit={(v) => `${Math.round(v)}h`} height={120} />
+        </Card>
+        <Card title="Charge des 7 prochains jours" action={<Btn size="sm" variant="ghost" onClick={() => go("planning")}>Planning</Btn>}>
+          <div className="flex flex-col gap-2.5">
+            {loads.map((p) => (<div key={p.date} className="grid grid-cols-[52px_1fr] items-center gap-2"><span className="text-xs text-muted">{DAYS[weekday(parseISO(p.date))]} {parseISO(p.date).getDate()}</span><LoadMeter load={p.load} level={p.level} /></div>))}
+          </div>
+        </Card>
+        <Card title="Prochaines échéances" action={<Btn size="sm" variant="ghost" onClick={() => go("academic")}>Tout voir</Btn>}>
+          {upcoming.length ? (
+            <ul className="flex flex-col divide-y divide-line">
+              {upcoming.map((t) => { const left = daysBetween(today, t.deadline); const c = courseName(t.courseId); return (
+                <li key={t.id} className="flex items-center gap-2 py-2 first:pt-0 last:pb-0">
+                  <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: c?.color ?? "rgb(var(--muted))" }} />
+                  <span className="min-w-0 flex-1 truncate text-[13px]">{t.title}</span>
+                  <Pill tone={left < 0 ? "bad" : left <= 2 ? "warn" : "muted"}>{left < 0 ? `${-left} j de retard` : left === 0 ? "Aujourd'hui" : `J-${left}`}</Pill>
+                </li>); })}
+            </ul>
+          ) : <Empty icon={<Check size={18} />} title="Rien à rendre" hint="Toutes vos tâches sont terminées." />}
+        </Card>
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------- Module : Planning / Time-blocking
+const BLOCK_STYLE: Record<Block["kind"], string> = {
+  class: "border-l-[3px] bg-sunken", task: "border-l-[3px] bg-accent/8", chore: "border-l-[3px] border-l-warn bg-warn/10", meal: "border-l-[3px] border-l-line bg-transparent text-muted", sleep: "",
+};
+const Planning: React.FC = () => {
+  const { state, dispatch, toast } = useStore();
+  const [offset, setOffset] = useState(0);
+  const date = iso(addDays(new Date(), offset));
+  const plan = useMemo(() => planDay(state, date), [state, date]);
+  const week = useMemo(() => { const s = addDays(new Date(), offset - weekday(addDays(new Date(), offset))); return Array.from({ length: 7 }, (_, i) => planDay(state, iso(addDays(s, i)))); }, [state, offset]);
+  const startH = Math.floor(plan.wake / 60), endH = Math.ceil(Math.min(plan.bed, 1440 + 120) / 60);
+  const PX = 52; // pixels par heure
+  const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+  const [newClass, setNewClass] = useState({ courseId: state.courses[0]?.id ?? "", day: 0, start: "10:00", end: "12:00", room: "" });
+
+  return (
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+      <Card title={<span className="flex items-center gap-2"><CalendarClock size={15} />{DAYS_LONG[weekday(parseISO(date))]} {parseISO(date).toLocaleDateString("fr-FR", { day: "numeric", month: "long" })}</span>}
+        action={<><Btn size="sm" variant="ghost" onClick={() => setOffset(offset - 1)} aria-label="Jour précédent"><ChevronLeft size={14} /></Btn><Btn size="sm" onClick={() => setOffset(0)}>Aujourd'hui</Btn><Btn size="sm" variant="ghost" onClick={() => setOffset(offset + 1)} aria-label="Jour suivant"><ChevronRight size={14} /></Btn></>}>
+        <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div><p className="text-[11px] uppercase tracking-wider text-muted">Saturation</p><div className="mt-1 flex items-center gap-2"><Pill tone={levelTone(plan.level)}>{plan.level}</Pill></div></div>
+          <div><p className="text-[11px] uppercase tracking-wider text-muted">Cours</p><p className="font-mono text-sm tabular-nums">{fmtDur(plan.classMin)}</p></div>
+          <div><p className="text-[11px] uppercase tracking-wider text-muted">Travail planifié</p><p className="font-mono text-sm tabular-nums">{fmtDur(plan.taskMin)}</p></div>
+          <div><p className="text-[11px] uppercase tracking-wider text-muted">Éveil</p><p className="font-mono text-sm tabular-nums">{toHHMM(plan.wake)} → {toHHMM(plan.bed)}</p></div>
+        </div>
+        <LoadMeter load={plan.load} level={plan.level} />
+        <div className="relative mt-4 overflow-hidden rounded-lg border border-line" style={{ height: (endH - startH) * PX }}>
+          {Array.from({ length: endH - startH }, (_, i) => (
+            <div key={i} className="absolute inset-x-0 border-t border-line/70" style={{ top: i * PX }}><span className="absolute left-2 top-0.5 font-mono text-[10px] text-muted">{pad((startH + i) % 24)}:00</span></div>
+          ))}
+          {offset === 0 && nowMin > startH * 60 && nowMin < endH * 60 && (
+            <div className="absolute inset-x-0 z-10 h-px bg-bad" style={{ top: ((nowMin - startH * 60) / 60) * PX }}><span className="absolute -left-0.5 -top-[3px] h-[7px] w-[7px] rounded-full bg-bad" /></div>
+          )}
+          {plan.blocks.map((b, i) => (
+            <div key={i} className={cx("absolute left-14 right-2 overflow-hidden rounded-md px-2 py-1 text-xs transition hover:brightness-95", BLOCK_STYLE[b.kind])}
+              style={{ top: ((b.start - startH * 60) / 60) * PX + 1, height: Math.max(18, ((b.end - b.start) / 60) * PX - 2), borderLeftColor: b.color }}>
+              <div className="flex items-center gap-1.5">
+                <span className="font-mono text-[10px] tabular-nums text-muted">{toHHMM(b.start)}–{toHHMM(b.end)}</span>
+                {b.kind === "task" && <Zap size={10} className="text-accent" />}{b.kind === "chore" && <Home size={10} className="text-warn" />}{b.kind === "meal" && <Coffee size={10} />}
+              </div>
+              <p className="truncate font-medium text-fg">{b.label}</p>
+            </div>
+          ))}
+        </div>
+        <p className="mt-2 text-xs text-muted">Les blocs <Zap size={10} className="inline text-accent" /> sont générés automatiquement : reste à faire ÷ jours avant l'échéance, ajusté par la priorité, placé dans les créneaux libres (blocs de {state.settings.maxBlock} min max, 10 min de pause entre deux).</p>
+      </Card>
+      <div className="flex min-w-0 flex-col gap-4">
+        {plan.overflow.length > 0 && (
+          <Card title={<span className="flex items-center gap-2 text-bad"><AlertTriangle size={14} />Ne tient pas aujourd'hui</span>}>
+            <ul className="flex flex-col gap-2 text-[13px]">
+              {plan.overflow.map((o) => (<li key={o.task.id} className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate">{o.task.title}</span><span className="font-mono text-xs text-muted">{fmtDur(o.minutes)}</span>
+                <Btn size="sm" variant="ghost" title="Repousser l'échéance d'un jour" onClick={() => { dispatch({ type: "task/update", id: o.task.id, patch: { deadline: iso(addDays(parseISO(o.task.deadline), 1)) } }); toast("Échéance repoussée d'un jour", "info"); }}>+1 j</Btn></li>))}
+            </ul>
+          </Card>
+        )}
+        <Card title="Semaine">
+          <div className="grid grid-cols-7 gap-1.5">
+            {week.map((p) => { const h = Math.min(1.2, p.load); const tone = p.level === "surcharge" ? "bg-bad" : p.level === "chargé" ? "bg-warn" : "bg-ok";
+              return (<button key={p.date} onClick={() => setOffset(daysBetween(todayISO(), p.date))} className={cx("flex flex-col items-center gap-1 rounded-md p-1 hover:bg-sunken", p.date === date && "bg-sunken ring-1 ring-accent")}>
+                <div className="flex h-20 w-full items-end justify-center rounded bg-sunken/60"><div className={cx("w-3 rounded-sm", tone)} style={{ height: `${(h / 1.2) * 100}%` }} /></div>
+                <span className="text-[10px] text-muted">{DAYS[weekday(parseISO(p.date))]}</span><span className="font-mono text-[10px] tabular-nums">{Math.round(p.load * 100)}%</span></button>); })}
+          </div>
+        </Card>
+        <Card title="Emploi du temps fixe">
+          <ul className="mb-3 flex max-h-56 flex-col gap-1 overflow-auto pr-1 text-xs">
+            {[...state.classes].sort((a, b) => a.day - b.day || toMin(a.start) - toMin(b.start)).map((c) => { const co = state.courses.find((x) => x.id === c.courseId); return (
+              <li key={c.id} className="group flex items-center gap-2 rounded px-1 py-1 hover:bg-sunken"><span className="w-8 text-muted">{DAYS[c.day]}</span><span className="font-mono tabular-nums">{c.start}–{c.end}</span>
+                <span className="h-2 w-2 rounded-full" style={{ background: co?.color }} /><span className="min-w-0 flex-1 truncate">{co?.code}</span>
+                <button className="text-muted opacity-0 hover:text-bad group-hover:opacity-100" aria-label="Supprimer le créneau" onClick={() => { dispatch({ type: "class/remove", id: c.id }); toast("Créneau supprimé", "info"); }}><Trash2 size={12} /></button></li>); })}
+          </ul>
+          <form className="grid grid-cols-2 gap-2" onSubmit={(e) => { e.preventDefault(); if (toMin(newClass.end) <= toMin(newClass.start)) { toast("L'heure de fin doit suivre l'heure de début.", "bad"); return; } dispatch({ type: "class/add", session: { id: uid(), ...newClass } }); toast("Cours ajouté à l'emploi du temps"); }}>
+            <Select id="nc-course" aria-label="Module" className="col-span-2" value={newClass.courseId} onChange={(e) => setNewClass({ ...newClass, courseId: e.target.value })}>{state.courses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select>
+            <Select id="nc-day" aria-label="Jour" value={newClass.day} onChange={(e) => setNewClass({ ...newClass, day: Number(e.target.value) })}>{DAYS_LONG.map((d, i) => <option key={d} value={i}>{d}</option>)}</Select>
+            <Input id="nc-room" aria-label="Salle" placeholder="Salle" value={newClass.room} onChange={(e) => setNewClass({ ...newClass, room: e.target.value })} />
+            <Input id="nc-start" aria-label="Début" type="time" value={newClass.start} onChange={(e) => setNewClass({ ...newClass, start: e.target.value })} />
+            <Input id="nc-end" aria-label="Fin" type="time" value={newClass.end} onChange={(e) => setNewClass({ ...newClass, end: e.target.value })} />
+            <Btn type="submit" className="col-span-2" disabled={!state.courses.length}><Plus size={14} />Ajouter le créneau</Btn>
+          </form>
+        </Card>
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------- Module : Académique
+const STATUS: Record<TaskStatus, { label: string; color: string }> = {
+  todo: { label: "À faire", color: "rgb(var(--muted))" }, doing: { label: "En cours", color: "rgb(var(--accent))" },
+  review: { label: "En révision", color: "rgb(var(--warn))" }, done: { label: "Terminé", color: "rgb(var(--ok))" },
+};
+const ORDER: TaskStatus[] = ["todo", "doing", "review", "done"];
+const KIND_LABEL: Record<TaskKind, string> = { devoir: "Devoir", examen: "Examen", projet: "Projet" };
+
+const Academic: React.FC<{ openNewTask: () => void }> = ({ openNewTask }) => {
+  const { state, dispatch, toast } = useStore();
+  const [filter, setFilter] = useState<string>("");
+  const [dragId, setDragId] = useState<ID | null>(null);
+  const [editing, setEditing] = useState<Task | null>(null);
+  const [courseForm, setCourseForm] = useState({ name: "", code: "", coef: 3 });
+  const [gradeDraft, setGradeDraft] = useState<Record<ID, { label: string; score: string; weight: string }>>({});
+  const today = todayISO();
+  const tasks = state.tasks.filter((t) => !filter || t.courseId === filter);
+  const avg = overallAverage(state.courses);
+  const totalCoef = state.courses.reduce((n, c) => n + c.coef, 0);
+  const move = (t: Task, dir: 1 | -1) => { const i = ORDER.indexOf(t.status) + dir; if (i < 0 || i >= ORDER.length) return; dispatch({ type: "task/update", id: t.id, patch: { status: ORDER[i] } }); if (ORDER[i] === "done") toast(`« ${t.title} » terminé`); };
+  const palette = ["#2f6fed", "#0f9d76", "#d9822b", "#c2417a", "#7a5af5", "#1d9bb5", "#b5651d"];
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <Select id="ac-filter" aria-label="Filtrer par module" className="w-auto" value={filter} onChange={(e) => setFilter(e.target.value)}>
+          <option value="">Tous les modules</option>{state.courses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select>
+        <span className="text-xs text-muted">Glissez une carte d'une colonne à l'autre, ou utilisez les flèches.</span>
+        <Btn variant="primary" className="ml-auto" onClick={openNewTask}><Plus size={14} />Nouvelle tâche <Kbd>N</Kbd></Btn>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {ORDER.map((s) => { const col = tasks.filter((t) => t.status === s).sort((a, b) => a.deadline.localeCompare(b.deadline)); return (
+          <div key={s} className={cx("flex min-w-0 flex-col rounded-2xl border-2 border-dashed border-line bg-sunken/40 p-2 transition-colors duration-300", dragId && "border-accent bg-accent/5")}
+            onDragOver={(e) => e.preventDefault()} onDrop={() => { const t = state.tasks.find((x) => x.id === dragId); if (t && t.status !== s) { dispatch({ type: "task/update", id: t.id, patch: { status: s } }); toast(`Déplacé vers « ${STATUS[s].label} »`, s === "done" ? "ok" : "info"); } setDragId(null); }}>
+            <div className="flex items-center gap-2 px-2 py-1.5"><span className="h-2 w-2 rounded-full" style={{ background: STATUS[s].color }} /><span className="text-xs font-semibold">{STATUS[s].label}</span><span className="font-mono text-xs text-muted">{col.length}</span></div>
+            <div className="flex flex-col gap-2">
+              {col.map((t) => { const c = state.courses.find((x) => x.id === t.courseId); const left = daysBetween(today, t.deadline); const pct = Math.min(100, (t.spent / t.estimate) * 100); return (
+                <article key={t.id} draggable onDragStart={() => setDragId(t.id)} onDragEnd={() => setDragId(null)}
+                  className={cx("group cursor-grab rounded-xl border-2 border-fg/80 bg-panel p-3 shadow-[3px_3px_0_0_rgb(var(--ink))] transition-all duration-300 [transition-timing-function:var(--spring)] hover:-translate-y-0.5 hover:rotate-[-.6deg] active:cursor-grabbing", dragId === t.id && "rotate-2 opacity-60")}>
+                  <div className="mb-1.5 flex items-center gap-1.5">
+                    <span className="truncate text-[10px] font-semibold uppercase tracking-wider" style={{ color: c?.color }}>{c?.code ?? "Libre"}</span>
+                    <Pill>{KIND_LABEL[t.kind]}</Pill>{t.priority === 3 && <Flame size={12} className="text-bad" aria-label="Priorité haute" />}
+                    <button className="ml-auto text-muted opacity-60 transition hover:text-accent group-hover:opacity-100" aria-label="Modifier la tâche" onClick={() => setEditing(t)}><Pencil size={12} /></button>
+                    <button className="text-muted opacity-60 transition hover:text-bad group-hover:opacity-100" aria-label="Supprimer la tâche" onClick={() => { dispatch({ type: "task/remove", id: t.id }); toast("Tâche supprimée", "info"); }}><Trash2 size={12} /></button>
+                  </div>
+                  <p className={cx("text-[13px] font-medium leading-snug", s === "done" && "text-muted line-through")}>{t.title}</p>
+                  <div className="mt-2 h-1 rounded-full bg-sunken"><div className="h-full rounded-full bg-accent" style={{ width: `${pct}%` }} /></div>
+                  <div className="mt-2 flex items-center gap-2 text-[11px] text-muted">
+                    <span className="font-mono tabular-nums">{fmtDur(t.spent)} / {fmtDur(t.estimate)}</span>
+                    <span className={cx("ml-auto", s !== "done" && left < 0 && "font-semibold text-bad", s !== "done" && left >= 0 && left <= 2 && "text-warn")}>{fmtDate(t.deadline)}</span>
+                  </div>
+                  <div className="mt-2 flex justify-between">
+                    <Btn size="sm" variant="ghost" disabled={s === "todo"} onClick={() => move(t, -1)} aria-label="Statut précédent"><ChevronLeft size={13} /></Btn>
+                    <Btn size="sm" variant="ghost" disabled={s === "done"} onClick={() => move(t, 1)} aria-label="Statut suivant"><ChevronRight size={13} /></Btn>
+                  </div>
+                </article>); })}
+              {!col.length && <p className="px-2 py-6 text-center text-xs text-muted">Aucune tâche</p>}
+            </div>
+          </div>); })}
+      </div>
+
+      {editing && <Modal title="Modifier la tâche" onClose={() => setEditing(null)}><TaskForm task={editing} onDone={() => setEditing(null)} /></Modal>}
+      {!state.tasks.length && <Empty icon={<GraduationCap size={18} />} title="Aucune tâche pour l'instant" hint="Ajoutez vos devoirs, examens et projets : ils seront répartis automatiquement dans votre planning." action={<Btn variant="primary" onClick={openNewTask}><Plus size={14} />Première tâche</Btn>} />}
+      <Card title="Modules & coefficients" action={<span className="font-mono text-xs text-muted">Moyenne générale <span className="text-fg">{avg === null ? "—" : avg.toFixed(2)}</span> /20 · Σ coef {totalCoef}</span>}>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[640px] text-left text-[13px]">
+            <thead><tr className="text-[11px] uppercase tracking-wider text-muted"><th className="pb-2 font-medium">Module</th><th className="pb-2 font-medium">Coef</th><th className="pb-2 font-medium">Poids</th><th className="pb-2 font-medium">Notes (pondération)</th><th className="pb-2 text-right font-medium">Moyenne</th><th /></tr></thead>
+            <tbody className="divide-y divide-line">
+              {!state.courses.length && <tr><td colSpan={6} className="py-6 text-center text-xs text-muted">Ajoutez vos modules ci-dessous pour suivre coefficients et notes.</td></tr>}
+              {state.courses.map((c) => { const a = courseAverage(c); const d = gradeDraft[c.id] ?? { label: "", score: "", weight: "" }; return (
+                <tr key={c.id} className="align-top">
+                  <td className="py-2.5 pr-3"><div className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-sm" style={{ background: c.color }} /><span className="font-medium">{c.name}</span></div><span className="font-mono text-[11px] text-muted">{c.code}</span></td>
+                  <td className="py-2.5 pr-3"><Input id={`coef-${c.id}`} aria-label={`Coefficient ${c.name}`} type="number" min={0.5} step={0.5} className="h-7 w-16" value={c.coef} onChange={(e) => dispatch({ type: "course/update", id: c.id, patch: { coef: Math.max(0.5, Number(e.target.value)) } })} /></td>
+                  <td className="py-2.5 pr-3 font-mono text-xs tabular-nums text-muted">{totalCoef ? Math.round((c.coef / totalCoef) * 100) : 0} %</td>
+                  <td className="py-2.5 pr-3">
+                    <div className="flex flex-wrap gap-1">{c.grades.map((g) => (
+                      <span key={g.id} className="group inline-flex items-center gap-1 rounded bg-sunken px-1.5 py-0.5 text-[11px]">{g.label} <b className="font-mono">{g.score}</b><span className="text-muted">({g.weight} %)</span>
+                        <button aria-label="Retirer la note" className="text-muted hover:text-bad" onClick={() => dispatch({ type: "course/update", id: c.id, patch: { grades: c.grades.filter((x) => x.id !== g.id) } })}><X size={10} /></button></span>))}</div>
+                    <form className="mt-1.5 flex gap-1" onSubmit={(e) => { e.preventDefault(); const score = Number(d.score), weight = Number(d.weight);
+                      if (!d.label || isNaN(score) || score < 0 || score > 20 || !(weight > 0)) { toast("Note entre 0 et 20 et pondération positive requises.", "bad"); return; }
+                      dispatch({ type: "course/update", id: c.id, patch: { grades: [...c.grades, { id: uid(), label: d.label, score, weight }] } }); setGradeDraft({ ...gradeDraft, [c.id]: { label: "", score: "", weight: "" } }); toast("Note enregistrée"); }}>
+                      <Input id={`gl-${c.id}`} aria-label="Intitulé" placeholder="Intitulé" className="h-7 w-24 text-xs" value={d.label} onChange={(e) => setGradeDraft({ ...gradeDraft, [c.id]: { ...d, label: e.target.value } })} />
+                      <Input id={`gs-${c.id}`} aria-label="Note" placeholder="/20" className="h-7 w-14 text-xs" value={d.score} onChange={(e) => setGradeDraft({ ...gradeDraft, [c.id]: { ...d, score: e.target.value } })} />
+                      <Input id={`gw-${c.id}`} aria-label="Pondération" placeholder="%" className="h-7 w-12 text-xs" value={d.weight} onChange={(e) => setGradeDraft({ ...gradeDraft, [c.id]: { ...d, weight: e.target.value } })} />
+                      <Btn size="sm" type="submit" aria-label="Ajouter la note"><Plus size={12} /></Btn></form>
+                  </td>
+                  <td className={cx("py-2.5 text-right font-mono font-semibold tabular-nums", a !== null && a < 10 ? "text-bad" : "")}>{a === null ? "—" : a.toFixed(2)}</td>
+                  <td className="py-2.5 pl-2 text-right"><Btn size="sm" variant="danger" aria-label={`Supprimer ${c.name}`} onClick={() => { dispatch({ type: "course/remove", id: c.id }); toast("Module supprimé", "info"); }}><Trash2 size={12} /></Btn></td>
+                </tr>); })}
+            </tbody>
+          </table>
+        </div>
+        <form className="mt-3 flex flex-wrap gap-2 border-t border-line pt-3" onSubmit={(e) => { e.preventDefault(); if (!courseForm.name.trim()) { toast("Nommez le module.", "bad"); return; }
+          dispatch({ type: "course/add", course: { id: uid(), name: courseForm.name.trim(), code: courseForm.code.trim().toUpperCase() || courseForm.name.slice(0, 4).toUpperCase(), coef: courseForm.coef, color: palette[state.courses.length % palette.length], grades: [] } });
+          setCourseForm({ name: "", code: "", coef: 3 }); toast("Module ajouté"); }}>
+          <Input id="cf-name" aria-label="Nom du module" placeholder="Nouveau module" className="flex-1" value={courseForm.name} onChange={(e) => setCourseForm({ ...courseForm, name: e.target.value })} />
+          <Input id="cf-code" aria-label="Code" placeholder="Code" className="w-28" value={courseForm.code} onChange={(e) => setCourseForm({ ...courseForm, code: e.target.value })} />
+          <Input id="cf-coef" aria-label="Coefficient" type="number" min={0.5} step={0.5} className="w-20" value={courseForm.coef} onChange={(e) => setCourseForm({ ...courseForm, coef: Number(e.target.value) })} />
+          <Btn type="submit"><Plus size={14} />Module</Btn>
+        </form>
+      </Card>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------- Module : Pomodoro
+type Phase = "work" | "short" | "long";
+const PHASE_LABEL: Record<Phase, string> = { work: "Focus", short: "Pause courte", long: "Pause longue" };
+function beep() {
+  try {
+    const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    const ctx = new AC(); const o = ctx.createOscillator(); const g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination); o.frequency.value = 880; g.gain.setValueAtTime(0.15, ctx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.8);
+    o.start(); o.stop(ctx.currentTime + 0.8);
+  } catch { /* audio indisponible */ }
+}
+const Focus: React.FC = () => {
+  const { state, dispatch, toast } = useStore();
+  const cfg = state.settings.pomodoro;
+  const [phase, setPhase] = useState<Phase>("work");
+  const [running, setRunning] = useState(false);
+  const [remaining, setRemaining] = useState(cfg.work * 60);
+  const [cycles, setCycles] = useState(0);
+  const [taskId, setTaskId] = useState<ID | "">(state.tasks.find((t) => t.status === "doing")?.id ?? "");
+  const endAt = useRef<number | null>(null);
+  const total = (p: Phase) => (p === "work" ? cfg.work : p === "short" ? cfg.short : cfg.long) * 60;
+
+  const commitFocus = useCallback((seconds: number) => {
+    const minutes = Math.round(seconds / 60);
+    if (minutes < 1) return;
+    dispatch({ type: "focus/log", entry: { date: todayISO(), minutes, taskId: taskId || null } });
+    const t = state.tasks.find((x) => x.id === taskId);
+    if (t) dispatch({ type: "task/update", id: t.id, patch: { spent: t.spent + minutes, status: t.status === "todo" ? "doing" : t.status } });
+  }, [dispatch, state.tasks, taskId]);
+
+  const switchTo = useCallback((p: Phase) => { setPhase(p); setRemaining(total(p)); endAt.current = null; setRunning(false); }, [cfg]);
+
+  const complete = useCallback((secondsDone?: number) => {
+    if (secondsDone === undefined) beep();
+    if (phase === "work") {
+      commitFocus(secondsDone ?? total("work"));
+      const n = cycles + 1; setCycles(n);
+      const next: Phase = n % cfg.longEvery === 0 ? "long" : "short";
+      toast(`Session de focus terminée · ${PHASE_LABEL[next]} de ${next === "long" ? cfg.long : cfg.short} min`);
+      switchTo(next);
+    } else { toast("Pause terminée, on reprend", "info"); switchTo("work"); }
+  }, [phase, cycles, cfg, commitFocus, switchTo, toast]);
+
+  useEffect(() => {
+    if (!running) return;
+    if (!endAt.current) endAt.current = Date.now() + remaining * 1000;
+    const id = window.setInterval(() => {
+      const left = Math.max(0, Math.round(((endAt.current ?? 0) - Date.now()) / 1000));
+      setRemaining(left);
+      if (left === 0) { window.clearInterval(id); complete(); }
+    }, 250);
+    return () => window.clearInterval(id);
+  }, [running, complete]);
+
+  useEffect(() => { document.title = running ? `${pad(Math.floor(remaining / 60))}:${pad(remaining % 60)} · ${PHASE_LABEL[phase]}` : "Étudiant OS"; }, [remaining, running, phase]);
+  useEffect(() => { if (!running) setRemaining(total(phase)); }, [cfg.work, cfg.short, cfg.long]);
+
+  const toggle = () => { if (running) { endAt.current = null; setRunning(false); } else setRunning(true); };
+  const stopAndLog = () => {
+    if (phase === "work") { const done = total("work") - remaining; if (done >= 60) { commitFocus(done); toast(`${Math.round(done / 60)} min de focus enregistrées`); } }
+    switchTo(phase);
+  };
+  const progress = 1 - remaining / total(phase);
+  const R = 92, C = 2 * Math.PI * R;
+  const todayMin = state.focus.filter((f) => f.date === todayISO()).reduce((n, f) => n + f.minutes, 0);
+  const liveMin = todayMin + (phase === "work" ? Math.floor((total("work") - remaining) / 60) : 0);
+  const sessionsToday = state.focus.filter((f) => f.date === todayISO()).length;
+  const byTask = useMemo(() => {
+    const m = new Map<ID, number>(); state.focus.filter((f) => f.taskId && daysBetween(f.date, todayISO()) < 7).forEach((f) => m.set(f.taskId!, (m.get(f.taskId!) ?? 0) + f.minutes));
+    return [...m.entries()].map(([id, min]) => ({ t: state.tasks.find((x) => x.id === id), min })).filter((x) => x.t).sort((a, b) => b.min - a.min).slice(0, 5);
+  }, [state.focus, state.tasks]);
+  const setCfg = (patch: Partial<PomodoroCfg>) => dispatch({ type: "settings", patch: { pomodoro: { ...cfg, ...patch } } });
+
+  return (
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <Card>
+        <div className="flex flex-col items-center gap-5 py-4">
+          <div className="flex gap-1 rounded-lg bg-sunken p-1">
+            {(["work", "short", "long"] as Phase[]).map((p) => (<button key={p} onClick={() => switchTo(p)} className={cx("rounded-md px-3 py-1.5 text-xs font-medium transition", phase === p ? "bg-panel text-fg shadow-sm" : "text-muted hover:text-fg")}>{PHASE_LABEL[p]}</button>))}
+          </div>
+          <div className="relative grid place-items-center">
+            <svg width={220} height={220} viewBox="0 0 220 220" className="max-w-full -rotate-90">
+              <circle cx={110} cy={110} r={R} fill="none" stroke="rgb(var(--sunken))" strokeWidth={10} />
+              <circle cx={110} cy={110} r={R} fill="none" stroke={phase === "work" ? "rgb(var(--accent))" : "rgb(var(--ok))"} strokeWidth={10} strokeLinecap="round" strokeDasharray={C} strokeDashoffset={C * (1 - progress)} style={{ transition: "stroke-dashoffset .3s linear" }} />
+            </svg>
+            <div className="absolute text-center">
+              <p className="font-display text-6xl font-extrabold tabular-nums tracking-tighter">{pad(Math.floor(remaining / 60))}:{pad(remaining % 60)}</p>
+              <p className="mt-1 text-xs uppercase tracking-wider text-muted">{PHASE_LABEL[phase]} · cycle {(cycles % cfg.longEvery) + 1}/{cfg.longEvery}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Btn variant="ghost" onClick={stopAndLog} aria-label="Réinitialiser"><RotateCcw size={16} /></Btn>
+            <Btn variant="primary" data-pomo-toggle className="h-11 w-32 text-sm" onClick={toggle}>{running ? <><Pause size={16} />Pause</> : <><Play size={16} />Démarrer</>}</Btn>
+            <Btn variant="ghost" onClick={() => complete(total(phase) - remaining)} aria-label="Passer à la phase suivante"><SkipForward size={16} /></Btn>
+          </div>
+          <p className="text-xs text-muted"><Kbd>Espace</Kbd> démarrer / pause</p>
+          <Field label="Tâche en cours" htmlFor="pomo-task" className="w-full max-w-sm">
+            <Select id="pomo-task" value={taskId} onChange={(e) => setTaskId(e.target.value)}>
+              <option value="">Focus libre</option>{state.tasks.filter((t) => t.status !== "done").map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}</Select>
+          </Field>
+        </div>
+      </Card>
+      <div className="flex min-w-0 flex-col gap-4">
+        <div className="grid grid-cols-2 gap-3"><Stat label="Focus aujourd'hui" value={fmtDur(liveMin)} sub="mis à jour en direct" /><Stat label="Sessions" value={String(sessionsToday)} sub={`${cycles} cycles ce passage`} /></div>
+        <Card title="Réglages des sessions">
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Focus (min)" htmlFor="pc-w"><Input id="pc-w" type="number" min={5} max={120} value={cfg.work} onChange={(e) => setCfg({ work: Math.max(5, Number(e.target.value)) })} /></Field>
+            <Field label="Pause courte" htmlFor="pc-s"><Input id="pc-s" type="number" min={1} max={30} value={cfg.short} onChange={(e) => setCfg({ short: Math.max(1, Number(e.target.value)) })} /></Field>
+            <Field label="Pause longue" htmlFor="pc-l"><Input id="pc-l" type="number" min={5} max={60} value={cfg.long} onChange={(e) => setCfg({ long: Math.max(5, Number(e.target.value)) })} /></Field>
+            <Field label="Longue tous les" htmlFor="pc-e"><Input id="pc-e" type="number" min={2} max={8} value={cfg.longEvery} onChange={(e) => setCfg({ longEvery: Math.max(2, Number(e.target.value)) })} /></Field>
+          </div>
+        </Card>
+        <Card title="Temps par tâche · 7 jours">
+          {byTask.length ? <ul className="flex flex-col gap-2 text-[13px]">{byTask.map(({ t, min }) => (<li key={t!.id} className="flex gap-2"><span className="min-w-0 flex-1 truncate">{t!.title}</span><span className="font-mono text-xs tabular-nums text-muted">{fmtDur(min)}</span></li>))}</ul>
+            : <Empty icon={<Timer size={18} />} title="Pas encore de session liée" hint="Choisissez une tâche avant de lancer le minuteur pour suivre le temps passé dessus." />}
+        </Card>
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------- Module : Courses
+const AISLES: Aisle[] = ["Fruits & légumes", "Frais", "Épicerie", "Boissons", "Surgelés", "Hygiène", "Entretien"];
+const GUESS: [RegExp, Aisle][] = [
+  [/lait|yaourt|fromage|beurre|œuf|oeuf|crème|jambon|poulet|viande|poisson|emmental|tofu/i, "Frais"],
+  [/pomme|banane|salade|tomate|carotte|oignon|ail|courgette|épinard|fruit|légume|citron|avocat/i, "Fruits & légumes"],
+  [/eau|jus|soda|bière|vin|thé|sirop/i, "Boissons"], [/surgel|glace|frite/i, "Surgelés"],
+  [/savon|shampo|dentifrice|déo|gel douche|coton|rasoir|papier toilette/i, "Hygiène"],
+  [/lessive|éponge|vaisselle|javel|sac poubelle|sacs poubelle|nettoy|essuie/i, "Entretien"],
+];
+const guessAisle = (name: string): Aisle => GUESS.find(([re]) => re.test(name))?.[1] ?? "Épicerie";
+
+const Groceries: React.FC = () => {
+  const { state, dispatch, toast } = useStore();
+  const [name, setName] = useState(""); const [qty, setQty] = useState(""); const [aisle, setAisle] = useState<Aisle | "auto">("auto");
+  const [quick, setQuick] = useState(false); const [bulk, setBulk] = useState(""); const [hideChecked, setHideChecked] = useState(false);
+  const [price, setPrice] = useState(""); const [paid, setPaid] = useState("");
+  const cur = state.settings.currency;
+  const left = state.groceries.filter((g) => !g.checked).length;
+  const estTotal = state.groceries.reduce((n, g) => n + g.price, 0);
+  const cartTotal = state.groceries.filter((g) => g.checked).reduce((n, g) => n + g.price, 0);
+  const mk = monthKey(todayISO());
+  const monthExp = state.budget.expenses.filter((e) => monthKey(e.date) === mk);
+  const groceryLimit = state.budget.limits.Courses;
+  const grocerySpent = monthExp.filter((e) => e.category === "Courses").reduce((n, e) => n + e.amount, 0);
+  const remainingAll = state.budget.monthly - monthExp.reduce((n, e) => n + e.amount, 0);
+  const checkout = () => {
+    const amount = paid.trim() ? parseAmount(paid) : cartTotal;
+    if (!(amount > 0)) { toast("Indiquez le montant payé (ou des prix sur les articles cochés).", "bad"); return; }
+    dispatch({ type: "grocery/checkout", amount, date: todayISO() }); setPaid("");
+    toast(`Dépense de ${money(amount, cur)} ajoutée au budget Courses`);
+  };
+  const add = (e: React.FormEvent) => {
+    e.preventDefault(); if (!name.trim()) return;
+    const a = aisle === "auto" ? guessAisle(name) : aisle;
+    const pr = price.trim() ? parseAmount(price) : 0;
+    dispatch({ type: "grocery/add", item: { id: uid(), name: name.trim(), qty: qty.trim(), aisle: a, checked: false, price: isNaN(pr) ? 0 : pr } });
+    toast(`Ajouté au rayon ${a}`); setName(""); setQty(""); setPrice("");
+  };
+  const addBulk = () => {
+    const lines = bulk.split(/[\n,;]/).map((l) => l.trim()).filter(Boolean);
+    lines.forEach((l) => { const m = l.match(/^(.*?)(?:\s+(x?\d+.*))?$/); dispatch({ type: "grocery/add", item: { id: uid(), name: m?.[1] ?? l, qty: m?.[2] ?? "", aisle: guessAisle(l), checked: false, price: 0 } }); });
+    if (lines.length) toast(`${lines.length} articles ajoutés et triés par rayon`); setBulk("");
+  };
+  return (
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <Card title={<span className="flex items-center gap-2"><ShoppingCart size={15} />Liste de courses <Pill tone={left ? "info" : "ok"}>{left} restants</Pill></span>}
+        action={<><Btn size="sm" variant={quick ? "primary" : "soft"} onClick={() => setQuick(!quick)}><Zap size={12} />Mode rapide</Btn><Btn size="sm" variant="ghost" onClick={() => setHideChecked(!hideChecked)}>{hideChecked ? "Afficher" : "Masquer"} cochés</Btn></>}>
+        {!state.groceries.length ? <Empty icon={<ShoppingCart size={18} />} title="Liste vide" hint="Ajoutez un article à droite ; le rayon est deviné automatiquement." /> : (
+          <div className={cx("grid gap-4", !quick && "sm:grid-cols-2")}>
+            {AISLES.map((a) => { const items = state.groceries.filter((g) => g.aisle === a && !(hideChecked && g.checked)); if (!items.length) return null; return (
+              <div key={a} className="min-w-0">
+                <p className="mb-1.5 flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-muted"><span>{a}</span><span className="font-mono">{items.filter((i) => !i.checked).length}/{items.length}</span></p>
+                <ul className="flex flex-col">
+                  {items.map((g) => (
+                    <li key={g.id} className={cx("group flex items-center gap-3 rounded-lg px-2 transition-all duration-300 hover:translate-x-0.5 hover:bg-sunken", quick ? "py-3 text-base" : "py-1.5 text-[13px]")}>
+                      <button onClick={() => dispatch({ type: "grocery/toggle", id: g.id })} aria-label={g.checked ? "Décocher" : "Cocher"} className={cx("grid shrink-0 place-items-center rounded border transition", quick ? "h-6 w-6" : "h-4 w-4", g.checked ? "scale-110 border-fg bg-hi text-[rgb(24_22_46)]" : "border-fg/40 hover:border-accent")}>{g.checked && <Check className="tick" size={quick ? 14 : 11} strokeWidth={3} />}</button>
+                      <span className={cx("min-w-0 flex-1 truncate", g.checked && "text-muted line-through")}>{g.name}</span>
+                      {g.qty && <span className="font-mono text-xs text-muted">{g.qty}</span>}
+                      {quick ? (g.price > 0 && <span className="font-mono text-xs tabular-nums text-muted">{money(g.price, cur)}</span>) : (
+                        <input id={`gp-${g.id}`} aria-label={`Prix ${g.name}`} inputMode="decimal" defaultValue={g.price ? String(g.price).replace(".", ",") : ""} placeholder="prix"
+                          onBlur={(e) => { const v = e.target.value.trim() ? parseAmount(e.target.value) : 0; if (!isNaN(v) && v !== g.price) dispatch({ type: "grocery/update", id: g.id, patch: { price: v } }); }}
+                          className="w-14 rounded-md border border-transparent bg-transparent px-1 text-right font-mono text-xs tabular-nums text-muted outline-none hover:border-line focus:border-accent focus:text-fg" />)}
+                      {!quick && <button className="text-muted opacity-0 hover:text-bad group-hover:opacity-100" aria-label="Supprimer" onClick={() => dispatch({ type: "grocery/remove", id: g.id })}><Trash2 size={12} /></button>}
+                    </li>))}
+                </ul>
+              </div>); })}
+          </div>)}
+        {state.groceries.length > 0 && (
+          <div className="mt-4 flex flex-wrap items-end gap-3 border-t border-line pt-4">
+            <div className="mr-auto"><p className="text-[11px] uppercase tracking-wider text-muted">Panier coché · liste estimée</p>
+              <p className="font-mono text-lg font-semibold tabular-nums">{money(cartTotal, cur)} <span className="text-sm font-normal text-muted">/ {money(estTotal, cur)}</span></p></div>
+            {state.groceries.some((g) => g.checked) && <>
+              <Field label="Montant payé" htmlFor="gr-paid"><Input id="gr-paid" inputMode="decimal" className="w-28" placeholder={cartTotal ? cartTotal.toFixed(2).replace(".", ",") : "0,00"} value={paid} onChange={(e) => setPaid(e.target.value)} /></Field>
+              <Btn variant="primary" onClick={checkout}><Receipt size={14} />Valider les achats</Btn>
+              <Btn variant="ghost" onClick={() => { dispatch({ type: "grocery/clearChecked" }); toast("Articles cochés retirés", "info"); }}><Trash2 size={13} />Retirer sans dépense</Btn></>}
+          </div>)}
+      </Card>
+      <div className="flex min-w-0 flex-col gap-4">
+        <Card title={<span className="flex items-center gap-2"><Wallet size={15} />Budget courses du mois</span>}>
+          {groceryLimit ? (<>
+            <div className="flex items-baseline justify-between"><span className="font-mono text-xl font-semibold tabular-nums">{money(grocerySpent, cur)}</span><span className="text-xs text-muted">sur {money(groceryLimit, cur)}</span></div>
+            <div className="mt-2 h-2 rounded-full bg-sunken"><div className={cx("h-full rounded-full transition-all", grocerySpent > groceryLimit ? "bg-bad" : grocerySpent + estTotal > groceryLimit ? "bg-warn" : "bg-ok")} style={{ width: `${Math.min(100, (grocerySpent / groceryLimit) * 100)}%` }} /></div>
+            <p className="mt-2 text-xs text-muted">{grocerySpent + estTotal > groceryLimit ? `Attention : cette liste (${money(estTotal, cur)}) dépasserait le budget de ${money(grocerySpent + estTotal - groceryLimit, cur)}.` : `Après cette liste, il resterait ${money(groceryLimit - grocerySpent - estTotal, cur)}.`}</p>
+          </>) : <p className="text-xs text-muted">Pas de plafond « Courses » défini. Reste global du mois : <b className="font-mono text-fg">{money(remainingAll, cur)}</b>. Fixez un plafond dans l'onglet Budget.</p>}
+        </Card>
+        <Card title="Ajouter un article">
+          <form onSubmit={add} className="flex flex-col gap-2">
+            <Input id="gr-name" aria-label="Article" placeholder="Ex. Lait demi-écrémé" value={name} onChange={(e) => setName(e.target.value)} />
+            <div className="grid grid-cols-2 gap-2"><Input id="gr-qty" aria-label="Quantité" placeholder="Quantité" value={qty} onChange={(e) => setQty(e.target.value)} />
+              <Input id="gr-price" aria-label="Prix estimé" inputMode="decimal" placeholder={`Prix estimé (${cur})`} value={price} onChange={(e) => setPrice(e.target.value)} />
+              <Select id="gr-aisle" aria-label="Rayon" className="col-span-2" value={aisle} onChange={(e) => setAisle(e.target.value as Aisle | "auto")}><option value="auto">Rayon auto{name ? ` (${guessAisle(name)})` : ""}</option>{AISLES.map((a) => <option key={a} value={a}>{a}</option>)}</Select></div>
+            <Btn type="submit" variant="primary"><Plus size={14} />Ajouter</Btn>
+          </form>
+        </Card>
+        <Card title="Saisie en vrac">
+          <textarea id="gr-bulk" aria-label="Articles en vrac" value={bulk} onChange={(e) => setBulk(e.target.value)} rows={4} placeholder={"tomates 6\nliquide vaisselle\nthé vert, riz"} className={cx(inputCls, "h-auto py-2")} />
+          <Btn className="mt-2 w-full" onClick={addBulk} disabled={!bulk.trim()}>Trier et ajouter</Btn>
+        </Card>
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------- Module : Budget & dépenses
+const CATS: ExpenseCat[] = ["Courses", "Restauration", "Logement", "Transport", "Études", "Loisirs", "Santé", "Autre"];
+const CAT_COLOR: Record<ExpenseCat, string> = {
+  Courses: "#10a37f", Restauration: "#e0802a", Logement: "#5b6b8c", Transport: "#2b8bd6", Études: "#6d5bd0", Loisirs: "#d6457a", Santé: "#1aa3a3", Autre: "#8a8f98",
+};
+const QUICK: { label: string; amount: number; category: ExpenseCat }[] = [
+  { label: "Resto U", amount: 3.3, category: "Restauration" }, { label: "Café", amount: 1.5, category: "Restauration" },
+  { label: "Ticket transport", amount: 2.1, category: "Transport" }, { label: "Boulangerie", amount: 2.4, category: "Courses" },
+];
+const BudgetView: React.FC = () => {
+  const { state, dispatch, toast } = useStore();
+  const cur = state.settings.currency;
+  const [offset, setOffset] = useState(0);
+  const now = new Date();
+  const ref = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+  const mk = `${ref.getFullYear()}-${pad(ref.getMonth() + 1)}`;
+  const isCurrent = offset === 0;
+  const exp = state.budget.expenses.filter((e) => monthKey(e.date) === mk).sort((a, b) => b.date.localeCompare(a.date));
+  const spent = exp.reduce((n, e) => n + e.amount, 0);
+  const dim = daysInMonth(ref);
+  const elapsed = isCurrent ? now.getDate() : offset < 0 ? dim : 0;
+  const projection = elapsed ? (spent / elapsed) * dim : 0;
+  const remaining = state.budget.monthly - spent;
+  const perDayLeft = isCurrent ? remaining / Math.max(1, dim - now.getDate() + 1) : 0;
+  const byCat = CATS.map((c) => ({ c, v: exp.filter((e) => e.category === c).reduce((n, e) => n + e.amount, 0), lim: state.budget.limits[c] })).filter((x) => x.v > 0 || x.lim);
+  const daily = Array.from({ length: dim }, (_, i) => exp.filter((e) => Number(e.date.slice(8)) === i + 1).reduce((n, e) => n + e.amount, 0));
+  const [f, setF] = useState({ label: "", amount: "", category: "Courses" as ExpenseCat, date: todayISO() });
+  const [editLimits, setEditLimits] = useState(false);
+  const add = (e: React.FormEvent) => {
+    e.preventDefault(); const amount = parseAmount(f.amount);
+    if (!(amount > 0)) { toast("Saisissez un montant positif, par exemple 12,50.", "bad"); return; }
+    dispatch({ type: "expense/add", expense: { id: uid(), date: f.date, amount, category: f.category, label: f.label.trim() || f.category } });
+    toast(`${money(amount, cur)} ajoutés en ${f.category}`); setF({ ...f, label: "", amount: "" });
+  };
+  const tone = remaining < 0 ? "bad" : projection > state.budget.monthly ? "warn" : "ok";
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <Btn size="sm" variant="ghost" onClick={() => setOffset(offset - 1)} aria-label="Mois précédent"><ChevronLeft size={14} /></Btn>
+        <span className="min-w-[140px] text-center text-sm font-semibold capitalize">{ref.toLocaleDateString("fr-FR", { month: "long", year: "numeric" })}</span>
+        <Btn size="sm" variant="ghost" onClick={() => setOffset(offset + 1)} aria-label="Mois suivant"><ChevronRight size={14} /></Btn>
+        {!isCurrent && <Btn size="sm" onClick={() => setOffset(0)}>Ce mois</Btn>}
+        <div className="ml-auto flex items-center gap-2"><label htmlFor="bd-monthly" className="text-xs text-muted">Budget mensuel</label>
+          <Input id="bd-monthly" inputMode="decimal" className="w-28" defaultValue={String(state.budget.monthly)} key={state.budget.monthly}
+            onBlur={(e) => { const v = parseAmount(e.target.value); if (v > 0 && v !== state.budget.monthly) { dispatch({ type: "budget/set", patch: { monthly: v } }); toast("Budget mensuel mis à jour"); } }} /><span className="text-xs text-muted">{cur}</span></div>
+      </div>
+      {isCurrent && remaining < 0 && <div className="flex items-center gap-2 rounded-2xl border border-bad/30 bg-bad/8 px-4 py-3 text-sm text-bad"><AlertTriangle size={16} />Budget dépassé de {money(-remaining, cur)} ce mois-ci.</div>}
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <Stat label="Dépensé" value={money(spent, cur)} sub={`${Math.round((spent / Math.max(1, state.budget.monthly)) * 100)} % du budget`} />
+        <Stat label="Restant" value={money(remaining, cur)} sub={isCurrent ? `${money(Math.max(0, perDayLeft), cur)} / jour jusqu'à la fin du mois` : undefined} tone={remaining < 0 ? "bad" : "ok"} />
+        <Stat label="Projection fin de mois" value={elapsed ? money(projection, cur) : "—"} sub="au rythme actuel" tone={tone === "ok" ? undefined : tone} />
+        <Stat label="Dépenses" value={String(exp.length)} sub={exp.length ? `moyenne ${money(spent / exp.length, cur)}` : "aucune ce mois"} />
+      </div>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="flex min-w-0 flex-col gap-4">
+          <Card title="Dépenses par jour" action={<Pill tone="info">{money(spent / Math.max(1, elapsed || dim), cur)} / jour</Pill>}>
+            <BarChart data={daily.map((v, i) => ({ label: (i + 1) % 5 === 0 || i === 0 ? String(i + 1) : "", value: v, tone: v > state.budget.monthly / dim * 2 ? "warn" : "accent" }))} goal={state.budget.monthly / dim} unit={(v) => `${Math.round(v)}`} />
+            <p className="mt-1 text-xs text-muted">Ligne pointillée : budget journalier moyen ({money(state.budget.monthly / dim, cur)}).</p>
+          </Card>
+          <Card title="Historique" action={<span className="font-mono text-xs text-muted">{exp.length} lignes</span>}>
+            {exp.length ? (
+              <ul className="flex flex-col divide-y divide-line">
+                {exp.map((e) => (
+                  <li key={e.id} className="group flex items-center gap-3 py-2 text-[13px]">
+                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl text-[11px] font-semibold text-white" style={{ background: CAT_COLOR[e.category] }}>{e.category.slice(0, 2)}</span>
+                    <div className="min-w-0 flex-1"><p className="truncate font-medium">{e.label}</p><p className="text-[11px] text-muted">{fmtDate(e.date)} · {e.category}</p></div>
+                    <span className="font-mono tabular-nums">−{money(e.amount, cur)}</span>
+                    <button className="text-muted opacity-60 hover:text-bad group-hover:opacity-100" aria-label="Supprimer la dépense" onClick={() => { dispatch({ type: "expense/remove", id: e.id }); toast("Dépense supprimée", "info"); }}><Trash2 size={13} /></button>
+                  </li>))}
+              </ul>) : <Empty icon={<Receipt size={18} />} title="Aucune dépense ce mois-ci" hint="Ajoutez une dépense à droite, ou validez vos achats depuis la liste de courses." />}
+          </Card>
+        </div>
+        <div className="flex min-w-0 flex-col gap-4">
+          <Card title="Nouvelle dépense">
+            <form onSubmit={add} className="grid grid-cols-2 gap-2">
+              <Input id="bd-label" aria-label="Libellé" placeholder="Libellé (ex. Pharmacie)" className="col-span-2" value={f.label} onChange={(e) => setF({ ...f, label: e.target.value })} />
+              <Input id="bd-amount" aria-label="Montant" inputMode="decimal" placeholder={`Montant (${cur})`} value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
+              <Select id="bd-cat" aria-label="Catégorie" value={f.category} onChange={(e) => setF({ ...f, category: e.target.value as ExpenseCat })}>{CATS.map((c) => <option key={c} value={c}>{c}</option>)}</Select>
+              <Input id="bd-date" aria-label="Date" type="date" className="col-span-2" value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />
+              <Btn type="submit" variant="primary" className="col-span-2"><Plus size={14} />Ajouter la dépense</Btn>
+            </form>
+            <p className="mb-1.5 mt-3 text-[11px] uppercase tracking-wider text-muted">Ajout rapide</p>
+            <div className="flex flex-wrap gap-1.5">{QUICK.map((q) => (
+              <button key={q.label} onClick={() => { dispatch({ type: "expense/add", expense: { id: uid(), date: todayISO(), amount: q.amount, category: q.category, label: q.label } }); toast(`${q.label} : ${money(q.amount, cur)}`); }}
+                className="rounded-full border border-line px-2.5 py-1 text-xs transition hover:border-accent hover:text-accent">{q.label} · {money(q.amount, cur)}</button>))}</div>
+          </Card>
+          <Card title="Par catégorie" action={<Btn size="sm" variant="ghost" onClick={() => setEditLimits(!editLimits)}>{editLimits ? "Terminé" : "Plafonds"}</Btn>}>
+            <div className="flex flex-col gap-3">
+              {(editLimits ? CATS.map((c) => ({ c, v: exp.filter((e) => e.category === c).reduce((n, e) => n + e.amount, 0), lim: state.budget.limits[c] })) : byCat).map(({ c, v, lim }) => (
+                <div key={c}>
+                  <div className="mb-1 flex items-center justify-between gap-2 text-xs"><span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ background: CAT_COLOR[c] }} />{c}</span>
+                    {editLimits ? <Input id={`lim-${c}`} aria-label={`Plafond ${c}`} inputMode="decimal" placeholder="aucun" className="h-7 w-24 text-xs" defaultValue={lim ? String(lim) : ""}
+                      onBlur={(e) => { const val = e.target.value.trim() ? parseAmount(e.target.value) : 0; const limits = { ...state.budget.limits }; if (val > 0) limits[c] = val; else delete limits[c]; dispatch({ type: "budget/set", patch: { limits } }); }} />
+                      : <span className={cx("font-mono tabular-nums", lim && v > lim ? "text-bad" : "text-muted")}>{money(v, cur)}{lim ? ` / ${money(lim, cur)}` : ""}</span>}</div>
+                  <div className="h-1.5 rounded-full bg-sunken"><div className="h-full rounded-full" style={{ width: `${Math.min(100, (v / (lim || Math.max(spent, 1))) * 100)}%`, background: lim && v > lim ? "rgb(var(--bad))" : CAT_COLOR[c] }} /></div>
+                </div>))}
+              {!editLimits && !byCat.length && <p className="text-xs text-muted">Les catégories apparaîtront avec vos premières dépenses.</p>}
+            </div>
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------- Module : Ménage
+const REC_LABEL: Record<Recurrence, string> = { daily: "Quotidienne", weekly: "Hebdomadaire", biweekly: "Bimensuelle" };
+const Chores: React.FC = () => {
+  const { state, dispatch, toast } = useStore();
+  const [offset, setOffset] = useState(0);
+  const monday = addDays(new Date(), offset * 7 - weekday(new Date()));
+  const days = Array.from({ length: 7 }, (_, i) => addDays(monday, i));
+  const [f, setF] = useState({ name: "", recurrence: "weekly" as Recurrence, day: 5, minutes: 20, assignees: ["Moi", ...state.settings.roommates].join(", ") });
+  const people = Array.from(new Set(state.chores.flatMap((c) => c.assignees)));
+  const minutesBy = people.map((p) => ({ p, min: state.chores.reduce((n, c) => n + days.filter((d) => choreScheduledOn(c, d) && choreAssignee(c, d) === p).length * c.minutes, 0) }));
+  const maxMin = Math.max(1, ...minutesBy.map((x) => x.min));
+  const today = todayISO();
+  return (
+    <div className="flex flex-col gap-4">
+      <Card title={<span className="flex items-center gap-2"><Repeat size={15} />Semaine {isoWeek(monday)} · {monday.toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}</span>}
+        action={<><Btn size="sm" variant="ghost" onClick={() => setOffset(offset - 1)} aria-label="Semaine précédente"><ChevronLeft size={14} /></Btn><Btn size="sm" onClick={() => setOffset(0)}>Cette semaine</Btn><Btn size="sm" variant="ghost" onClick={() => setOffset(offset + 1)} aria-label="Semaine suivante"><ChevronRight size={14} /></Btn></>}>
+        {!state.chores.length ? <Empty icon={<Home size={18} />} title="Aucune corvée définie" hint="Ajoutez une corvée ci-dessous pour générer la matrice et la rotation." /> : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] border-separate border-spacing-1 text-[12px]">
+              <thead><tr><th className="text-left text-[11px] font-medium uppercase tracking-wider text-muted">Corvée</th>
+                {days.map((d) => <th key={iso(d)} className={cx("rounded-md py-1 text-center font-medium", iso(d) === today ? "bg-accent/10 text-accent" : "text-muted")}>{DAYS[weekday(d)]} {d.getDate()}</th>)}<th /></tr></thead>
+              <tbody>
+                {state.chores.map((c) => (
+                  <tr key={c.id} className="group">
+                    <td className="pr-2"><p className="font-medium text-fg">{c.name}</p><p className="text-[11px] text-muted">{REC_LABEL[c.recurrence]} · {c.minutes} min</p></td>
+                    {days.map((d) => { const on = choreScheduledOn(c, d); const k = iso(d); const done = c.done.includes(k); const who = choreAssignee(c, d); return (
+                      <td key={k} className="text-center">{on ? (
+                        <button onClick={() => { dispatch({ type: "chore/toggle", id: c.id, date: k }); if (!done) toast(`${c.name} : fait par ${who}`); }}
+                          className={cx("flex h-10 w-full flex-col items-center justify-center rounded-md border text-[11px] transition", done ? "border-ok/40 bg-ok/12 text-ok" : k < today ? "border-bad/30 bg-bad/6 text-bad" : who === "Moi" ? "border-accent/40 bg-accent/8 text-fg" : "border-line bg-sunken text-fg hover:border-accent/50")}>
+                          {done ? <Check size={14} /> : <span className="font-medium">{who}</span>}
+                        </button>) : <span className="block h-10 rounded-md bg-sunken/40" />}</td>); })}
+                    <td><button className="p-1 text-muted opacity-0 hover:text-bad group-hover:opacity-100" aria-label="Supprimer la corvée" onClick={() => { dispatch({ type: "chore/remove", id: c.id }); toast("Corvée supprimée", "info"); }}><Trash2 size={12} /></button></td>
+                  </tr>))}
+              </tbody>
+            </table>
+          </div>)}
+        <p className="mt-2 text-xs text-muted">La rotation avance automatiquement : chaque jour pour les tâches quotidiennes, chaque semaine (ou toutes les deux semaines) pour les autres. Les cases « Moi » non faites sont injectées dans le planning du jour.</p>
+      </Card>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Card title={<span className="flex items-center gap-2"><Users size={15} />Répartition de la semaine</span>}>
+          <div className="flex flex-col gap-3">{minutesBy.map(({ p, min }) => (
+            <div key={p} className="grid grid-cols-[64px_1fr_56px] items-center gap-2 text-[13px]"><span className="truncate">{p}</span><div className="h-2 rounded-full bg-sunken"><div className="h-full rounded-full bg-accent" style={{ width: `${(min / maxMin) * 100}%` }} /></div><span className="text-right font-mono text-xs tabular-nums text-muted">{fmtDur(min)}</span></div>))}</div>
+        </Card>
+        <Card title="Nouvelle corvée">
+          <form className="grid grid-cols-2 gap-2" onSubmit={(e) => { e.preventDefault(); const assignees = f.assignees.split(",").map((s) => s.trim()).filter(Boolean);
+            if (!f.name.trim() || !assignees.length) { toast("Nom et au moins une personne requis.", "bad"); return; }
+            dispatch({ type: "chore/add", chore: { id: uid(), name: f.name.trim(), recurrence: f.recurrence, day: f.day, minutes: f.minutes, assignees, done: [] } }); setF({ ...f, name: "" }); toast("Corvée ajoutée à la rotation"); }}>
+            <Input id="ch-name" aria-label="Corvée" placeholder="Ex. Nettoyer la plaque" className="col-span-2" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
+            <Select id="ch-rec" aria-label="Récurrence" value={f.recurrence} onChange={(e) => setF({ ...f, recurrence: e.target.value as Recurrence })}>{(Object.keys(REC_LABEL) as Recurrence[]).map((r) => <option key={r} value={r}>{REC_LABEL[r]}</option>)}</Select>
+            <Select id="ch-day" aria-label="Jour" value={f.day} disabled={f.recurrence === "daily"} onChange={(e) => setF({ ...f, day: Number(e.target.value) })}>{DAYS_LONG.map((d, i) => <option key={d} value={i}>{d}</option>)}</Select>
+            <Input id="ch-min" aria-label="Durée (min)" type="number" min={5} step={5} value={f.minutes} onChange={(e) => setF({ ...f, minutes: Number(e.target.value) })} />
+            <Input id="ch-who" aria-label="Rotation (virgules)" placeholder="Moi, Inès" value={f.assignees} onChange={(e) => setF({ ...f, assignees: e.target.value })} />
+            <Btn type="submit" variant="primary" className="col-span-2"><Plus size={14} />Ajouter</Btn>
+          </form>
+        </Card>
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------- Module : Sommeil
+const Sleep: React.FC = () => {
+  const { state, dispatch, toast } = useStore();
+  const s = state.settings;
+  const tomorrow = addDays(new Date(), 1);
+  const firstClass = state.classes.filter((c) => c.day === weekday(tomorrow)).sort((a, b) => toMin(a.start) - toMin(b.start))[0];
+  const [manualWake, setManualWake] = useState("");
+  const autoWake = firstClass ? toMin(firstClass.start) - s.prepMinutes : toMin(s.wakeDefault) + 60;
+  const wake = manualWake ? toMin(manualWake) : autoWake;
+  const opts = bedtimeOptions(wake, s.fallAsleep);
+  const [log, setLog] = useState<SleepLog>({ date: todayISO(), bed: "23:30", wake: "07:30", quality: 3 });
+  const last14 = lastNDays(14);
+  const logs14 = state.sleep.filter((l) => last14.includes(l.date));
+  const avg = logs14.length ? logs14.reduce((n, l) => n + sleepMinutes(l.bed, l.wake), 0) / logs14.length : 0;
+  const debt = sleepDebt(state);
+  const reg = sleepRegularity(logs14);
+  const firstCourse = firstClass ? state.courses.find((c) => c.id === firstClass.courseId) : undefined;
+
+  return (
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+      <Card title={<span className="flex items-center gap-2"><BedDouble size={15} />Heure idéale d'endormissement</span>}>
+        <p className="text-[13px] text-muted">{firstClass ? <>Demain ({DAYS_LONG[weekday(tomorrow)].toLowerCase()}), premier cours à <b className="font-mono text-fg">{firstClass.start}</b> · {firstCourse?.name}. Avec {s.prepMinutes} min de préparation, réveil à <b className="font-mono text-fg">{toHHMM(autoWake)}</b>.</> : <>Pas de cours demain : réveil conseillé à <b className="font-mono text-fg">{toHHMM(autoWake)}</b>.</>}</p>
+        <div className="mt-3 flex items-end gap-2"><Field label="Forcer un réveil" htmlFor="sl-wake"><Input id="sl-wake" type="time" value={manualWake} onChange={(e) => setManualWake(e.target.value)} className="w-32" /></Field>{manualWake && <Btn variant="ghost" onClick={() => setManualWake("")}>Automatique</Btn>}</div>
+        <div className="mt-4 grid gap-2 sm:grid-cols-3">
+          {opts.map((o, i) => (
+            <div key={o.cycles} className={cx("rounded-lg border p-3", i === 1 ? "border-accent bg-accent/8" : "border-line")}>
+              <p className="text-[11px] uppercase tracking-wider text-muted">{o.cycles} cycles · {o.hours} h</p>
+              <p className="font-mono text-2xl font-semibold tabular-nums">{toHHMM(o.bed)}</p>
+              <p className="text-[11px] text-muted">{i === 0 ? "Optimal" : i === 1 ? "Recommandé" : "Minimum"}</p>
+            </div>))}
+        </div>
+        <p className="mt-3 text-xs text-muted">Cycles de 90 min, plus {s.fallAsleep} min d'endormissement. Se réveiller en fin de cycle limite l'inertie du sommeil.</p>
+      </Card>
+      <Card title="Régularité & dette">
+        <div className="grid grid-cols-3 gap-3">
+          <div><p className="text-[11px] uppercase tracking-wider text-muted">Moyenne 14 j</p><p className="font-mono text-lg font-semibold tabular-nums">{fmtDur(avg)}</p></div>
+          <div><p className="text-[11px] uppercase tracking-wider text-muted">Dette 7 j</p><p className={cx("font-mono text-lg font-semibold tabular-nums", debt > 240 ? "text-bad" : debt > 60 ? "text-warn" : "text-ok")}>{debt > 0 ? fmtDur(debt) : "0"}</p></div>
+          <div><p className="text-[11px] uppercase tracking-wider text-muted">Écart coucher</p><p className={cx("font-mono text-lg font-semibold tabular-nums", reg > 45 ? "text-warn" : "text-ok")}>± {Math.round(reg)} min</p></div>
+        </div>
+        <div className="mt-3"><BarChart data={last14.map((d) => { const l = state.sleep.find((x) => x.date === d); const h = l ? sleepMinutes(l.bed, l.wake) / 60 : 0;
+          return { label: String(parseISO(d).getDate()), value: h, tone: h >= s.sleepGoal - 0.25 ? "ok" : h >= s.sleepGoal - 1.25 ? "warn" : "bad" }; })} goal={s.sleepGoal} max={10} unit={(v) => `${Math.round(v)}h`} /></div>
+        <div className="mt-2 flex items-center gap-2"><Field label="Objectif (h/nuit)" htmlFor="sl-goal"><Input id="sl-goal" type="number" min={5} max={11} step={0.5} className="w-24" value={s.sleepGoal} onChange={(e) => dispatch({ type: "settings", patch: { sleepGoal: Number(e.target.value) } })} /></Field>
+          <p className="text-xs text-muted">{debt > 240 ? "Dette élevée : couchez-vous 30 à 45 min plus tôt pendant 4 à 5 jours plutôt que de tout rattraper le week-end." : "Dette maîtrisée. Gardez un coucher régulier à ± 30 min."}</p></div>
+      </Card>
+      <Card title="Enregistrer une nuit" className="md:col-span-2">
+        <form className="flex flex-wrap items-end gap-3" onSubmit={(e) => { e.preventDefault(); dispatch({ type: "sleep/upsert", log }); toast(`Nuit enregistrée : ${fmtDur(sleepMinutes(log.bed, log.wake))}`); }}>
+          <Field label="Nuit se terminant le" htmlFor="sl-date"><Input id="sl-date" type="date" value={log.date} max={todayISO()} onChange={(e) => setLog({ ...log, date: e.target.value })} /></Field>
+          <Field label="Coucher" htmlFor="sl-bed"><Input id="sl-bed" type="time" value={log.bed} onChange={(e) => setLog({ ...log, bed: e.target.value })} /></Field>
+          <Field label="Réveil" htmlFor="sl-wk"><Input id="sl-wk" type="time" value={log.wake} onChange={(e) => setLog({ ...log, wake: e.target.value })} /></Field>
+          <Field label="Qualité" htmlFor="sl-q"><Select id="sl-q" value={log.quality} onChange={(e) => setLog({ ...log, quality: Number(e.target.value) as SleepLog["quality"] })}>{[1, 2, 3, 4, 5].map((q) => <option key={q} value={q}>{"★".repeat(q)}</option>)}</Select></Field>
+          <span className="pb-2 font-mono text-sm tabular-nums text-muted">= {fmtDur(sleepMinutes(log.bed, log.wake))}</span>
+          <Btn type="submit" variant="primary"><Moon size={14} />Enregistrer</Btn>
+        </form>
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full min-w-[480px] text-[13px]"><thead><tr className="text-left text-[11px] uppercase tracking-wider text-muted"><th className="pb-2 font-medium">Date</th><th className="pb-2 font-medium">Coucher</th><th className="pb-2 font-medium">Réveil</th><th className="pb-2 font-medium">Durée</th><th className="pb-2 font-medium">Écart objectif</th><th className="pb-2 font-medium">Qualité</th><th /></tr></thead>
+            <tbody className="divide-y divide-line">{[...state.sleep].reverse().slice(0, 10).map((l) => { const m = sleepMinutes(l.bed, l.wake); const diff = m - s.sleepGoal * 60; return (
+              <tr key={l.date} className="group"><td className="py-1.5">{fmtDate(l.date)}</td><td className="font-mono tabular-nums">{l.bed}</td><td className="font-mono tabular-nums">{l.wake}</td><td className="font-mono tabular-nums">{fmtDur(m)}</td>
+                <td className={cx("font-mono tabular-nums", diff < -60 ? "text-bad" : diff < 0 ? "text-warn" : "text-ok")}>{diff >= 0 ? "+" : "−"}{fmtDur(Math.abs(diff))}</td><td className="text-warn">{"★".repeat(l.quality)}</td>
+                <td className="text-right"><button className="text-muted opacity-0 hover:text-bad group-hover:opacity-100" aria-label="Supprimer la nuit" onClick={() => dispatch({ type: "sleep/remove", date: l.date })}><Trash2 size={12} /></button></td></tr>); })}</tbody></table>
+        </div>
+      </Card>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------- Module : Réglages
+const SettingsView: React.FC = () => {
+  const { state, dispatch, toast } = useStore();
+  const s = state.settings;
+  const [json, setJson] = useState("");
+  const [confirmReset, setConfirmReset] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const exportJson = () => { const text = JSON.stringify(state, null, 2); setJson(text);
+    navigator.clipboard?.writeText(text).then(() => toast("Sauvegarde JSON copiée dans le presse-papiers"), () => toast("Sauvegarde générée ci-dessous : sélectionnez et copiez", "info")); };
+  const importJson = (text: string) => {
+    try { const p = JSON.parse(text); if (!isAppState(p)) throw new Error("format"); dispatch({ type: "replace", state: migrate({ ...p, settings: { ...p.settings, onboarded: true } }) }); toast("Données importées"); setJson(""); }
+    catch { toast("Import impossible : le JSON n'est pas une sauvegarde Étudiant OS valide.", "bad"); }
+  };
+  const set = (patch: Partial<SettingsState>) => dispatch({ type: "settings", patch });
+  return (
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <Card title="Profil & rythme">
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Prénom" htmlFor="st-name"><Input id="st-name" value={s.name} onChange={(e) => set({ name: e.target.value })} /></Field>
+          <Field label="Thème" htmlFor="st-theme"><Select id="st-theme" value={s.theme} onChange={(e) => set({ theme: e.target.value as SettingsState["theme"] })}><option value="system">Système</option><option value="light">Clair</option><option value="dark">Sombre</option></Select></Field>
+          <Field label="Réveil par défaut" htmlFor="st-wake"><Input id="st-wake" type="time" value={s.wakeDefault} onChange={(e) => set({ wakeDefault: e.target.value })} /></Field>
+          <Field label="Coucher par défaut" htmlFor="st-bed"><Input id="st-bed" type="time" value={s.bedDefault} onChange={(e) => set({ bedDefault: e.target.value })} /></Field>
+          <Field label="Préparation matin (min)" htmlFor="st-prep"><Input id="st-prep" type="number" min={10} max={180} value={s.prepMinutes} onChange={(e) => set({ prepMinutes: Number(e.target.value) })} /></Field>
+          <Field label="Endormissement (min)" htmlFor="st-fall"><Input id="st-fall" type="number" min={0} max={60} value={s.fallAsleep} onChange={(e) => set({ fallAsleep: Number(e.target.value) })} /></Field>
+          <Field label="Colocataires" htmlFor="st-room"><Input id="st-room" defaultValue={s.roommates.join(", ")} placeholder="Sami, Lina" onBlur={(e) => set({ roommates: e.target.value.split(",").map((x) => x.trim()).filter(Boolean) })} /></Field>
+          <Field label="Devise" htmlFor="st-cur"><Select id="st-cur" value={s.currency} onChange={(e) => set({ currency: e.target.value })}>{["€", "$", "£", "CHF", "DT", "MAD", "FCFA"].map((c) => <option key={c} value={c}>{c}</option>)}</Select></Field>
+          <Field label="Bloc de travail max (min)" htmlFor="st-block"><Input id="st-block" type="number" min={25} max={180} step={5} value={s.maxBlock} onChange={(e) => set({ maxBlock: Math.max(25, Number(e.target.value)) })} /></Field>
+        </div>
+      </Card>
+      <Card title="Sauvegarde">
+        <div className="flex flex-wrap gap-2">
+          <Btn onClick={exportJson}><Download size={14} />Exporter en JSON</Btn>
+          <Btn onClick={() => fileRef.current?.click()}><Upload size={14} />Importer un fichier</Btn>
+          <input ref={fileRef} id="st-file" type="file" accept="application/json,.json" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) f.text().then(importJson); e.target.value = ""; }} />
+        </div>
+        <textarea id="st-json" aria-label="JSON" value={json} onChange={(e) => setJson(e.target.value)} rows={8} placeholder="Collez ici une sauvegarde JSON pour l'importer…" className={cx(inputCls, "mt-3 h-auto py-2 font-mono text-[11px]")} />
+        <div className="mt-2 flex flex-wrap justify-between gap-2">
+          <Btn variant="primary" disabled={!json.trim()} onClick={() => importJson(json)}>Importer le JSON collé</Btn>
+          {confirmReset ? (<div className="flex items-center gap-2"><span className="text-xs text-bad">Effacer toutes vos données ?</span><Btn size="sm" variant="danger" onClick={() => { dispatch({ type: "replace", state: blank({ onboarded: false, theme: s.theme }, 600) }); setConfirmReset(false); toast("Tout a été effacé. Recommencez la configuration.", "info"); }}>Confirmer</Btn><Btn size="sm" variant="ghost" onClick={() => setConfirmReset(false)}>Annuler</Btn></div>)
+            : <Btn variant="danger" onClick={() => setConfirmReset(true)}><RotateCcw size={14} />Tout effacer</Btn>}
+        </div>
+        <p className="mt-3 text-xs text-muted">Les données restent dans ce navigateur (localStorage). Exportez-les pour les transférer sur un autre appareil.</p>
+      </Card>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------- Premier lancement
+const Onboarding: React.FC<{ onDone: (s: AppState) => void }> = ({ onDone }) => {
+  const [f, setF] = useState({ name: "", roommates: "", budget: "600", wake: "07:30", bed: "23:30", sleepGoal: 8 });
+  const settings = (): Partial<SettingsState> => ({ name: f.name.trim() || "Moi", roommates: f.roommates.split(",").map((x) => x.trim()).filter(Boolean), wakeDefault: f.wake, bedDefault: f.bed, sleepGoal: f.sleepGoal });
+  const start = (e: React.FormEvent) => { e.preventDefault(); onDone(blank(settings(), parseAmount(f.budget) || 600)); };
+  const demo = () => { const s = seed(); onDone({ ...s, settings: { ...s.settings, onboarded: true } }); };
+  return (
+    <div className="grid min-h-full place-items-center bg-bg px-4 py-10">
+      <div className="w-full max-w-lg animate-pop">
+        <div className="mb-6 flex items-center gap-3"><div className="sticker grid h-12 w-12 place-items-center rounded-2xl border-2 border-fg bg-pink text-white shadow-[3px_3px_0_0_rgb(var(--ink))]"><Sparkles size={22} /></div>
+          <div><h1 className="font-display text-3xl font-extrabold tracking-tight">Bienvenue dans <span className="marker">Étudiant OS<svg viewBox="0 0 200 20" preserveAspectRatio="none" aria-hidden><path d="M2 12 C 40 6, 80 16, 120 9 S 180 6, 198 11" /></svg></span></h1><p className="text-sm text-muted">Trois réglages et votre espace est prêt. Tout reste dans ce navigateur.</p></div></div>
+        <form onSubmit={start} className="inked stagger grid grid-cols-2 gap-3 rounded-3xl bg-panel p-5">
+          <Field label="Votre prénom" htmlFor="ob-name" className="col-span-2"><Input id="ob-name" autoFocus placeholder="Ex. Khaled" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
+          <Field label="Colocataires (pour le ménage, facultatif)" htmlFor="ob-room" className="col-span-2"><Input id="ob-room" placeholder="Ex. Sami, Lina" value={f.roommates} onChange={(e) => setF({ ...f, roommates: e.target.value })} /></Field>
+          <Field label="Budget mensuel (€)" htmlFor="ob-budget"><Input id="ob-budget" inputMode="decimal" value={f.budget} onChange={(e) => setF({ ...f, budget: e.target.value })} /></Field>
+          <Field label="Sommeil visé (h)" htmlFor="ob-sleep"><Input id="ob-sleep" type="number" min={5} max={11} step={0.5} value={f.sleepGoal} onChange={(e) => setF({ ...f, sleepGoal: Number(e.target.value) })} /></Field>
+          <Field label="Réveil habituel" htmlFor="ob-wake"><Input id="ob-wake" type="time" value={f.wake} onChange={(e) => setF({ ...f, wake: e.target.value })} /></Field>
+          <Field label="Coucher habituel" htmlFor="ob-bed"><Input id="ob-bed" type="time" value={f.bed} onChange={(e) => setF({ ...f, bed: e.target.value })} /></Field>
+          <Btn type="submit" variant="primary" className="col-span-2 h-11 text-sm">Créer mon espace</Btn>
+          <p className="col-span-2 text-center text-xs text-muted">Envie de voir l'application remplie d'abord ? <button type="button" onClick={demo} className="font-medium text-accent hover:underline">Explorer avec des données d'exemple</button></p>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------- Palette de commandes & raccourcis
+interface Command { id: string; label: string; hint?: string; icon: React.ReactNode; run: () => void }
+const CommandPalette: React.FC<{ commands: Command[]; onClose: () => void }> = ({ commands, onClose }) => {
+  const [q, setQ] = useState(""); const [i, setI] = useState(0);
+  const list = commands.filter((c) => c.label.toLowerCase().includes(q.toLowerCase()));
+  useEffect(() => setI(0), [q]);
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 px-3 pt-[8vh] animate-fade sm:px-4 sm:pt-[14vh]" onMouseDown={onClose}>
+      <div className="inked w-full max-w-lg overflow-hidden rounded-[22px] bg-panel animate-pop" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2 border-b border-line px-4"><Search size={15} className="text-muted" />
+          <input id="cmdk" autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Aller à… ou action" className="h-12 flex-1 bg-transparent text-sm text-fg outline-none placeholder:text-muted"
+            onKeyDown={(e) => { if (e.key === "ArrowDown") { e.preventDefault(); setI(Math.min(i + 1, list.length - 1)); } if (e.key === "ArrowUp") { e.preventDefault(); setI(Math.max(i - 1, 0)); } if (e.key === "Enter" && list[i]) { list[i].run(); onClose(); } if (e.key === "Escape") onClose(); }} />
+          <Kbd>Échap</Kbd></div>
+        <ul className="max-h-80 overflow-auto p-1.5">
+          {list.map((c, k) => (<li key={c.id}><button onMouseEnter={() => setI(k)} onClick={() => { c.run(); onClose(); }} className={cx("flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[13px]", k === i ? "bg-sunken text-fg" : "text-muted")}>
+            {c.icon}<span className="flex-1">{c.label}</span>{c.hint && <Kbd>{c.hint}</Kbd>}</button></li>))}
+          {!list.length && <li className="px-3 py-6 text-center text-xs text-muted">Aucun résultat</li>}
+        </ul>
+      </div>
+    </div>
+  );
+};
+
+const NAV: { key: ViewKey; label: string; icon: React.FC<{ size?: number }>; short: string }[] = [
+  { key: "dashboard", label: "Tableau de bord", icon: LayoutDashboard, short: "1" },
+  { key: "planning", label: "Planning", icon: CalendarClock, short: "2" },
+  { key: "academic", label: "Académique", icon: GraduationCap, short: "3" },
+  { key: "focus", label: "Focus", icon: Timer, short: "4" },
+  { key: "groceries", label: "Courses", icon: ShoppingCart, short: "5" },
+  { key: "budget", label: "Budget", icon: Wallet, short: "6" },
+  { key: "chores", label: "Ménage", icon: Home, short: "7" },
+  { key: "sleep", label: "Sommeil", icon: Moon, short: "8" },
+  { key: "settings", label: "Réglages", icon: Settings, short: "9" },
+];
+
+const ToastStack: React.FC<{ toasts: Toast[] }> = ({ toasts }) => (
+  <div className="pointer-events-none fixed z-[60] flex flex-col items-end gap-2" style={{ bottom: "calc(84px + env(safe-area-inset-bottom, 0px))", right: "calc(16px + env(safe-area-inset-right, 0px))", left: "calc(16px + env(safe-area-inset-left, 0px))" }}>
+    {toasts.map((t) => (
+      <div key={t.id} role="status" className={cx("inked pointer-events-auto flex max-w-sm items-center gap-2 rounded-2xl px-3.5 py-2.5 text-[13px] font-semibold animate-slide", t.tone === "bad" ? "bg-pink text-white" : "bg-hi text-[rgb(24_22_46)]")}>
+        <span className="tick grid h-5 w-5 shrink-0 place-items-center rounded-full border-2 border-current">{t.tone === "bad" ? <X size={11} strokeWidth={3} /> : <Check size={11} strokeWidth={3} />}</span>{t.text}
+      </div>))}
+  </div>
+);
+
+// ---------------------------------------------------------------- Application racine
+export default function StudentOS() {
+  const [state, dispatch] = useReducer(reducer, undefined, loadState);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [view, setViewRaw] = useState<ViewKey>(() => { try { return (localStorage.getItem(STORAGE_KEY + ":view") as ViewKey) || "dashboard"; } catch { return "dashboard"; } });
+  const [palette, setPalette] = useState(false);
+  // Changement de module animé : View Transitions API si disponible, sinon simple entrée échelonnée.
+  const setView = useCallback((v: ViewKey) => {
+    const doc = document as Document & { startViewTransition?: (cb: () => void) => unknown };
+    const reduce = typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (doc.startViewTransition && !reduce) doc.startViewTransition(() => flushSync(() => setViewRaw(v)));
+    else setViewRaw(v);
+    window.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" });
+  }, []);
+  const [newTask, setNewTask] = useState(false);
+  const [help, setHelp] = useState(false);
+
+  useEffect(() => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch { /* quota ou stockage bloqué */ } }, [state]);
+  useEffect(() => { try { localStorage.setItem(STORAGE_KEY + ":view", view); } catch { /* idem */ } }, [view]);
+  useEffect(() => {
+    const root = document.documentElement;
+    if (state.settings.theme === "system") root.removeAttribute("data-theme"); else root.setAttribute("data-theme", state.settings.theme);
+  }, [state.settings.theme]);
+
+  const toast = useCallback((text: string, tone: Toast["tone"] = "ok") => {
+    const id = uid(); setToasts((t) => [...t.slice(-3), { id, text, tone }]);
+    window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3200);
+  }, []);
+  const ctx = useMemo(() => ({ state, dispatch, toast }), [state, toast]);
+  const isDark = state.settings.theme === "dark" || (state.settings.theme === "system" && typeof matchMedia !== "undefined" && matchMedia("(prefers-color-scheme: dark)").matches);
+  const toggleTheme = () => dispatch({ type: "settings", patch: { theme: isDark ? "light" : "dark" } });
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement;
+      const typing = el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPalette((p) => !p); return; }
+      if (typing || palette || newTask || e.metaKey || e.ctrlKey || e.altKey) return;
+      const nav = NAV.find((n) => n.short === e.key); if (nav) { setView(nav.key); return; }
+      if (e.key === "n") { e.preventDefault(); setNewTask(true); }
+      else if (e.key === "t") toggleTheme();
+      else if (e.key === "?") setHelp((h) => !h);
+      else if (e.key === " " && view === "focus") { e.preventDefault(); (document.querySelector("[data-pomo-toggle]") as HTMLButtonElement | null)?.click(); }
+    };
+    window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey);
+  });
+
+  const plan = useMemo(() => planDay(state, todayISO()), [state]);
+  const commands: Command[] = [
+    ...NAV.map((n) => ({ id: n.key, label: `Aller à : ${n.label}`, hint: n.short, icon: <n.icon size={14} />, run: () => setView(n.key) })),
+    { id: "new", label: "Nouvelle tâche", hint: "N", icon: <Plus size={14} />, run: () => setNewTask(true) },
+    { id: "theme", label: "Basculer clair / sombre", hint: "T", icon: isDark ? <Sun size={14} /> : <Moon size={14} />, run: toggleTheme },
+    { id: "help", label: "Raccourcis clavier", hint: "?", icon: <Keyboard size={14} />, run: () => setHelp(true) },
+  ];
+  const hour = new Date().getHours();
+  const greet = hour < 6 ? "Bonne nuit" : hour < 18 ? "Bonjour" : "Bonsoir";
+  const current = NAV.find((n) => n.key === view)!;
+
+  if (!state.settings.onboarded) return (
+    <StoreCtx.Provider value={ctx}>
+      <Onboarding onDone={(s) => { dispatch({ type: "replace", state: s }); setView("dashboard"); toast(`Bienvenue ${s.settings.name} ! Commencez par ajouter vos cours dans Académique et Planning.`); }} />
+      <ToastStack toasts={toasts} />
+    </StoreCtx.Provider>
+  );
+
+  return (
+    <StoreCtx.Provider value={ctx}>
+      <div className="flex min-h-full bg-bg text-fg">
+        <aside className="sticky top-0 hidden h-screen w-[76px] shrink-0 flex-col p-3 md:flex lg:w-60">
+          <div className="mb-6 flex items-center gap-2.5 px-1 pt-2 lg:px-2"><div className="sticker grid h-9 w-9 place-items-center rounded-xl border-2 border-fg bg-pink text-white shadow-[3px_3px_0_0_rgb(var(--ink))]"><ListChecks size={17} /></div><span className="hidden font-display text-[19px] font-extrabold leading-none tracking-tight lg:inline">Étudiant<span className="text-accent">.</span>OS</span></div>
+          <nav className="relative flex flex-col gap-0.5">
+            <span aria-hidden className="absolute inset-x-0 top-0 h-10 rounded-xl border-2 border-fg bg-hi shadow-[3px_3px_0_0_rgb(var(--ink))] transition-transform duration-500 [transition-timing-function:var(--spring)]"
+              style={{ transform: `translateY(${NAV.findIndex((n) => n.key === view) * 42}px) rotate(-1deg)` }} />
+            {NAV.map((n) => (<button key={n.key} onClick={() => setView(n.key)} title={n.label} aria-label={n.label} className={cx("nav-item group relative flex h-10 items-center gap-2.5 rounded-xl px-3 text-[13px] transition-colors duration-300", view === n.key ? "font-bold text-[rgb(24_22_46)]" : "text-muted hover:text-fg")}>
+              <span className="grid w-full place-items-center lg:w-auto"><n.icon size={17} /></span><span className="hidden flex-1 text-left lg:inline">{n.label}</span><span className="hidden font-mono text-[10px] text-muted opacity-0 group-hover:opacity-100 lg:inline">{n.short}</span></button>))}
+          </nav>
+          <div className="mt-auto flex flex-col gap-2">
+            <div className="inked hidden rounded-2xl bg-panel p-3 lg:block"><p className="mb-1.5 text-[11px] uppercase tracking-wider text-muted">Charge du jour</p><LoadMeter load={plan.load} level={plan.level} /></div>
+            <button onClick={() => setPalette(true)} aria-label="Rechercher" className="flex items-center justify-center gap-2 lg:justify-start rounded-xl border border-line bg-panel px-2.5 py-1.5 text-xs text-muted hover:text-fg"><Search size={13} /><span className="hidden flex-1 text-left lg:inline">Rechercher</span><span className="hidden lg:inline"><Kbd>Ctrl K</Kbd></span></button>
+          </div>
+        </aside>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <header className="sticky top-0 z-20 border-b-2 border-dashed border-line bg-bg/80 backdrop-blur-md" style={{ top: "env(safe-area-inset-top, 0px)" }}>
+            <div className="mx-auto flex max-w-6xl items-center gap-3 py-3 px-4 sm:px-6">
+              <div className="min-w-0 flex-1"><p className="text-xs text-muted">{greet} {state.settings.name} · {new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}</p>
+                <h1 className="truncate pb-0.5 font-display text-[21px] sm:text-[26px] font-extrabold leading-tight tracking-tight"><span key={view} className="marker">{current.label}<svg viewBox="0 0 200 20" preserveAspectRatio="none" aria-hidden><path d="M2 12 C 40 6, 80 16, 120 9 S 180 6, 198 11" /></svg></span></h1></div>
+              <span className="hidden sm:inline-flex"><Pill tone={levelTone(plan.level)}>Journée {plan.level}</Pill></span>
+              <Btn variant="ghost" size="sm" className="hidden lg:inline-flex" onClick={() => setHelp(true)} aria-label="Raccourcis"><Keyboard size={15} /></Btn>
+              <Btn variant="ghost" size="sm" onClick={toggleTheme} aria-label="Changer de thème">{isDark ? <Sun size={15} /> : <Moon size={15} />}</Btn>
+              <Btn variant="primary" size="sm" onClick={() => setNewTask(true)} aria-label="Nouvelle tâche"><Plus size={14} /><span className="hidden sm:inline">Tâche</span></Btn>
+            </div>
+          </header>
+          <main key={view} className="page stagger mx-auto w-full max-w-6xl flex-1 px-4 pb-28 pt-5 sm:px-6 md:pb-8">
+            {view === "dashboard" && <Dashboard go={setView} />}
+            {view === "planning" && <Planning />}
+            {view === "academic" && <Academic openNewTask={() => setNewTask(true)} />}
+            {view === "focus" && <Focus />}
+            {view === "groceries" && <Groceries />}
+            {view === "budget" && <BudgetView />}
+            {view === "chores" && <Chores />}
+            {view === "sleep" && <Sleep />}
+            {view === "settings" && <SettingsView />}
+          </main>
+        </div>
+        <nav className="fixed inset-x-0 bottom-0 z-30 flex gap-0.5 overflow-x-auto border-t-2 border-fg bg-panel/95 px-2 pt-2 backdrop-blur-xl md:hidden"
+          style={{ paddingBottom: "calc(6px + env(safe-area-inset-bottom, 0px))", paddingLeft: "max(8px, env(safe-area-inset-left, 0px))", paddingRight: "max(8px, env(safe-area-inset-right, 0px))" }}>
+          {NAV.map((n) => (<button key={n.key} onClick={() => setView(n.key)} className={cx("nav-item flex min-w-[64px] flex-1 flex-col items-center gap-0.5 rounded-xl border-2 py-1.5 text-[10px] font-semibold transition-all duration-300 [transition-timing-function:var(--spring)]", view === n.key ? "-translate-y-1 -rotate-2 border-fg bg-hi text-[rgb(24_22_46)] shadow-[2px_2px_0_0_rgb(var(--ink))]" : "border-transparent text-muted")}><n.icon size={18} />{n.key === "dashboard" ? "Accueil" : n.label}</button>))}
+        </nav>
+      </div>
+
+      {palette && <CommandPalette commands={commands} onClose={() => setPalette(false)} />}
+      {newTask && <Modal title="Nouvelle tâche" onClose={() => setNewTask(false)}><TaskForm onDone={() => setNewTask(false)} /></Modal>}
+      {help && (
+        <Modal title="Raccourcis clavier" onClose={() => setHelp(false)}>
+          <ul className="grid gap-2 text-[13px] sm:grid-cols-2">
+            {[["Ctrl / ⌘ K", "Palette de commandes"], ["1 – 9", "Changer de module"], ["N", "Nouvelle tâche"], ["T", "Thème clair / sombre"], ["Espace", "Démarrer / pause (Focus)"], ["?", "Afficher cette aide"], ["Échap", "Fermer une fenêtre"]].map(([k, l]) => (
+              <li key={k} className="flex items-center justify-between gap-3 rounded-lg bg-sunken px-3 py-2"><span>{l}</span><Kbd>{k}</Kbd></li>))}
+          </ul>
+        </Modal>
+      )}
+      <ToastStack toasts={toasts} />
+    </StoreCtx.Provider>
+  );
+}

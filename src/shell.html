@@ -1,0 +1,129 @@
+<title>Étudiant OS</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+/* Direction : carnet d'étudiant imprimé en risographie. Papier à grain, encre bleue + rose fluo,
+   ombres d'encre décalées, surligneur tracé à la main. Couleurs en triplets RGB pour Tailwind. */
+:root {
+  --bg: 238 236 244; --panel: 252 251 255; --sunken: 228 226 238; --line: 206 203 222;
+  --fg: 24 22 46; --ink: 24 22 46; --muted: 102 98 130; --accent: 52 72 240; --onaccent: 255 255 255;
+  --pink: 255 72 140; --hi: 255 226 64;
+  --ok: 0 150 105; --warn: 205 120 0; --bad: 226 40 80;
+  --font-ui: "Instrument Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Bricolage Grotesque", "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --spring: cubic-bezier(.34, 1.56, .64, 1); --ease: cubic-bezier(.22, 1, .36, 1);
+  --grain-op: .35;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: 16 15 28; --panel: 25 24 42; --sunken: 34 33 56; --line: 58 56 88;
+  --fg: 240 238 252; --ink: 0 0 0; --muted: 150 146 184; --accent: 120 138 255; --onaccent: 12 12 30;
+  --pink: 255 102 166; --hi: 255 220 70;
+  --ok: 60 210 150; --warn: 250 180 60; --bad: 255 100 130; --grain-op: .18; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: 16 15 28; --panel: 25 24 42; --sunken: 34 33 56; --line: 58 56 88;
+  --fg: 240 238 252; --ink: 0 0 0; --muted: 150 146 184; --accent: 120 138 255; --onaccent: 12 12 30;
+  --pink: 255 102 166; --hi: 255 220 70;
+  --ok: 60 210 150; --warn: 250 180 60; --bad: 255 100 130; --grain-op: .18; color-scheme: dark }
+html, body, #root { height: 100%; }
+body { background: rgb(var(--bg)); color: rgb(var(--fg)); font-family: var(--font-ui); -webkit-font-smoothing: antialiased; }
+/* Grain papier + quadrillage pointillé discret */
+body::before { content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background-image: radial-gradient(rgb(var(--fg) / .09) 1px, transparent 1.2px); background-size: 22px 22px; }
+body::after { content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 70; opacity: var(--grain-op); mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 .35 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>"); }
+#root { position: relative; z-index: 1; padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px); }
+h1, h2, h3 { text-wrap: balance; font-family: var(--font-display); }
+::selection { background: rgb(var(--hi)); color: rgb(24 22 46); }
+
+/* --- Objets "imprimés" : bord encre + ombre décalée qui bouge au survol / à l'appui --- */
+.inked { border: 2px solid rgb(var(--fg)); box-shadow: 4px 4px 0 0 rgb(var(--ink)); transition: transform .35s var(--spring), box-shadow .35s var(--spring); }
+:root:not([data-theme="light"]) .inked { box-shadow: 4px 4px 0 0 rgb(var(--accent) / .55); }
+:root[data-theme="light"] .inked { box-shadow: 4px 4px 0 0 rgb(var(--ink)); }
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .inked { box-shadow: 4px 4px 0 0 rgb(var(--ink)); } }
+.lift:hover { transform: translate(-2px, -2px); box-shadow: 6px 6px 0 0 rgb(var(--ink)); }
+.press { transition: transform .25s var(--spring), box-shadow .25s var(--spring), filter .2s; }
+.press:active { transform: translate(3px, 3px); box-shadow: 0 0 0 0 rgb(var(--ink)) !important; }
+.btn-ink { box-shadow: 3px 3px 0 0 rgb(var(--ink)); border: 2px solid rgb(var(--fg)); }
+.btn-ink:hover { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 0 rgb(var(--ink)); }
+
+/* Surligneur tracé à la main sous le titre de page */
+.marker { position: relative; display: inline-block; z-index: 0; }
+.marker svg { position: absolute; left: -6px; right: -8px; bottom: -2px; width: calc(100% + 14px); height: 60%; z-index: -1; overflow: visible; }
+.marker path { stroke: rgb(var(--hi)); stroke-width: 16; fill: none; stroke-linecap: round; stroke-dasharray: 600; stroke-dashoffset: 600;
+  animation: draw .7s var(--ease) .12s forwards; opacity: .9; }
+:root[data-theme="dark"] .marker path { stroke: rgb(var(--pink)); opacity: .55; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .marker path { stroke: rgb(var(--pink)); opacity: .55; } }
+@keyframes draw { to { stroke-dashoffset: 0 } }
+
+/* Entrées échelonnées : chaque bloc arrive comme une feuille posée sur le bureau */
+.stagger > * > * { animation: settle .6s var(--ease) both; }
+.stagger > * > *:nth-child(1) { animation-delay: .02s } .stagger > * > *:nth-child(2) { animation-delay: .07s }
+.stagger > * > *:nth-child(3) { animation-delay: .12s } .stagger > * > *:nth-child(4) { animation-delay: .17s }
+.stagger > * > *:nth-child(5) { animation-delay: .22s } .stagger > * > *:nth-child(n+6) { animation-delay: .26s }
+@keyframes settle { from { opacity: 0; transform: translateY(18px) rotate(-.6deg) } to { opacity: 1; transform: none } }
+
+@keyframes fade { from { opacity: 0 } to { opacity: 1 } }
+@keyframes pop { 0% { transform: translateY(-24px) rotate(-2.5deg) scale(.96); opacity: 0 } 60% { transform: translateY(3px) rotate(.6deg); opacity: 1 } 100% { transform: none } }
+@keyframes slide { 0% { transform: translateY(20px) rotate(4deg) scale(.9); opacity: 0 } 70% { transform: rotate(-2.5deg) scale(1.03); opacity: 1 } 100% { transform: rotate(-1.5deg) } }
+@keyframes tick { 0% { stroke-dashoffset: 24 } 100% { stroke-dashoffset: 0 } }
+@keyframes wiggle { 0%,100% { transform: rotate(0) } 30% { transform: rotate(-9deg) } 60% { transform: rotate(6deg) } }
+@keyframes bump { 0% { transform: scale(.92) } 60% { transform: scale(1.06) } 100% { transform: none } }
+.animate-fade { animation: fade .25s var(--ease) } .animate-pop { animation: pop .5s var(--spring) both } .animate-slide { animation: slide .55s var(--spring) both }
+.tick polyline, .tick path { stroke-dasharray: 24; animation: tick .35s var(--ease) both; }
+.nav-item:hover svg { animation: wiggle .5s var(--ease); }
+.bump { animation: bump .45s var(--spring); }
+.sticker { transform: rotate(-1.5deg); }
+
+/* Transition entre modules : l'ancienne page glisse et se floute, la nouvelle se dévoile par un balayage */
+::view-transition-old(page) { animation: page-out .32s var(--ease) both; }
+::view-transition-new(page) { animation: page-in .55s var(--ease) both; }
+@keyframes page-out { to { opacity: 0; transform: translateY(10px) scale(.985); filter: blur(4px); } }
+@keyframes page-in { from { opacity: 0; clip-path: inset(0 0 100% 0 round 24px); transform: translateY(-8px); } to { opacity: 1; clip-path: inset(0 0 0 0 round 0); transform: none; } }
+::view-transition-old(root), ::view-transition-new(root) { animation: none; }
+.page { view-transition-name: page; }
+
+
+/* Écrans tactiles : pas de survol, donc les actions masquées restent visibles, et pas de zoom iOS sur les champs */
+@media (hover: none) { .group .opacity-0, .group .opacity-60 { opacity: 1 !important; } .lift:hover, .btn-ink:hover { transform: none; } }
+@media (max-width: 639px) { input, select, textarea { font-size: 16px !important; } .sheet { padding-bottom: env(safe-area-inset-bottom, 0px); } }
+button, a, input, select { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important }
+  .marker path { stroke-dashoffset: 0 } ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important }
+}
+#boot { display: grid; place-items: center; height: 100%; color: rgb(var(--muted)); font: 600 15px var(--font-display); padding-inline: 16px; text-align: center }
+</style>
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script>
+const c = (v) => `rgb(var(--${v}) / <alpha-value>)`;
+tailwind.config = { theme: { extend: {
+  colors: { bg: c("bg"), panel: c("panel"), sunken: c("sunken"), line: c("line"), fg: c("fg"), ink: c("ink"), muted: c("muted"), accent: c("accent"), onaccent: c("onaccent"), pink: c("pink"), hi: c("hi"), ok: c("ok"), warn: c("warn"), bad: c("bad") },
+  fontFamily: { sans: ["Instrument Sans", "ui-sans-serif", "system-ui", "sans-serif"], display: ["Bricolage Grotesque", "Instrument Sans", "sans-serif"], mono: ["JetBrains Mono", "ui-monospace", "monospace"] },
+  opacity: { 6: ".06", 8: ".08", 12: ".12", 15: ".15" },
+} } };
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/lucide-react@0.263.1/dist/umd/lucide-react.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
+<div id="root"><div id="boot">Chargement d'Étudiant OS…</div></div>
+<script type="text/plain" id="app-src">
+/*__APP__*/
+</script>
+<script>
+(function () {
+  // Icônes : Lucide si chargé, sinon un pictogramme neutre pour ne jamais casser l'interface.
+  const Fallback = (p) => React.createElement("span", { style: { display: "inline-block", width: p.size || 16, height: p.size || 16, borderRadius: 4, border: "1.5px solid currentColor", opacity: .6 } });
+  window.Icons = new Proxy({}, { get: (_, k) => (window.LucideReact && window.LucideReact[k]) || Fallback });
+  try {
+    const src = document.getElementById("app-src").textContent;
+    const out = Babel.transform(src, { filename: "StudentOS.tsx", presets: [["typescript", { isTSX: true, allExtensions: true }], "react"] }).code;
+    new Function("React", "ReactDOM", "Icons", out + "\nReactDOM.createRoot(document.getElementById('root')).render(React.createElement(StudentOS));")(React, ReactDOM, window.Icons);
+  } catch (e) {
+    document.getElementById("boot").textContent = "Erreur au démarrage : " + e.message;
+    console.error(e);
+  }
+})();
+</script>
