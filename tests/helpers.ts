@@ -39,3 +39,18 @@ export async function confirmedUser(tag: string, password = "motdepasse123") {
   if (s.error) throw s.error;
   return { c, email, password, id: s.data.user!.id };
 }
+
+/** Compte administrateur de TEST (adresse autorisée par supabase/seed.sql, stack locale uniquement). Réutilisé d'un lancement à l'autre. */
+export async function adminUser(n: 1 | 2, password = "adminpass123") {
+  const email = `admin-test-${n}@test.local`;
+  const c = client();
+  let s = await c.auth.signInWithPassword({ email, password });
+  if (s.error) {
+    const { error } = await c.auth.signUp({ email, password, options: { data: { display_name: `Admin ${n}` } } });
+    if (error) throw error;
+    await follow(await lastLink(email));
+    s = await c.auth.signInWithPassword({ email, password });
+    if (s.error) throw s.error;
+  }
+  return { c, email, password, id: s.data.user!.id };
+}

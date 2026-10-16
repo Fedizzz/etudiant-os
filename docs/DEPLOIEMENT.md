@@ -43,9 +43,31 @@ Crée un second projet Supabase « staging » et publie `dist/` construit avec s
 - Site : Actions → « Déploiement » → ouvre une exécution antérieure réussie → « Re-run all jobs » (ou `git revert` du commit fautif puis push).
 - Base : les migrations ne sont jamais modifiées une fois appliquées ; pour annuler, écris une nouvelle migration corrective. Active les sauvegardes quotidiennes (plan Pro : Point-in-time recovery) avant l'ouverture au public.
 
-## 6. Avant d'ouvrir au public
+## 6. Administration, signalements et centre d'aide
+
+La migration `20261017000001_support_admin.sql` ajoute : rôles administrateur, tickets, messages, notes internes, notifications, journal d'audit, bucket privé `support-files` (captures PNG / JPEG / WebP, 5 Mo). Elle s'applique comme les autres (`supabase db push` ou le workflow « Migrations Supabase »).
+
+**Activer les deux comptes administrateurs** (`fedizayen12@gmail.com`, `khaled05062006@gmail.com`, inscrits dans la table `admin_allowlist` par la migration) :
+1. Chaque personne crée son compte sur le site avec **cette adresse exacte**, puis clique le lien de confirmation reçu par e-mail.
+2. À la confirmation, la base accorde automatiquement le rôle (déclencheur sur `auth.users`). Si le compte existait et était déjà confirmé avant la migration, la migration l'a promu directement.
+3. Vérification (SQL Editor) : `select u.email, r.granted_at from public.user_roles r join auth.users u on u.id = r.user_id;`
+4. Le bouton **Administration** apparaît dans Réglages → Aide & support et dans le menu. L'adresse de l'espace : `/etudiant-os/admin`.
+
+Aucune fonction ni requête depuis le site ne peut accorder ce rôle : `admin_allowlist` et `user_roles` ne sont modifiables que depuis le SQL Editor (rôle `postgres`). Pour ajouter ou retirer un administrateur :
+```sql
+insert into public.admin_allowlist (email) values ('nouvelle@adresse.fr');   -- ou : delete from public.admin_allowlist where email = '…';
+select public.sync_admin_roles();
+```
+Un administrateur dont l'adresse quitte la liste, change ou n'est plus confirmée perd ses droits immédiatement (`is_admin()` revérifie tout à chaque appel).
+
+**Notifications** : dans l'application (pastille, liste « Mes demandes », temps réel via la table `notifications` + relecture toutes les 45 s). **Aucun e-mail de notification n'est envoyé** : il faudrait un fournisseur d'e-mails et une fonction serveur (Edge Function ou webhook de base de données), non configurés à ce jour.
+
+**Suppression d'un compte par un administrateur** : en deux étapes (lancement = suspension immédiate ; puis suppression définitive avec saisie de l'adresse). Les fichiers sont supprimés par l'API Storage, puis le compte ; le journal d'audit conserve la trace.
+
+## 7. Avant d'ouvrir au public
 
 - [ ] Compléter les mentions entre crochets des pages Confidentialité et Conditions (éditeur, contact, hébergeur, région) et les faire relire.
 - [ ] SMTP de production configuré, e-mails de test reçus (inscription, mot de passe oublié, changement d'adresse).
 - [ ] Inscription, confirmation, connexion et récupération testées sur le site en ligne, sur ordinateur et téléphone.
 - [ ] Vérifier dans Supabase → Advisors (Security / Performance) qu'aucune alerte ne subsiste.
+- [ ] Les deux comptes administrateurs créés, confirmés, et le rôle vérifié (section 6).

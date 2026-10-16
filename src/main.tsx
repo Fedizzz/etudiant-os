@@ -8,6 +8,7 @@ import { supabase, BASE, frError } from "./supabase.ts";
 import { LocalHost, CloudHost, Splash } from "./hosts.tsx";
 import { LoginPage, SignupPage, ForgotPage, ResetPage } from "./auth.tsx";
 import { Landing, PrivacyPage, TermsPage, NotFound } from "./landing.tsx";
+import { AdminApp } from "./admin.tsx";
 
 // Fragment d'URL au chargement (jetons ou erreur d'un lien d'e-mail), capturé avant que Supabase ne le nettoie.
 const initialHash = (window as unknown as { __INITIAL_HASH__?: string }).__INITIAL_HASH__ ?? window.location.hash;
@@ -58,10 +59,18 @@ function App() {
     case "terms": return <TermsPage go={go} />;
     case "notfound": return <NotFound go={go} />;
     case "app":
-      if (!supabase) return <LocalHost view={route.view} onView={onView} />; // build sans Supabase : mode local d'origine
+    case "support":
+      if (!supabase) return route.name === "app" ? <LocalHost view={route.view} onView={onView} /> : <NotConfigured go={go} />; // build sans Supabase : mode local d'origine
       if (session === undefined) return <Splash text="Vérification de la session…" />;
       if (!session) return <Splash text="Redirection vers la connexion…" />;
-      return <CloudHost key={session.user.id} sb={supabase} session={session} view={route.view} onView={onView} onSignedOut={() => { setSession(null); go({ name: "landing" }, { replace: true }); }} />;
+      return <CloudHost key={session.user.id} sb={supabase} session={session} view={route.name === "app" ? route.view : "dashboard"} onView={onView} nav={go}
+        support={route.name === "support" ? { page: route.page, id: route.id } : null}
+        onSignedOut={() => { setSession(null); go({ name: "landing" }, { replace: true }); }} />;
+    case "admin":
+      if (!supabase) return <NotConfigured go={go} />;
+      if (session === undefined) return <Splash text="Vérification de la session…" />;
+      if (!session) return <Splash text="Redirection vers la connexion…" />;
+      return <AdminApp key={session.user.id} sb={supabase} session={session} section={route.section} id={route.id} nav={go} />;
     default:
       if (!supabase) return <NotConfigured go={go} />;
       if (session === undefined) return <Splash text="Chargement…" />;

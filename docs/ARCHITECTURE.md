@@ -66,5 +66,30 @@ Les données utilisées sans compte (clé `etudiant-os/v1`) ne sont jamais envoy
 
 ## Routes
 
-`/` accueil · `/login` · `/signup` · `/forgot-password` · `/reset-password` · `/confidentialite` · `/conditions` · `/app` (tableau de bord) · `/app/planning` · `/app/academique` · `/app/focus` · `/app/courses` · `/app/budget` · `/app/menage` · `/app/sommeil` · `/app/settings` · toute autre adresse → page 404.
+`/` accueil · `/login` · `/signup` · `/forgot-password` · `/reset-password` · `/confidentialite` · `/conditions` · `/app` (tableau de bord) · `/app/planning` · `/app/academique` · `/app/focus` · `/app/courses` · `/app/budget` · `/app/menage` · `/app/sommeil` · `/app/settings` · `/app/report-problem` · `/app/help` · `/app/requests[/<id>]` · `/admin` · `/admin/users[/<id>]` · `/admin/tickets[/<id>]` · `/admin/audit` · toute autre adresse → page 404.
 Sur GitHub Pages, `404.html` (copie de `index.html`) permet l'actualisation de n'importe quelle route ; `_redirects` fait de même sur Netlify / Cloudflare Pages.
+
+## Administration et support
+
+Fichiers : `src/supportModel.ts` (libellés, validation, infos techniques — testé), `src/supportApi.ts` (appels), `src/support.tsx` (pages utilisateur, conversation), `src/admin.tsx` (espace admin). Migration : `supabase/migrations/20261017000001_support_admin.sql`.
+
+| Table | Contenu | Lecture | Écriture |
+|---|---|---|---|
+| `admin_allowlist` | adresses autorisées à administrer | personne (API) | SQL Editor uniquement |
+| `user_roles` | rôle `admin` accordé | sa ligne ; admins | déclencheur sur `auth.users` uniquement |
+| `profiles` (+ `status`, `status_reason`, `deletion_requested_at`) | statut du compte | sa ligne | client : `display_name` seulement ; statut : fonctions admin |
+| `tickets` | signalements (`bug`) et demandes d'aide (`help`) | les siens ; admins | `create_ticket`, `post_message`, `set_my_ticket_state`, `admin_update_ticket` |
+| `ticket_messages` | conversation (rôle `user` / `admin` / `system` fixé par la base) | messages de ses tickets ; admins | `post_message` |
+| `ticket_notes` | notes internes | admins | `admin_add_ticket_note` |
+| `user_notes` | notes de support sur un compte | admins | `admin_add_user_note` |
+| `notifications` | réponse, précision demandée, résolu, rouvert, nouveau ticket… | les siennes (Realtime filtré par RLS) | fonctions ci-dessus ; lu : `mark_ticket_read` |
+| `admin_audit` | journal (acteur, action, cible, résumé, justification) | admins | fonctions uniquement ; UPDATE / DELETE / TRUNCATE bloqués par déclencheur |
+| bucket `support-files` | captures PNG/JPEG/WebP ≤ 5 Mo, dossier = auteur | ses fichiers, pièces jointes de ses tickets, admins | son dossier |
+
+**Rôle administrateur** : `is_admin()` exige à chaque appel un rôle présent, une adresse toujours dans `admin_allowlist`, **confirmée** (`email_confirmed_at`) et un compte non suspendu. Une adresse en cours de changement (non confirmée), des métadonnées modifiées par le client ou une requête directe ne suffisent pas (testé). Aucune fonction n'accorde de rôle ; un admin ne peut ni suspendre ni supprimer un autre admin ou lui-même.
+
+**Données personnelles** : la fiche utilisateur affiche compte, statut, préférences d'affichage et **totaux** (nombre de tâches, dépenses…), jamais le contenu. La correction ciblée (`admin_read_user_data` / `admin_fix_user_data`) exige une justification, vise un chemin précis (`tasks / id:abc / title`), vérifie que la valeur n'a pas changé depuis la lecture et que le type est conservé, journalise ancienne et nouvelle valeur, et peut être annulée (`admin_revert_data_fix`) si la valeur n'a pas bougé depuis. L'appareil de l'utilisateur reçoit la nouvelle version par la synchronisation habituelle.
+
+**Suspension** : `profiles.status = suspended` (écritures, lecture des données et création de tickets refusées immédiatement) + `auth.users.banned_until` (connexion et renouvellement de session refusés) + suppression des sessions. **Suppression** : lancement (suspension + marquage, journalisé) → suppression des fichiers par l'API Storage (politique admin limitée aux comptes marqués) → `admin_delete_user` (confirmation par l'adresse).
+
+**Notifications** : Realtime sur `notifications` (RLS : chacun ne reçoit que les siennes) + relecture toutes les 45 s et au retour sur l'onglet. Pas d'e-mail (aucun fournisseur configuré).

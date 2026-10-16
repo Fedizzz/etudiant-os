@@ -25,8 +25,9 @@ Sans `.env`, le site est construit en **mode local** (pas de comptes, données d
 |---|---|---|
 | `npm run typecheck` | TypeScript strict | — |
 | `npm test` | logique métier (calculs, planning, focus, budget, sommeil, import), moteur de synchronisation (hors ligne, conflits, doublons), routes | — |
-| `npm run test:db` | inscription/confirmation réelles, mot de passe oublié, RLS, isolation entre comptes, fichiers, suppression de compte | `supabase start` |
+| `npm run test:db` | inscription/confirmation réelles, mot de passe oublié, RLS, isolation entre comptes, fichiers, suppression de compte ; rôles admin, tickets, messagerie, notes internes, pièces jointes, journal d'audit, suspension, correction de données | `supabase start` (+ `supabase/seed.sql` : adresses admin de test) |
 | `npm run test:e2e` | parcours complets dans un navigateur : landing, comptes, deux appareils, temps réel, hors ligne, conflits, import local, focus, suppression | `supabase start`, build + `node scripts/serve.mjs` |
+| `npm run test:e2e:support` | signalement avec capture, aide, Mes demandes, réponse admin, notes internes, notifications, résolution/réouverture, accès /admin refusé, gestion des utilisateurs, mobile | `supabase start`, build + `node scripts/serve.mjs` |
 
 ## Structure
 

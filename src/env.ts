@@ -13,6 +13,8 @@ export interface AccountApi {
   deleteAccount(): Promise<string | null>;
 }
 export interface SyncInfo { status: SyncStatus; pending: number; lastSyncedAt: number | null; error: string | null; conflicts: number; online: boolean; retry(): void }
+/** Support et administration (mode compte uniquement). isAdmin n'est qu'un indice d'affichage : la base vérifie tout. */
+export interface SupportInfo { isAdmin: boolean; unread: number; open(page: "report" | "help" | "requests"): void; openAdmin(): void }
 export interface AppEnv {
   mode: "local" | "cloud";
   /** Préfixe des clés de stockage locales (sauvegardes de sécurité…) : propre à chaque compte. */
@@ -20,4 +22,5 @@ export interface AppEnv {
   files: FileStore;
   account?: AccountApi;
   sync?: SyncInfo;
+  support?: SupportInfo;
 }

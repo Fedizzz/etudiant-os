@@ -1717,6 +1717,22 @@ const AccountCard: React.FC = () => {
   );
 };
 
+/** Aide, signalements et (pour les administrateurs reconnus par le serveur) accès à l'administration. */
+const SupportCard: React.FC = () => {
+  const { env } = useStore();
+  const sp = env.support!;
+  return (
+    <Card title={<span className="flex items-center gap-2"><Sparkles size={15} />Aide & support</span>} className="lg:col-span-2">
+      <div className="flex flex-wrap gap-2">
+        <Btn onClick={() => sp.open("help")}>Besoin d'aide ?</Btn>
+        <Btn onClick={() => sp.open("report")}><AlertTriangle size={14} />Signaler un problème</Btn>
+        <Btn onClick={() => sp.open("requests")}><FileText size={14} />Mes demandes{sp.unread > 0 && <span className="rounded-full bg-pink px-1.5 text-[11px] text-white">{sp.unread}</span>}</Btn>
+        {sp.isAdmin && <Btn variant="primary" onClick={sp.openAdmin} data-testid="admin-link"><Database size={14} />Administration</Btn>}
+      </div>
+    </Card>
+  );
+};
+
 const SettingsView: React.FC = () => {
   const { state, dispatch, toast, undoable, env } = useStore();
   const BKEY = `${env.ns}:backup`, CKEY = `${env.ns}:corrupt`;
@@ -1762,6 +1778,7 @@ const SettingsView: React.FC = () => {
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
       {env.account && <AccountCard />}
+      {env.support && <SupportCard />}
       <Card title="Profil & rythme">
         <div className="grid grid-cols-2 gap-3">
           <Field label="Prénom" htmlFor="st-name"><Input id="st-name" value={s.name} onChange={(e) => set({ name: e.target.value })} /></Field>
@@ -1931,8 +1948,10 @@ export interface StudentOSProps {
   notice?: string | null;
   /** Contenu ajouté sous l'en-tête (statut de synchronisation…) et dans le menu (déconnexion…). */
   headerExtra?: React.ReactNode; menuExtra?: React.ReactNode;
+  /** Page affichée à la place du module courant (pages de support), dans le même cadre. */
+  override?: { key: string; title: string; node: React.ReactNode } | null;
 }
-export default function StudentOS({ state, dispatch, env, view, onView, notice, headerExtra, menuExtra }: StudentOSProps) {
+export default function StudentOS({ state, dispatch, env, view, onView, notice, headerExtra, menuExtra, override }: StudentOSProps) {
   const stateRef = useRef(state); stateRef.current = state;
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [editTask, setEditTask] = useState<ID | null>(null);
@@ -2032,7 +2051,7 @@ export default function StudentOS({ state, dispatch, env, view, onView, notice, 
   const current = NAV.find((n) => n.key === view)!;
   const navItems = NAV.filter((n) => !state.settings.hiddenViews.includes(n.key));
 
-  if (!state.settings.onboarded) return (
+  if (!state.settings.onboarded && !override) return (
     <StoreCtx.Provider value={ctx}>
       <PencilDefs /><style>{accentCss(state.settings.accent)}</style>
       <Onboarding onDone={(s) => { dispatch({ type: "replace", state: s }); setView("dashboard"); toast(`Bienvenue ${s.settings.name} ! Commencez par ajouter vos cours dans Académique et Planning.`); }} />
@@ -2048,8 +2067,8 @@ export default function StudentOS({ state, dispatch, env, view, onView, notice, 
           <div className="mb-6 flex items-center gap-2.5 px-1 pt-2 lg:px-2"><div className="sticker grid h-9 w-9 place-items-center rounded-xl border-2 border-fg bg-pink text-white shadow-[3px_3px_0_0_rgb(var(--ink))]"><ListChecks size={17} /></div><span className="hidden font-display text-[19px] font-extrabold leading-none tracking-tight lg:inline">Étudiant<span className="text-accent">.</span>OS</span></div>
           <nav className="relative flex flex-col gap-0.5">
             <span aria-hidden className="absolute inset-x-0 top-0 h-10 rounded-xl border-2 border-fg bg-hi shadow-[3px_3px_0_0_rgb(var(--ink))] transition-transform duration-500 [transition-timing-function:var(--spring)]"
-              style={{ transform: `translateY(${Math.max(0, navItems.findIndex((n) => n.key === view)) * 42}px) rotate(-1deg)`, opacity: navItems.some((n) => n.key === view) ? 1 : 0 }} />
-            {navItems.map((n) => (<button key={n.key} onClick={() => setView(n.key)} title={n.label} aria-label={n.label} className={cx("nav-item group relative flex h-10 items-center gap-2.5 rounded-xl px-3 text-[13px] transition-colors duration-300", view === n.key ? "font-bold text-[rgb(24_22_46)]" : "text-muted hover:text-fg")}>
+              style={{ transform: `translateY(${Math.max(0, navItems.findIndex((n) => n.key === view)) * 42}px) rotate(-1deg)`, opacity: !override && navItems.some((n) => n.key === view) ? 1 : 0 }} />
+            {navItems.map((n) => (<button key={n.key} onClick={() => setView(n.key)} title={n.label} aria-label={n.label} className={cx("nav-item group relative flex h-10 items-center gap-2.5 rounded-xl px-3 text-[13px] transition-colors duration-300", view === n.key && !override ? "font-bold text-[rgb(24_22_46)]" : "text-muted hover:text-fg")}>
               <span className="grid w-full place-items-center lg:w-auto"><n.icon size={17} /></span><span className="hidden flex-1 text-left lg:inline">{n.label}</span><span className="hidden font-mono text-[10px] text-muted opacity-0 group-hover:opacity-100 lg:inline">{n.short}</span></button>))}
           </nav>
           <div className="mt-auto flex flex-col gap-2">
@@ -2062,7 +2081,7 @@ export default function StudentOS({ state, dispatch, env, view, onView, notice, 
           <header className="sticky top-0 z-20 border-b-2 border-dashed border-line bg-bg/80 backdrop-blur-md" style={{ top: "env(safe-area-inset-top, 0px)" }}>
             <div className="mx-auto flex max-w-6xl 2xl:max-w-[1560px] min-[2200px]:max-w-[1880px] items-center gap-3 py-3 px-4 sm:px-6">
               <div className="min-w-0 flex-1"><p className="truncate text-xs text-muted">{greet} {state.settings.name}<span className="hidden min-[400px]:inline"> · {new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}</span></p>
-                <h1 className="truncate pb-0.5 font-display text-[19px] min-[400px]:text-[21px] sm:text-[26px] font-extrabold leading-tight tracking-tight"><span key={view} className="marker">{current.label}<svg viewBox="0 0 200 20" preserveAspectRatio="none" aria-hidden><path d="M2 12 C 40 6, 80 16, 120 9 S 180 6, 198 11" /></svg></span></h1></div>
+                <h1 className="truncate pb-0.5 font-display text-[19px] min-[400px]:text-[21px] sm:text-[26px] font-extrabold leading-tight tracking-tight"><span key={override?.key ?? view} className="marker">{override?.title ?? current.label}<svg viewBox="0 0 200 20" preserveAspectRatio="none" aria-hidden><path d="M2 12 C 40 6, 80 16, 120 9 S 180 6, 198 11" /></svg></span></h1></div>
               {headerExtra}
               <span className="hidden lg:inline-flex"><Pill tone={levelTone(plan.level)}>Journée {plan.level}</Pill></span>
               <Btn variant="ghost" size="sm" className="hidden lg:inline-flex" onClick={() => setHelp(true)} aria-label="Raccourcis"><Keyboard size={15} /></Btn>
@@ -2070,11 +2089,12 @@ export default function StudentOS({ state, dispatch, env, view, onView, notice, 
               <Btn variant="primary" size="sm" onClick={() => setNewTask(true)} aria-label="Nouvelle tâche"><Plus size={14} /><span className="hidden sm:inline">Tâche</span></Btn>
               <div className="relative md:hidden">
                 <Btn variant="soft" size="sm" aria-label="Menu" aria-expanded={menu} aria-haspopup="menu" onClick={() => setMenu(!menu)} className={cx(menu && "bg-hi/60")}><MoreVertical size={18} strokeWidth={3} /></Btn>
-                {menu && <MobileMenu items={navItems} view={view} plan={plan} onPick={(k) => { setMenu(false); setView(k); }} onSearch={() => { setMenu(false); setPalette(true); }} onTheme={toggleTheme} isDark={isDark} onClose={() => setMenu(false)} extra={menuExtra} />}
+                {menu && <MobileMenu items={navItems} view={override ? ("" as ViewKey) : view} plan={plan} onPick={(k) => { setMenu(false); setView(k); }} onSearch={() => { setMenu(false); setPalette(true); }} onTheme={toggleTheme} isDark={isDark} onClose={() => setMenu(false)} extra={menuExtra} />}
               </div>
             </div>
           </header>
-          <main key={view} className="page stagger mx-auto w-full max-w-6xl 2xl:max-w-[1560px] min-[2200px]:max-w-[1880px] flex-1 px-4 pb-10 pt-5 sm:px-6 md:pb-8">
+          <main key={override?.key ?? view} className="page stagger mx-auto w-full max-w-6xl 2xl:max-w-[1560px] min-[2200px]:max-w-[1880px] flex-1 px-4 pb-10 pt-5 sm:px-6 md:pb-8">
+            {override ? override.node : <>
             {view === "dashboard" && <Dashboard go={setView} openNewTask={() => setNewTask(true)} />}
             {view === "planning" && <Planning />}
             {view === "academic" && <Academic openNewTask={() => setNewTask(true)} />}
@@ -2084,6 +2104,7 @@ export default function StudentOS({ state, dispatch, env, view, onView, notice, 
             {view === "chores" && <Chores />}
             {view === "sleep" && <Sleep />}
             {view === "settings" && <SettingsView />}
+            </>}
           </main>
         </div>
       </div>

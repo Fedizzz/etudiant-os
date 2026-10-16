@@ -5,7 +5,11 @@ import { reducer, loadState, validateState, blank, STORAGE_KEY, type Action, typ
 import { SyncEngine, mergeStates, summarize, isEmptyState, type ImportSummary } from "./sync.ts";
 import { cloudTransport, localCache, watchRemote, cloudFiles, deleteAccount, displayNameOf, frError, appUrl } from "./supabase.ts";
 import type { AppEnv, AccountApi } from "./env.ts";
-import StudentOS, { fileSave, fileLoad, fileDelete, Btn, Pill, Modal, SYNC_LABEL, syncTone, X } from "./StudentOS.tsx";
+import StudentOS, { fileSave, fileLoad, fileDelete, Btn, Pill, Modal, SYNC_LABEL, syncTone, X, AlertTriangle, FileText, Sparkles, Database } from "./StudentOS.tsx";
+import type { Route, SupportPage } from "./router.ts";
+import { SupportView, SUPPORT_TITLE, useNotifications } from "./support.tsx";
+import { myRole, watchNotifications, unreadNotifications, isMine } from "./supportApi.ts";
+import { BASE } from "./supabase.ts";
 
 const localFiles = { save: fileSave, load: fileLoad, remove: fileDelete };
 
@@ -34,8 +38,14 @@ function readLocalData(): AppState | null {
 const decisionKey = (uid: string) => `etudiant-os/import-decision/${uid}`;
 const clientId = () => { try { let id = sessionStorage.getItem("etudiant-os/client"); if (!id) { id = Math.random().toString(36).slice(2, 10); sessionStorage.setItem("etudiant-os/client", id); } return id; } catch { return "web"; } };
 
-export function CloudHost({ sb, session, view, onView, onSignedOut }: { sb: SupabaseClient; session: Session; view: ViewKey; onView: (v: ViewKey) => void; onSignedOut: () => void }) {
+export function CloudHost({ sb, session, view, onView, onSignedOut, support, nav }: { sb: SupabaseClient; session: Session; view: ViewKey; onView: (v: ViewKey) => void; onSignedOut: () => void; support?: { page: SupportPage; id?: string } | null; nav: (r: Route) => void }) {
   const uid = session.user.id;
+  // Rôle et statut lus auprès de la base (indice d'affichage seulement : chaque opération est revérifiée côté serveur).
+  const [role, setRole] = useState<{ is_admin: boolean; active: boolean } | null>(null);
+  useEffect(() => { let alive = true; void myRole(sb).then((r) => alive && setRole(r)).catch(() => {}); return () => { alive = false; }; }, [sb, uid]);
+  const notif = useNotifications(sb, uid, watchNotifications, unreadNotifications);
+  const unread = notif.items.filter((n) => isMine(n, uid)).length;          // réponses sur mes demandes
+  const adminUnread = notif.items.length - unread;                            // nouveaux tickets / messages (administrateurs)
   const engine = useMemo(() => new SyncEngine(cloudTransport(sb), localCache(uid), () => blank({ onboarded: false, name: displayNameOf(session.user) }, 600), { clientId: clientId() }), [sb, uid]);
   const snap = useSyncExternalStore(engine.subscribe, engine.getSnapshot);
   const [user, setUser] = useState(session.user);
@@ -109,22 +119,48 @@ export function CloudHost({ sb, session, view, onView, onSignedOut }: { sb: Supa
     signOut,
     async deleteAccount() { const err = await deleteAccount(sb, uid); if (!err) { engine.destroy(); try { localStorage.removeItem(decisionKey(uid)); } catch { /* ignore */ } onSignedOut(); } return err; },
   }), [sb, uid, user, signOut, engine, onSignedOut]);
+  const isAdmin = !!role?.is_admin;
   const env = useMemo<AppEnv>(() => ({
     mode: "cloud", ns: `etudiant-os/u/${uid}`, files: cloudFiles(sb, uid), account,
     sync: { status: snap.status, pending: snap.pending, lastSyncedAt: snap.lastSyncedAt, error: snap.error, conflicts: snap.conflicts, online: snap.status !== "offline", retry: () => void engine.reconnect() },
-  }), [sb, uid, account, snap, engine]);
+    support: { isAdmin, unread, open: (page) => nav({ name: "support", page }), openAdmin: () => nav({ name: "admin", section: "dashboard" }) },
+  }), [sb, uid, account, snap, engine, isAdmin, unread, nav]);
 
+  if (role && !role.active) return <Suspended onSignOut={() => void reallySignOut()} />;
   if (!snap.ready || !snap.state) return <Splash text="Chargement de votre espace…" />;
   const st = snap.status;
   const badge = (
-    <span role="status" aria-live="polite" title={snap.error ?? undefined} data-testid="sync-status">
-      <Pill tone={syncTone(st)}>{SYNC_LABEL[st]}{snap.pending && st !== "saved" && st !== "saving" ? ` · ${snap.pending}` : ""}</Pill>
-    </span>
+    <>
+      <span role="status" aria-live="polite" title={snap.error ?? undefined} data-testid="sync-status">
+        <Pill tone={syncTone(st)}>{SYNC_LABEL[st]}{snap.pending && st !== "saved" && st !== "saving" ? ` · ${snap.pending}` : ""}</Pill>
+      </span>
+      {unread > 0 && (
+        <button onClick={() => nav({ name: "support", page: "requests" })} data-testid="notif-badge" aria-label={`${unread} réponse${unread > 1 ? "s" : ""} non lue${unread > 1 ? "s" : ""} dans Mes demandes`}
+          className="press inline-flex h-7 items-center gap-1 rounded-full border-2 border-fg bg-pink px-2 text-[11px] font-bold text-white shadow-[2px_2px_0_0_rgb(var(--ink))]">
+          <FileText size={13} />{unread}
+        </button>)}
+      {isAdmin && adminUnread > 0 && (
+        <button onClick={() => nav({ name: "admin", section: "tickets" })} data-testid="admin-badge" aria-label={`${adminUnread} notification${adminUnread > 1 ? "s" : ""} d'administration`}
+          className="press hidden h-7 items-center gap-1 rounded-full border-2 border-fg bg-panel px-2 text-[11px] font-bold text-fg sm:inline-flex">
+          <Database size={13} />{adminUnread}
+        </button>)}
+    </>
   );
-  const menuExtra = <button role="menuitem" onClick={() => void signOut()} className="flex w-full items-center gap-3 rounded-xl px-2 py-2.5 text-left text-[14px] text-muted hover:bg-sunken"><X size={17} />Se déconnecter</button>;
+  const item = "flex w-full items-center gap-3 rounded-xl px-2 py-2.5 text-left text-[14px] text-muted hover:bg-sunken";
+  const menuExtra = (
+    <>
+      <button role="menuitem" onClick={() => nav({ name: "support", page: "help" })} className={item}><Sparkles size={17} />Besoin d'aide ?</button>
+      <button role="menuitem" onClick={() => nav({ name: "support", page: "report" })} className={item}><AlertTriangle size={17} />Signaler un problème</button>
+      <button role="menuitem" onClick={() => nav({ name: "support", page: "requests" })} className={item}><FileText size={17} />Mes demandes{unread > 0 && <span className="ml-auto rounded-full bg-pink px-1.5 text-[11px] text-white">{unread}</span>}</button>
+      {isAdmin && <button role="menuitem" onClick={() => nav({ name: "admin", section: "dashboard" })} className={item} data-testid="admin-menu"><Database size={17} />Administration{adminUnread > 0 && <span className="ml-auto rounded-full bg-sunken px-1.5 text-[11px] text-fg">{adminUnread}</span>}</button>}
+      <button role="menuitem" onClick={() => void signOut()} className={item}><X size={17} />Se déconnecter</button>
+    </>
+  );
+  const override = support ? { key: `support-${support.page}-${support.id ?? ""}`, title: SUPPORT_TITLE[support.page],
+    node: <SupportView sb={sb} uid={uid} page={support.page} id={support.id} nav={nav} unread={unread} refreshKey={notif.tick} openFaq={() => window.location.assign(BASE + "#faq")} /> } : null;
   return (
     <>
-      <StudentOS state={snap.state} dispatch={engine.dispatch} env={env} view={view} onView={onView} headerExtra={badge} menuExtra={menuExtra} notice={notice2 ?? (st === "error" ? snap.error : null)} />
+      <StudentOS state={snap.state} dispatch={engine.dispatch} env={env} view={view} onView={onView} headerExtra={badge} menuExtra={menuExtra} override={override} notice={notice2 ?? (st === "error" ? snap.error : null)} />
       {importOffer && (
         <Modal title="Importer les données de cet appareil ?" onClose={() => skipImport(false)}>
           <div className="flex flex-col gap-3 text-[13px]">
@@ -152,6 +188,18 @@ export function CloudHost({ sb, session, view, onView, onSignedOut }: { sb: Supa
           </div>
         </Modal>)}
     </>
+  );
+}
+
+function Suspended({ onSignOut }: { onSignOut: () => void }) {
+  return (
+    <div className="grid min-h-full place-items-center bg-bg px-4 text-center text-fg">
+      <div className="inked max-w-md rounded-[24px] bg-panel p-8" role="alert">
+        <h1 className="font-display text-2xl font-extrabold">Compte suspendu</h1>
+        <p className="mt-2 text-[14px] text-muted">L'accès à ce compte a été suspendu par l'administration. Tes données ne sont pas supprimées.</p>
+        <Btn variant="primary" className="mt-5" onClick={onSignOut}>Se déconnecter</Btn>
+      </div>
+    </div>
   );
 }
 
