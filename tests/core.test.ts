@@ -306,3 +306,32 @@ test("budget : revenus du mois et épargne pris en compte dans le restant", asyn
   const v = validateState(JSON.parse(JSON.stringify({ ...st, budget: { ...st.budget, incomes: [...b.incomes, { id: "x", date: "bad", amount: 5 }] } })));
   assert.ok(v.ok); if (v.ok) { assert.equal(v.state.budget.incomes!.length, 2); assert.equal(v.state.budget.savings!.length, 3); assert.equal(v.state.budget.savingsGoal!.target, 500); }
 });
+
+test("checklists : étapes de tâche et de corvée (par date), nettoyage", () => {
+  let s = { ...base(), tasks: [task({ steps: [{ id: "a", text: "Lire", done: false }, { id: "b", text: "Exos", done: false }] })] };
+  s = C.reducer(s, { type: "task/step", id: "t1", stepId: "b" });
+  assert.deepEqual(s.tasks[0].steps!.map((x) => x.done), [false, true]);
+  const chore: C.Chore = { id: "c", name: "Frigo", recurrence: "weekly", day: 3, minutes: 20, assignees: ["Moi"], done: [], steps: [{ id: "x", text: "Vider" }, { id: "y", text: "Laver" }] };
+  s = C.reducer({ ...s, chores: [chore] }, { type: "chore/step", id: "c", date: TODAY, stepId: "x" });
+  assert.deepEqual(C.choreStepsDone(s.chores[0], TODAY), ["x"]);
+  assert.deepEqual(C.choreStepsDone(s.chores[0], "2026-10-22"), []); // nouvelle occurrence : tout décoché
+  s = C.reducer(s, { type: "chore/step", id: "c", date: TODAY, stepId: "x" });
+  assert.deepEqual(C.choreStepsDone(s.chores[0], TODAY), []);
+  const v = C.validateState(JSON.parse(JSON.stringify({ ...s, tasks: [task({ steps: [{ id: "a", text: "  ok ", done: 1 }, { id: "b", text: "  " }, { text: "sans id" }] as never })] })));
+  assert.ok(v.ok);
+  if (v.ok) { assert.deepEqual(v.state.tasks[0].steps, [{ id: "a", text: "ok", done: true }]); assert.equal(v.state.chores[0].steps!.length, 2); }
+});
+
+test("sommeil à l'heure : proposition automatique et compteurs", () => {
+  assert.deepEqual(C.onTimeGuess("23:40", "07:30", "23:30", "07:30"), { bedOk: true, wakeOk: true });
+  assert.deepEqual(C.onTimeGuess("00:10", "07:50", "23:30", "07:30"), { bedOk: false, wakeOk: false }); // après minuit = en retard
+  assert.deepEqual(C.onTimeGuess("22:50", "06:00", "23:30", "07:30"), { bedOk: true, wakeOk: true }); // en avance = à l'heure
+  const L = (date: string, bedOk?: boolean, wakeOk?: boolean): C.SleepLog => ({ date, bed: "23:00", wake: "07:00", quality: 3, bedOk, wakeOk });
+  const logs = [L("2026-08-01", false, false), L("2026-10-12", true, false), L("2026-10-13", true, true), L("2026-10-14"), L("2026-10-15", true, true)];
+  const all = C.onTimeStats(logs, TODAY), d30 = C.onTimeStats(logs, TODAY, 30);
+  assert.deepEqual(all.bed, { ok: 3, late: 1 }); assert.deepEqual(all.wake, { ok: 2, late: 2 });
+  assert.deepEqual(d30.bed, { ok: 3, late: 0 });
+  assert.equal(all.streak, 2); // 15 et 13 (le 14 non renseigné ne casse pas la série), arrêt au 12
+  const v = C.validateState(JSON.parse(JSON.stringify({ ...base(), sleep: [L("2026-10-15", true, "x" as never)] })));
+  assert.ok(v.ok && v.state.sleep[0].bedOk === true && !("wakeOk" in v.state.sleep[0]));
+});

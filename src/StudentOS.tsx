@@ -4,8 +4,8 @@ import { MiniPdf } from "./pdf.ts";
 import { layoutLanes } from "./core.ts";
 import { DAY_WORDS, dayOf, pageGeometry, parseGrid } from "./timetable.ts";
 import { parseIcs, normalizeFeedUrl, isFeedUrl } from "./ical.ts";
-import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, pad, parseAmount, parseISO, parseReceipt, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
-import type { Action, Aisle, AppState, Block, Budget, Course, DayPlan, Expense, ExpenseCat, GroceryTemplate, ID, Phase, PomodoroCfg, Priority, ReceiptResult, Recurrence, EventRecurrence, CalFeed, FeedEvent, SettingsState, SleepLog, Task, TaskKind, TaskStatus, TemplateItem, ViewKey } from "./core.ts";
+import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, choreStepsDone, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, onTimeGuess, onTimeStats, pad, parseAmount, parseISO, parseReceipt, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
+import type { Action, Aisle, Chore, AppState, Block, Budget, Course, DayPlan, Expense, ExpenseCat, GroceryTemplate, ID, Phase, PomodoroCfg, Priority, ReceiptResult, Recurrence, EventRecurrence, CalFeed, FeedEvent, SettingsState, SleepLog, Step, Task, TaskKind, TaskStatus, TemplateItem, ViewKey } from "./core.ts";
 import type { AppEnv } from "./env.ts";
 
 /* ============================================================================
@@ -405,6 +405,41 @@ const TimeMode: React.FC<{ value: "duration" | "slot"; onChange: (v: "duration" 
   </div>
 );
 
+/** Liste d'étapes cochables (checklist). */
+export const StepsCheck: React.FC<{ steps: Step[]; done: (id: ID) => boolean; onToggle: (id: ID) => void; small?: boolean; label?: string }> = ({ steps, done, onToggle, small, label }) => (
+  <ul className="flex flex-col gap-1" aria-label={label ?? "Checklist"}>
+    {steps.map((x) => { const d = done(x.id); return (
+      <li key={x.id}><button type="button" onClick={() => onToggle(x.id)} aria-pressed={d} className={cx("flex w-full items-start gap-2 rounded-md px-1 py-0.5 text-left transition hover:bg-sunken", small ? "text-[12px]" : "text-[13px]")}>
+        <span className={cx("mt-[2px] grid h-4 w-4 shrink-0 place-items-center rounded border-2 transition", d ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-fg/40")}>{d && <Check size={10} strokeWidth={3} />}</span>
+        <span className={cx("min-w-0 flex-1 break-words", d && "text-muted line-through")}>{x.text}</span>
+      </button></li>); })}
+  </ul>
+);
+/** Édition d'une checklist : ajout (Entrée), suppression, et cases à cocher si `checkable`. */
+export const StepsEditor: React.FC<{ id: string; steps: Step[]; onChange: (s: Step[]) => void; checkable?: boolean; className?: string; placeholder?: string }> = ({ id, steps, onChange, checkable, className, placeholder }) => {
+  const [txt, setTxt] = useState("");
+  const add = () => { const t = txt.trim(); if (!t) return; if (steps.length >= 40) return; onChange([...steps, { id: uid(), text: t.slice(0, 120), ...(checkable ? { done: false } : {}) }]); setTxt(""); };
+  const done = steps.filter((x) => x.done).length;
+  return (
+    <div className={className}>
+      <p className="mb-1 flex items-center justify-between text-[11px] font-medium uppercase tracking-wider text-muted"><label htmlFor={id}>Checklist</label>{checkable && steps.length > 0 && <span className="font-mono normal-case tabular-nums">{done}/{steps.length}</span>}</p>
+      {steps.length > 0 && <ul className="mb-1.5 flex flex-col gap-1">{steps.map((x, i) => (
+        <li key={x.id} className="flex items-center gap-2 text-[13px]">
+          {checkable ? <button type="button" aria-label={x.done ? `Décocher ${x.text}` : `Cocher ${x.text}`} onClick={() => onChange(steps.map((y) => (y.id === x.id ? { ...y, done: !y.done } : y)))}
+            className={cx("grid h-4 w-4 shrink-0 place-items-center rounded border-2", x.done ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-fg/40")}>{x.done && <Check size={10} strokeWidth={3} />}</button>
+            : <span className="w-4 shrink-0 text-center font-mono text-[11px] text-muted">{i + 1}.</span>}
+          <input aria-label={`Étape ${i + 1}`} value={x.text} onChange={(e) => onChange(steps.map((y) => (y.id === x.id ? { ...y, text: e.target.value } : y)))}
+            className={cx("min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-1 py-0.5 outline-none focus:border-line", x.done && "text-muted line-through")} />
+          <button type="button" className="p-1 text-muted hover:text-bad" aria-label={`Supprimer l'étape ${x.text}`} onClick={() => onChange(steps.filter((y) => y.id !== x.id))}><X size={12} /></button>
+        </li>))}</ul>}
+      <div className="flex gap-2">
+        <Input id={id} value={txt} placeholder={placeholder ?? "Ajouter une étape…"} onChange={(e) => setTxt(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }} />
+        <Btn type="button" onClick={add} aria-label="Ajouter l'étape" disabled={!txt.trim()}><Plus size={14} /></Btn>
+      </div>
+    </div>
+  );
+};
+
 const TaskForm: React.FC<{ onDone: () => void; task?: Task }> = ({ onDone, task }) => {
   const { state, dispatch, toast } = useStore();
   const [f, setF] = useState(task
@@ -412,6 +447,7 @@ const TaskForm: React.FC<{ onDone: () => void; task?: Task }> = ({ onDone, task 
     : { title: "", courseId: state.courses[0]?.id ?? "", kind: "devoir" as TaskKind, deadline: iso(addDays(new Date(), 3)), estimate: 120, priority: 2 as Priority, spent: 0 });
   const [mode, setMode] = useState<"duration" | "slot">(task?.slot ? "slot" : "duration");
   const [slot, setSlot] = useState(task?.slot ?? { date: todayISO(), start: "14:00", end: "16:00" });
+  const [steps, setSteps] = useState<Step[]>(task?.steps ?? []);
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!f.title.trim()) { toast("Donnez un titre à la tâche.", "bad"); return; }
@@ -424,7 +460,7 @@ const TaskForm: React.FC<{ onDone: () => void; task?: Task }> = ({ onDone, task 
     } else if (!(f.estimate >= 5)) { toast("L'estimation doit être d'au moins 5 minutes.", "bad"); return; }
     if (!(f.spent >= 0)) { toast("Le temps passé ne peut pas être négatif.", "bad"); return; }
     if (!task && f.deadline < todayISO()) toast("Échéance déjà passée : la tâche apparaîtra en retard.", "info");
-    const data = { ...f, estimate, title: f.title.trim(), courseId: f.courseId || null, slot: chosen };
+    const data = { ...f, estimate, title: f.title.trim(), courseId: f.courseId || null, slot: chosen, steps: steps.map((x) => ({ ...x, text: x.text.trim() })).filter((x) => x.text) };
     if (task) { dispatch({ type: "task/update", id: task.id, patch: data }); toast("Tâche mise à jour"); }
     else { const { slot: sl, ...rest } = data; dispatch({ type: "task/add", task: { id: uid(), ...rest, ...(sl ? { slot: sl } : {}), status: "todo", createdAt: todayISO() } }); toast(sl ? `Tâche ajoutée : ${fmtDate(sl.date)}, ${sl.start}–${sl.end}` : "Tâche ajoutée et planifiée"); }
     onDone();
@@ -448,6 +484,7 @@ const TaskForm: React.FC<{ onDone: () => void; task?: Task }> = ({ onDone, task 
         <Field label="Début" htmlFor="tf-sstart"><Input id="tf-sstart" type="time" value={slot.start} onChange={(e) => setSlot({ ...slot, start: e.target.value })} /></Field>
         <Field label="Fin" htmlFor="tf-send"><Input id="tf-send" type="time" value={slot.end} onChange={(e) => setSlot({ ...slot, end: e.target.value })} /></Field>
       </>}
+      <StepsEditor id="tf-steps" steps={steps} onChange={setSteps} checkable className="col-span-2 sm:col-span-4" placeholder="Ex. Lire le chapitre, faire les exercices…" />
       {task && <Field label="Temps déjà passé (min)" htmlFor="tf-spent" className="col-span-2"><Input id="tf-spent" type="number" min={0} step={5} value={f.spent} onChange={(e) => setF({ ...f, spent: Math.max(0, Number(e.target.value)) })} /></Field>}
       <div className="col-span-2 flex justify-end gap-2 sm:col-span-4"><Btn type="button" variant="ghost" onClick={onDone}>Annuler</Btn><Btn type="submit" variant="primary">{task ? <><Check size={14} />Enregistrer</> : <><Plus size={14} />Ajouter</>}</Btn></div>
     </form>
@@ -584,10 +621,38 @@ const ReceiptScanner: React.FC<{ onResult: (r: ReceiptResult) => void; label?: s
 };
 
 // ---------------------------------------------------------------- Module : Tableau de bord
+type OnTime = ReturnType<typeof onTimeStats>;
+/** Compteur coucher / réveil à l'heure (tableau de bord et page Sommeil). */
+export const OnTimeCounter: React.FC<{ all: OnTime; d30: OnTime; bedTarget: string; wakeTarget: string }> = ({ all, d30, bedTarget, wakeTarget }) => {
+  const row = (label: string, target: string, a: OnTime["bed"], m: OnTime["bed"]) => {
+    const n = a.ok + a.late, pct = n ? Math.round((a.ok / n) * 100) : 0;
+    return (
+      <div>
+        <div className="mb-1 flex items-baseline justify-between gap-2 text-[13px]"><span className="font-medium">{label} <span className="font-mono text-[11px] text-muted">· {target}</span></span>
+          <span className="font-mono text-[11px] tabular-nums text-muted">{n ? `${pct} %` : "—"}</span></div>
+        <div className="flex items-center gap-3">
+          <span className="flex items-center gap-1 font-mono text-xl font-semibold tabular-nums text-ok" title="À l'heure"><Check size={15} strokeWidth={3} />{a.ok}</span>
+          <span className="flex items-center gap-1 font-mono text-xl font-semibold tabular-nums text-bad" title="Pas à l'heure"><X size={15} strokeWidth={3} />{a.late}</span>
+          <div className="flex h-2 flex-1 overflow-hidden rounded-full bg-sunken">{n > 0 && <><div className="h-full bg-ok" style={{ width: `${pct}%` }} /><div className="h-full bg-bad/70" style={{ width: `${100 - pct}%` }} /></>}</div>
+        </div>
+        <p className="mt-0.5 text-[10px] text-muted">30 derniers jours : {m.ok} à l'heure · {m.late} en retard</p>
+      </div>);
+  };
+  return (
+    <div className="flex flex-col gap-3" data-testid="ontime">
+      {row("Coucher", bedTarget, all.bed, d30.bed)}
+      {row("Réveil", wakeTarget, all.wake, d30.wake)}
+      <p className="text-[11px] text-muted">{all.streak > 0 ? <>🔥 Série : <b className="text-fg">{all.streak} nuit{all.streak > 1 ? "s" : ""}</b> d'affilée à l'heure (coucher et réveil).</> : "Cochez chaque nuit si vous vous êtes couché·e et levé·e à l'heure."}</p>
+    </div>
+  );
+};
+
 const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }> = ({ go, openNewTask }) => {
   const { state, dispatch, toast, openTask } = useStore();
   const today = todayISO();
   const cur = state.settings.currency;
+  const choreStep = useChoreStep();
+  const ot = useMemo(() => ({ all: onTimeStats(state.sleep, today), d30: onTimeStats(state.sleep, today, 30) }), [state.sleep, today]);
   // Toutes les valeurs viennent des mêmes fonctions que les modules (une seule source de vérité).
   const days7 = useMemo(() => planRange(state, today, 7, today), [state, today]);
   const plan = days7[0];
@@ -673,6 +738,7 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
                 <li key={t.id} className="flex flex-wrap items-center gap-2 py-2 first:pt-0 last:pb-0">
                   <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: c?.color ?? "rgb(var(--muted))" }} />
                   <button className="min-w-0 flex-1 truncate text-left text-[13px] hover:text-accent" onClick={() => openTask(t.id)}>{t.title}</button>
+                  {!!t.steps?.length && <Pill tone="muted">☑ {t.steps.filter((x) => x.done).length}/{t.steps.length}</Pill>}
                   <span className="font-mono text-xs tabular-nums text-muted">{fmtDur(minutes)}<span className="hidden sm:inline"> prévus</span></span>
                   <Btn size="sm" onClick={() => startFocus(t)} aria-label={`Lancer le focus sur ${t.title}`}><Play size={12} /><span className="hidden sm:inline">Focus</span></Btn>
                   <Btn size="sm" variant="ghost" onClick={() => finish(t)} aria-label="Marquer terminé"><Check size={13} /></Btn>
@@ -703,6 +769,9 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
             <p className="mt-2 text-xs text-muted">Tiret : nuit non saisie (non comptée).</p></>
             : <Empty icon={<Moon size={18} />} title="Aucune nuit cette semaine" hint="Enregistrez vos heures de coucher et de réveil pour suivre votre régularité." action={<Btn onClick={() => go("sleep")}>Enregistrer une nuit</Btn>} />}
         </Card>
+        <Card title={<span className="flex items-center gap-2"><BedDouble size={15} />À l'heure ?</span>} action={<Btn size="sm" variant="ghost" onClick={() => go("sleep")}>Cocher</Btn>}>
+          <OnTimeCounter all={ot.all} d30={ot.d30} bedTarget={state.settings.bedDefault} wakeTarget={state.settings.wakeDefault} />
+        </Card>
         <Card title="Charge des 7 prochains jours" action={<Btn size="sm" variant="ghost" onClick={() => go("planning")}>Planning</Btn>}>
           <div className="flex flex-col gap-2.5">
             {days7.map((p) => (<div key={p.date} className="grid grid-cols-[52px_1fr] items-center gap-2"><span className="text-xs text-muted">{DAYS[weekday(parseISO(p.date))]} {parseISO(p.date).getDate()}</span><LoadMeter load={p.load} level={p.level} /></div>))}
@@ -725,7 +794,7 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
           {chores.length ? (
             <ul className="flex flex-col divide-y divide-line">
               {chores.map(({ c, who, done, skipped }) => (
-                <li key={c.id} className="flex items-center gap-2 py-2 first:pt-0 last:pb-0 text-[13px]">
+                <li key={c.id} className="flex flex-wrap items-center gap-2 py-2 first:pt-0 last:pb-0 text-[13px]">
                   <button onClick={() => { if (skipped) return; dispatch({ type: "chore/toggle", id: c.id, date: today, who }); if (!done) toast(solo ? `${c.name} : faite` : `${c.name} : fait par ${who}`); }} disabled={skipped}
                     aria-label={done ? `Annuler ${c.name}` : `Marquer ${c.name} comme faite`}
                     className={cx("grid h-5 w-5 shrink-0 place-items-center rounded border-2 transition", done ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-fg/40 hover:border-accent", skipped && "opacity-40")}>{done && <Check className="tick" size={11} strokeWidth={3} />}</button>
@@ -734,6 +803,7 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
                   {!solo && <Pill tone={who === "Moi" ? "info" : "muted"}>{who}</Pill>}
                   {!done && !skipped && <Btn size="sm" variant="ghost" title="Reporter" aria-label={`Reporter ${c.name}`} onClick={() => { dispatch({ type: "chore/skip", id: c.id, date: today }); toast(`${c.name} reportée`, "info"); }}>↷</Btn>}
                   {skipped && <span className="text-[11px] text-muted">reportée</span>}
+                  {!!c.steps?.length && !skipped && <div className="basis-full pl-7"><StepsCheck small steps={c.steps} done={(id) => choreStepsDone(c, today).includes(id)} onToggle={(id) => choreStep(c, today, id, who)} label={`Checklist de ${c.name}`} /></div>}
                 </li>))}
             </ul>
           ) : <Empty icon={<Home size={18} />} title={state.chores.length ? "Rien aujourd'hui" : "Aucune corvée"} hint={state.chores.length ? "Aucune corvée n'est prévue aujourd'hui dans la rotation." : solo ? "Créez vos corvées dans Ménage." : "Créez vos corvées et la rotation entre colocataires dans Ménage."} action={!state.chores.length ? <Btn onClick={() => go("chores")}><Plus size={13} />Créer une corvée</Btn> : undefined} />}
@@ -1344,6 +1414,8 @@ const Academic: React.FC<{ openNewTask: () => void }> = ({ openNewTask }) => {
                     <button className="text-muted opacity-60 transition hover:text-bad group-hover:opacity-100" aria-label="Supprimer la tâche" onClick={() => undoable({ type: "task/remove", id: t.id }, `Tâche « ${t.title} » supprimée`)}><Trash2 size={12} /></button></span>
                   </div>
                   <p className={cx("text-[13px] font-medium leading-snug", s === "done" && "text-muted line-through")}>{t.title}</p>
+                  {!!t.steps?.length && <div className="mt-1.5" onPointerDown={(e) => e.stopPropagation()}><p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted">Checklist · {t.steps.filter((x) => x.done).length}/{t.steps.length}</p>
+                    <StepsCheck small steps={t.steps} done={(id) => !!t.steps?.find((x) => x.id === id)?.done} onToggle={(stepId) => dispatch({ type: "task/step", id: t.id, stepId })} label={`Checklist de ${t.title}`} /></div>}
                   <div className="mt-2 h-1 rounded-full bg-sunken"><div className="h-full rounded-full bg-accent" style={{ width: `${pct}%` }} /></div>
                   <div className="mt-2 flex items-center gap-2 text-[11px] text-muted">
                     <span className="font-mono tabular-nums">{fmtDur(t.spent)} / {fmtDur(t.estimate)}</span>
@@ -2049,6 +2121,9 @@ const Chores: React.FC = () => {
   const solo = isSolo(state);
   const [cmode, setCmode] = useState<"duration" | "slot">("duration");
   const [presetEnd, setPresetEnd] = useState(false);
+  const [newSteps, setNewSteps] = useState<Step[]>([]);
+  const [editSteps, setEditSteps] = useState<ID | null>(null);
+  const editing = state.chores.find((c) => c.id === editSteps);
   const [f, setF] = useState({ name: "", recurrence: "weekly" as Recurrence, day: 5, minutes: 20, time: "18:00", end: "18:30", assignees: ["Moi", ...state.settings.roommates].join(", ") });
   const people = Array.from(new Set(state.chores.flatMap((c) => c.assignees)));
   const minutesBy = people.map((p) => ({ p, min: state.chores.reduce((n, c) => n + days.filter((d) => choreScheduledOn(c, d) && choreAssignee(c, d) === p).length * c.minutes, 0) }));
@@ -2067,7 +2142,8 @@ const Chores: React.FC = () => {
               <tbody>
                 {state.chores.map((c) => (
                   <tr key={c.id} className="group">
-                    <td className="pr-2"><p className="font-medium text-fg">{c.name}</p><p className="text-[11px] text-muted">{REC_LABEL[c.recurrence]}{c.time ? ` · ${c.time}–${toHHMM(toMin(c.time) + c.minutes)}` : ` · ${c.minutes} min`}</p></td>
+                    <td className="pr-2"><p className="font-medium text-fg">{c.name}</p>
+                      <button className="text-[11px] text-accent hover:underline" onClick={() => setEditSteps(c.id)} aria-label={`Checklist de ${c.name}`}>{c.steps?.length ? `☑ Checklist · ${c.steps.length} étape${c.steps.length > 1 ? "s" : ""}` : "+ Checklist"}</button><p className="text-[11px] text-muted">{REC_LABEL[c.recurrence]}{c.time ? ` · ${c.time}–${toHHMM(toMin(c.time) + c.minutes)}` : ` · ${c.minutes} min`}</p></td>
                     {days.map((d) => { const on = choreScheduledOn(c, d); const k = iso(d); const done = c.done.includes(k); const skipped = (c.skipped ?? []).includes(k); const who = choreAssignee(c, d); const by = c.doneBy?.[k] ?? who; return (
                       <td key={k} className="relative text-center">{on ? (<>
                         {skipped ? (
@@ -2108,7 +2184,7 @@ const Chores: React.FC = () => {
             if (!f.name.trim() || !assignees.length) { toast("Nom et au moins une personne requis.", "bad"); return; }
             if (cmode === "slot" && toMin(f.end) <= toMin(f.time)) { toast("L'heure de fin doit suivre l'heure de début.", "bad"); return; }
             const minutes = cmode === "slot" ? toMin(f.end) - toMin(f.time) : f.minutes;
-            dispatch({ type: "chore/add", chore: { id: uid(), name: f.name.trim(), recurrence: f.recurrence, day: f.day, minutes, assignees, done: [], ...(cmode === "slot" ? { time: f.time } : {}) } }); setF({ ...f, name: "" }); toast(state.settings.roommates.length ? "Corvée ajoutée à la rotation" : "Corvée ajoutée"); }}>
+            dispatch({ type: "chore/add", chore: { id: uid(), name: f.name.trim(), recurrence: f.recurrence, day: f.day, minutes, assignees, done: [], ...(cmode === "slot" ? { time: f.time } : {}), ...(newSteps.some((x) => x.text.trim()) ? { steps: newSteps.filter((x) => x.text.trim()).map(({ id, text }) => ({ id, text: text.trim() })), stepsDone: {} } : {}) } }); setF({ ...f, name: "" }); setNewSteps([]); toast(state.settings.roommates.length ? "Corvée ajoutée à la rotation" : "Corvée ajoutée"); }}>
             <div className="col-span-2">
               <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">Suggestions</p>
               <div className="relative">
@@ -2133,12 +2209,45 @@ const Chores: React.FC = () => {
               ? <Field label="Durée (min)" htmlFor="ch-min" className="col-span-2"><Input id="ch-min" type="number" min={5} step={5} value={f.minutes} onChange={(e) => setF({ ...f, minutes: Number(e.target.value) })} /></Field>
               : <><Field label="Début" htmlFor="ch-time"><Input id="ch-time" type="time" value={f.time} onChange={(e) => setF({ ...f, time: e.target.value })} /></Field>
                 <Field label="Fin" htmlFor="ch-end"><Input id="ch-end" type="time" value={f.end} onChange={(e) => setF({ ...f, end: e.target.value })} /></Field></>}
+            <StepsEditor id="ch-steps" steps={newSteps} onChange={setNewSteps} className="col-span-2" placeholder="Ex. Vider le frigo, laver les étagères…" />
             {state.settings.roommates.length > 0 && <Field label="Rotation (séparée par des virgules)" htmlFor="ch-who" className="col-span-2"><Input id="ch-who" placeholder="Moi, Inès" value={f.assignees} onChange={(e) => setF({ ...f, assignees: e.target.value })} /></Field>}
             <p className="col-span-2 text-[11px] text-muted">{cmode === "duration" ? "La corvée est placée dans un créneau libre de votre planning." : "La corvée apparaît à cet horaire dans votre planning."}{!state.settings.roommates.length && " Ajoutez des colocataires dans Réglages pour activer la rotation."}</p>
             <Btn type="submit" variant="primary" className="col-span-2"><Plus size={14} />Ajouter</Btn>
           </form>
         </Card>
       </div>
+      {editing && <Modal title={`Checklist · ${editing.name}`} onClose={() => setEditSteps(null)}><ChoreStepsEdit c={editing} onDone={() => setEditSteps(null)} /></Modal>}
+    </div>
+  );
+};
+
+/** Coche une étape de corvée ; la corvée est marquée faite quand toutes ses étapes le sont. */
+export function useChoreStep() {
+  const { dispatch, toast } = useStore();
+  return (c: Chore, date: string, stepId: ID, who: string) => {
+    const was = choreStepsDone(c, date);
+    const now = was.includes(stepId) ? was.filter((x) => x !== stepId) : [...was, stepId];
+    dispatch({ type: "chore/step", id: c.id, date, stepId });
+    const all = !!c.steps?.length && now.length === c.steps.length, done = c.done.includes(date);
+    if (all && !done) { dispatch({ type: "chore/toggle", id: c.id, date, who }); toast(`${c.name} : toutes les étapes faites ✓`); }
+    else if (!all && done && was.length === c.steps?.length) dispatch({ type: "chore/toggle", id: c.id, date, who });
+  };
+}
+
+const ChoreStepsEdit: React.FC<{ c: Chore; onDone: () => void }> = ({ c, onDone }) => {
+  const { dispatch, toast } = useStore();
+  const today = todayISO();
+  const [steps, setSteps] = useState<Step[]>(c.steps ?? []);
+  const step = useChoreStep();
+  const on = choreScheduledOn(c, parseISO(today));
+  return (
+    <div className="flex flex-col gap-4">
+      {on && !!c.steps?.length && <div><p className="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted">Aujourd'hui · {choreStepsDone(c, today).length}/{c.steps.length}</p>
+        <StepsCheck steps={c.steps} done={(id) => choreStepsDone(c, today).includes(id)} onToggle={(id) => step(c, today, id, choreAssignee(c, parseISO(today)))} /></div>}
+      <StepsEditor id="cs-steps" steps={steps} onChange={setSteps} placeholder="Ex. Dégivrer, laver les bacs…" />
+      <p className="text-[11px] text-muted">Les étapes se décochent automatiquement à chaque nouvelle occurrence de la corvée. Quand toutes sont cochées, la corvée est marquée faite.</p>
+      <div className="flex justify-end gap-2"><Btn variant="ghost" onClick={onDone}>Annuler</Btn>
+        <Btn variant="primary" onClick={() => { const clean = steps.map((x) => ({ id: x.id, text: x.text.trim() })).filter((x) => x.text); dispatch({ type: "chore/update", id: c.id, patch: { steps: clean, stepsDone: c.stepsDone ?? {} } }); toast("Checklist enregistrée"); onDone(); }}><Check size={14} />Enregistrer</Btn></div>
     </div>
   );
 };
@@ -2153,7 +2262,13 @@ const Sleep: React.FC = () => {
   const autoWake = firstClass ? toMin(firstClass.start) - s.prepMinutes : toMin(s.wakeDefault) + 60;
   const wake = manualWake ? toMin(manualWake) : autoWake;
   const opts = bedtimeOptions(wake, s.fallAsleep);
-  const [log, setLog] = useState<SleepLog>({ date: todayISO(), bed: "23:30", wake: "07:30", quality: 3 });
+  const [log, setLog] = useState<SleepLog>({ date: todayISO(), bed: s.bedDefault, wake: s.wakeDefault, quality: 3 });
+  // Cases « à l'heure » : proposées d'après les heures visées, jusqu'à ce que l'utilisateur les coche lui-même.
+  const [touched, setTouched] = useState(false);
+  const guess = onTimeGuess(log.bed, log.wake, s.bedDefault, s.wakeDefault);
+  const bedOk = touched ? !!log.bedOk : guess.bedOk, wakeOk = touched ? !!log.wakeOk : guess.wakeOk;
+  const ot = { all: onTimeStats(state.sleep, todayISO()), d30: onTimeStats(state.sleep, todayISO(), 30) };
+  const flip = (l: SleepLog, k: "bedOk" | "wakeOk") => dispatch({ type: "sleep/upsert", log: { ...l, [k]: l[k] === undefined ? false : !l[k] } });
   const last14 = lastNDays(14);
   const today = todayISO();
   const ss = sleepStats(state.sleep, s.sleepGoal, today);
@@ -2166,7 +2281,7 @@ const Sleep: React.FC = () => {
     if (!log.bed || !log.wake) { toast("Indiquez l'heure de coucher et de réveil.", "bad"); return; }
     if (dur < 60 || dur > 16 * 60) { toast(`Durée de ${fmtDur(dur)} peu plausible : vérifiez les heures (le passage de minuit est géré automatiquement).`, "bad"); return; }
     const prev = state.sleep.find((l) => l.date === log.date);
-    dispatch({ type: "sleep/upsert", log });
+    dispatch({ type: "sleep/upsert", log: { ...log, bedOk, wakeOk } }); setTouched(false);
     toast(`Nuit ${prev ? "mise à jour" : "enregistrée"} : ${fmtDur(dur)}`, "ok", prev ? { label: "Annuler", run: () => dispatch({ type: "sleep/upsert", log: prev }) } : undefined);
   };
   const firstCourse = firstClass ? state.courses.find((c) => c.id === firstClass.courseId) : undefined;
@@ -2199,21 +2314,41 @@ const Sleep: React.FC = () => {
         <div className="mt-2 flex items-center gap-2"><Field label="Objectif (h/nuit)" htmlFor="sl-goal"><Input id="sl-goal" type="number" min={5} max={11} step={0.5} className="w-24" value={s.sleepGoal} onChange={(e) => dispatch({ type: "settings", patch: { sleepGoal: Number(e.target.value) } })} /></Field>
           <p className="text-xs text-muted">{!ss.nights7 ? "Saisissez quelques nuits pour obtenir des statistiques. Les nuits non saisies (tirets) ne sont pas comptées." : debt > 240 ? "Dette élevée : couchez-vous 30 à 45 min plus tôt pendant quelques jours plutôt que de tout rattraper le week-end." : "Dette maîtrisée. Gardez des horaires réguliers à ± 30 min."} Indications générales, pas un avis médical.</p></div>
       </Card>
+      <Card title={<span className="flex items-center gap-2"><Check size={15} />À l'heure ?</span>} className="md:col-span-2">
+        <div className="grid gap-4 md:grid-cols-[1fr_auto]">
+          <OnTimeCounter all={ot.all} d30={ot.d30} bedTarget={s.bedDefault} wakeTarget={s.wakeDefault} />
+          <div className="flex flex-wrap items-end gap-3 md:flex-col md:items-stretch">
+            <Field label="Coucher visé" htmlFor="sl-tbed"><Input id="sl-tbed" type="time" className="w-32" value={s.bedDefault} onChange={(e) => e.target.value && dispatch({ type: "settings", patch: { bedDefault: e.target.value } })} /></Field>
+            <Field label="Réveil visé" htmlFor="sl-twake"><Input id="sl-twake" type="time" className="w-32" value={s.wakeDefault} onChange={(e) => e.target.value && dispatch({ type: "settings", patch: { wakeDefault: e.target.value } })} /></Field>
+          </div>
+        </div>
+        <p className="mt-2 text-[11px] text-muted">À l'enregistrement d'une nuit, les cases sont pré-cochées (jusqu'à 15 min de retard = à l'heure) ; vous pouvez les changer, et cliquer ✓ / ✗ dans le tableau ci-dessous pour corriger une nuit.</p>
+      </Card>
       <Card title="Enregistrer une nuit" className="md:col-span-2">
         <form className="flex flex-wrap items-end gap-3" onSubmit={save}>
           <Field label="Nuit se terminant le" htmlFor="sl-date"><Input id="sl-date" type="date" value={log.date} max={todayISO()} onChange={(e) => setLog({ ...log, date: e.target.value })} /></Field>
           <Field label="Coucher" htmlFor="sl-bed"><Input id="sl-bed" type="time" value={log.bed} onChange={(e) => setLog({ ...log, bed: e.target.value })} /></Field>
           <Field label="Réveil" htmlFor="sl-wk"><Input id="sl-wk" type="time" value={log.wake} onChange={(e) => setLog({ ...log, wake: e.target.value })} /></Field>
           <Field label="Qualité" htmlFor="sl-q"><Select id="sl-q" value={log.quality} onChange={(e) => setLog({ ...log, quality: Number(e.target.value) as SleepLog["quality"] })}>{[1, 2, 3, 4, 5].map((q) => <option key={q} value={q}>{"★".repeat(q)}</option>)}</Select></Field>
+          <div className="flex gap-2 pb-0.5" role="group" aria-label="À l'heure ?">
+            {([["bedOk", "Couché·e à l'heure", bedOk], ["wakeOk", "Levé·e à l'heure", wakeOk]] as const).map(([k, label, v]) => (
+              <button key={k} type="button" aria-pressed={v} onClick={() => { setTouched(true); setLog({ ...log, bedOk, wakeOk, [k]: !v }); }}
+                className={cx("flex items-center gap-1.5 rounded-full border-2 px-3 py-1.5 text-[12px] font-medium transition", v ? "border-ok/60 bg-ok/12 text-ok" : "border-bad/50 bg-bad/8 text-bad")}>
+                {v ? <Check size={13} strokeWidth={3} /> : <X size={13} strokeWidth={3} />}{label}</button>))}
+          </div>
           <span className="pb-2 font-mono text-sm tabular-nums text-muted">= {fmtDur(dur)}{toMin(log.wake) <= toMin(log.bed) ? " (passage de minuit)" : ""}</span>
           <Btn type="submit" variant="primary"><Moon size={14} />{existing ? "Remplacer" : "Enregistrer"}</Btn>
           {existing && <span className="pb-2 text-xs text-warn">Une nuit existe déjà à cette date ({existing.bed} → {existing.wake}).</span>}
         </form>
         <div className="mt-4 overflow-x-auto">
-          <table className="w-full min-w-[480px] text-[13px]"><thead><tr className="text-left text-[11px] uppercase tracking-wider text-muted"><th className="pb-2 font-medium">Date</th><th className="pb-2 font-medium">Coucher</th><th className="pb-2 font-medium">Réveil</th><th className="pb-2 font-medium">Durée</th><th className="pb-2 font-medium">Écart objectif</th><th className="pb-2 font-medium">Qualité</th><th /></tr></thead>
+          <table className="w-full min-w-[580px] text-[13px]"><thead><tr className="text-left text-[11px] uppercase tracking-wider text-muted"><th className="pb-2 font-medium">Date</th><th className="pb-2 font-medium">Coucher</th><th className="pb-2 font-medium">Réveil</th><th className="pb-2 font-medium">Durée</th><th className="pb-2 font-medium">Écart objectif</th><th className="pb-2 font-medium">Qualité</th><th className="pb-2 font-medium">À l'heure</th><th /></tr></thead>
             <tbody className="divide-y divide-line">{[...state.sleep].reverse().slice(0, 10).map((l) => { const m = sleepMinutes(l.bed, l.wake); const diff = m - s.sleepGoal * 60; return (
               <tr key={l.date} className="group"><td className="py-1.5">{fmtDate(l.date)}</td><td className="font-mono tabular-nums">{l.bed}</td><td className="font-mono tabular-nums">{l.wake}</td><td className="font-mono tabular-nums">{fmtDur(m)}</td>
                 <td className={cx("font-mono tabular-nums", diff < -60 ? "text-bad" : diff < 0 ? "text-warn" : "text-ok")}>{diff >= 0 ? "+" : "−"}{fmtDur(Math.abs(diff))}</td><td className="text-warn">{"★".repeat(l.quality)}</td>
+                <td className="whitespace-nowrap">{(["bedOk", "wakeOk"] as const).map((k) => (
+                  <button key={k} onClick={() => flip(l, k)} title={`${k === "bedOk" ? "Coucher" : "Réveil"} : ${l[k] === undefined ? "non renseigné" : l[k] ? "à l'heure" : "en retard"} · cliquer pour changer`} aria-label={`${k === "bedOk" ? "Coucher" : "Réveil"} à l'heure du ${fmtDate(l.date)}`}
+                    className={cx("mr-1 inline-flex h-6 items-center gap-0.5 rounded-md border px-1.5 text-[11px]", l[k] === undefined ? "border-dashed border-line text-muted" : l[k] ? "border-ok/50 bg-ok/10 text-ok" : "border-bad/40 bg-bad/8 text-bad")}>
+                    {k === "bedOk" ? "🛏" : "⏰"}{l[k] === undefined ? "?" : l[k] ? <Check size={11} strokeWidth={3} /> : <X size={11} strokeWidth={3} />}</button>))}</td>
                 <td className="text-right"><button className="text-muted opacity-0 hover:text-bad group-hover:opacity-100" aria-label="Supprimer la nuit" onClick={() => undoable({ type: "sleep/remove", date: l.date }, "Nuit supprimée")}><Trash2 size={12} /></button></td></tr>); })}</tbody></table>
         </div>
       </Card>

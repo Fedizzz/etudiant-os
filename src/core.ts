@@ -24,7 +24,11 @@ export interface Task {
   deadline: string; estimate: number; spent: number; priority: Priority; createdAt: string; doneAt?: string;
   /** Créneau précis choisi par l'utilisateur (sinon : réparti automatiquement selon l'estimation). */
   slot?: { date: string; start: string; end: string };
+  /** Checklist (sous-étapes cochables). */
+  steps?: Step[];
 }
+/** Étape d'une checklist. Pour une corvée, `done` n'est pas utilisé : l'avancement est noté par date dans `stepsDone`. */
+export interface Step { id: ID; text: string; done?: boolean }
 export interface GroceryItem { id: ID; name: string; aisle: Aisle; qty: string; checked: boolean; price: number }
 /** source et recurringId permettent de savoir d'où vient une dépense et d'éviter les doublons. */
 export interface Expense { id: ID; date: string; amount: number; category: ExpenseCat; label: string; source?: "manuel" | "courses" | "recurrente" | "ticket"; recurringId?: ID; items?: string[] }
@@ -39,7 +43,7 @@ export interface Budget {
   incomes?: Income[]; savings?: SavingMove[]; savingsGoal?: { name: string; target: number } | null;
 }
 /** done : dates faites · doneBy : qui l'a faite ce jour-là · skipped : dates reportées. */
-export interface Chore { id: ID; name: string; recurrence: Recurrence; day: number; minutes: number; assignees: string[]; done: string[]; doneBy?: Record<string, string>; skipped?: string[]; /** Heure fixe « HH:MM » (sinon placée automatiquement dans un créneau libre). */ time?: string }
+export interface Chore { id: ID; name: string; recurrence: Recurrence; day: number; minutes: number; assignees: string[]; done: string[]; doneBy?: Record<string, string>; skipped?: string[]; /** Heure fixe « HH:MM » (sinon placée automatiquement dans un créneau libre). */ time?: string; /** Checklist, et étapes cochées par date. */ steps?: Step[]; stepsDone?: Record<string, ID[]> }
 /** Calendrier externe abonné (lien .ics Celcat, iCloud, Google…). */
 export interface CalFeed { id: ID; name: string; url: string; color: string; lastSync: string | null; lastError: string | null; count?: number }
 /** Occurrence importée d'un calendrier abonné (remplacée à chaque actualisation). */
@@ -47,7 +51,8 @@ export interface FeedEvent { feedId: ID; uid: string; title: string; room: strin
 export type EventRecurrence = "none" | "daily" | "weekly" | "biweekly" | "monthly";
 /** Événement personnel du planning (rendez-vous, sport, job…) à heure précise, ponctuel ou récurrent. */
 export interface PlanEvent { id: ID; title: string; date: string; start: string; end: string; recurrence: EventRecurrence; until: string | null; color?: string; skipped?: string[] }
-export interface SleepLog { date: string; bed: string; wake: string; quality: 1 | 2 | 3 | 4 | 5 }
+/** bedOk / wakeOk : couché / levé à l'heure prévue (coché par l'utilisateur ; absent = non renseigné). */
+export interface SleepLog { date: string; bed: string; wake: string; quality: 1 | 2 | 3 | 4 | 5; bedOk?: boolean; wakeOk?: boolean }
 /** id = identifiant de session : un même id n'est jamais enregistré deux fois. */
 export interface FocusEntry { id?: ID; date: string; minutes: number; taskId: ID | null; courseId?: ID | null; interrupted?: boolean }
 export type Phase = "work" | "short" | "long";
@@ -218,6 +223,8 @@ export type Action =
   | { type: "expense/update"; id: ID; patch: Partial<Expense> }
   | { type: "recurring/save"; item: RecurringExpense } | { type: "recurring/remove"; id: ID } | { type: "recurring/sync"; today: string }
   | { type: "chore/skip"; id: ID; date: string }
+  | { type: "chore/update"; id: ID; patch: Partial<Chore> } | { type: "chore/step"; id: ID; date: string; stepId: ID }
+  | { type: "task/step"; id: ID; stepId: ID }
   | { type: "feed/add"; feed: CalFeed } | { type: "feed/remove"; id: ID } | { type: "feed/update"; id: ID; patch: Partial<CalFeed> }
   | { type: "feed/synced"; id: ID; events: FeedEvent[]; at: string }
   | { type: "event/update"; id: ID; patch: Partial<PlanEvent> }
@@ -308,6 +315,14 @@ export function reducer(s: AppState, a: Action): AppState {
         return { ...c, done: was ? c.done.filter((x) => x !== a.date) : [...c.done, a.date], doneBy, skipped: (c.skipped ?? []).filter((x) => x !== a.date) };
       }),
     };
+    case "chore/update": return { ...s, chores: s.chores.map((c) => (c.id === a.id ? { ...c, ...a.patch } : c)) };
+    case "chore/step": return { ...s, chores: s.chores.map((c) => {
+      if (c.id !== a.id) return c;
+      const cur = c.stepsDone?.[a.date] ?? [];
+      const next = cur.includes(a.stepId) ? cur.filter((x) => x !== a.stepId) : [...cur, a.stepId];
+      return { ...c, stepsDone: { ...c.stepsDone, [a.date]: next } };
+    }) };
+    case "task/step": return { ...s, tasks: s.tasks.map((t) => (t.id === a.id ? { ...t, steps: (t.steps ?? []).map((x) => (x.id === a.stepId ? { ...x, done: !x.done } : x)) } : t)) };
     case "chore/remove": return { ...s, chores: s.chores.filter((c) => c.id !== a.id) };
     case "sleep/upsert": return { ...s, sleep: [...s.sleep.filter((l) => l.date !== a.log.date), a.log].sort((x, y) => x.date.localeCompare(y.date)) };
     case "sleep/remove": return { ...s, sleep: s.sleep.filter((l) => l.date !== a.date) };
@@ -411,16 +426,18 @@ export function validateState(x: unknown): { ok: true; state: AppState; repaired
       const ok = Array.isArray(dates) ? dates.filter((r) => Array.isArray(r) && isDate(r[0]) && isDate(r[1]) && r[0] <= r[1]) : [];
       return ok.length ? { ...c, dates: ok } : c;
     }),
-    tasks: keep<Task>("tâches", p.tasks, (t) => isStr(t.id) && isStr(t.title) && isDate(t.deadline)).map((t) => ({ ...t, estimate: isNum(t.estimate) && t.estimate > 0 ? t.estimate : 60, spent: isNum(t.spent) && t.spent >= 0 ? t.spent : 0, priority: ([1, 2, 3].includes(t.priority) ? t.priority : 2) as Priority, status: (["todo", "doing", "review", "done"].includes(t.status) ? t.status : "todo") as TaskStatus, slot: t.slot && isDate(t.slot.date) && isTime(t.slot.start) && isTime(t.slot.end) && toMin(t.slot.end) > toMin(t.slot.start) ? t.slot : undefined })).map(({ slot, ...t }) => (slot ? { ...t, slot } : t)),
+    tasks: keep<Task>("tâches", p.tasks, (t) => isStr(t.id) && isStr(t.title) && isDate(t.deadline)).map((t) => ({ ...t, estimate: isNum(t.estimate) && t.estimate > 0 ? t.estimate : 60, spent: isNum(t.spent) && t.spent >= 0 ? t.spent : 0, priority: ([1, 2, 3].includes(t.priority) ? t.priority : 2) as Priority, status: (["todo", "doing", "review", "done"].includes(t.status) ? t.status : "todo") as TaskStatus, slot: t.slot && isDate(t.slot.date) && isTime(t.slot.start) && isTime(t.slot.end) && toMin(t.slot.end) > toMin(t.slot.start) ? t.slot : undefined })).map(({ slot, steps, ...t }) => { const st = cleanSteps(steps, true); return { ...t, ...(slot ? { slot } : {}), ...(st.length ? { steps: st } : {}) }; }),
     groceries: keep<GroceryItem>("articles", p.groceries, (g) => isStr(g.id) && isStr(g.name)).map((g) => ({ ...g, price: isNum(g.price) && g.price >= 0 ? g.price : 0, checked: !!g.checked, qty: isStr(g.qty) ? g.qty : "" })),
     chores: keep<Chore>("corvées", p.chores, (c) => isStr(c.id) && isStr(c.name) && Array.isArray(c.assignees)).map((c) => {
-      const { time, ...rest } = c;
-      return { ...rest, done: Array.isArray(c.done) ? c.done.filter(isDate) : [], skipped: Array.isArray(c.skipped) ? c.skipped.filter(isDate) : [], doneBy: c.doneBy && typeof c.doneBy === "object" ? c.doneBy : {}, ...(isTime(time) ? { time } : {}) };
+      const { time, steps, stepsDone, ...rest } = c;
+      const st = cleanSteps(steps, false);
+      const sd = stepsDone && typeof stepsDone === "object" ? Object.fromEntries(Object.entries(stepsDone).filter(([k, v]) => isDate(k) && Array.isArray(v)).map(([k, v]) => [k, (v as unknown[]).filter(isStr)]).slice(-120)) : {};
+      return { ...rest, ...(st.length ? { steps: st, stepsDone: sd } : {}), done: Array.isArray(c.done) ? c.done.filter(isDate) : [], skipped: Array.isArray(c.skipped) ? c.skipped.filter(isDate) : [], doneBy: c.doneBy && typeof c.doneBy === "object" ? c.doneBy : {}, ...(isTime(time) ? { time } : {}) };
     }),
     feedEvents: Array.isArray(p.feedEvents) ? (p.feedEvents as FeedEvent[]).filter((e) => e && isStr(e.feedId) && isDate(e.date) && isTime(e.start) && isTime(e.end)).slice(0, 5000) : [],
     events: keep<PlanEvent>("événements", Array.isArray(p.events) ? p.events : [], (e) => isStr(e.id) && isStr(e.title) && isDate(e.date) && isTime(e.start) && isTime(e.end))
       .map((e) => ({ ...e, recurrence: (["none", "daily", "weekly", "biweekly", "monthly"].includes(e.recurrence) ? e.recurrence : "none") as EventRecurrence, until: isDate(e.until) ? e.until : null, skipped: Array.isArray(e.skipped) ? e.skipped.filter(isDate) : [] })),
-    sleep: keep<SleepLog>("nuits", p.sleep, (l) => isDate(l.date) && isTime(l.bed) && isTime(l.wake)),
+    sleep: keep<SleepLog>("nuits", p.sleep, (l) => isDate(l.date) && isTime(l.bed) && isTime(l.wake)).map(({ bedOk, wakeOk, ...l }) => ({ ...l, ...(typeof bedOk === "boolean" ? { bedOk } : {}), ...(typeof wakeOk === "boolean" ? { wakeOk } : {}) })),
     focus: keep<FocusEntry>("sessions de focus", p.focus, (f) => isDate(f.date) && isNum(f.minutes) && f.minutes > 0 && f.minutes < 24 * 60).map((f, i) => ({ ...f, id: f.id ?? `legacy-${i}-${f.date}` })),
     budget: {
       monthly: isNum(b.monthly) && b.monthly >= 0 ? b.monthly : 600, limits: b.limits && typeof b.limits === "object" ? b.limits : {},
@@ -845,4 +862,29 @@ export function parseReceipt(text: string): ReceiptResult {
   if (dm) { const y = dm[3].length === 2 ? 2000 + Number(dm[3]) : Number(dm[3]); const d = new Date(y, Number(dm[2]) - 1, Number(dm[1])); if (!isNaN(d.getTime()) && y > 2000) date = iso(d); }
   const store = (lines.find((l) => /[a-z]{3,}/i.test(l) && !/\d{2}[/.]\d{2}/.test(l)) ?? "").replace(/[^\p{L}\d '&-]/gu, "").trim().slice(0, 32);
   return { amount, date, store, text };
+}
+
+/** Checklist nettoyée (texte non vide, 40 étapes max). */
+export function cleanSteps(v: unknown, withDone: boolean): Step[] {
+  if (!Array.isArray(v)) return [];
+  return v.filter((x) => x && typeof x.id === "string" && typeof x.text === "string" && x.text.trim())
+    .slice(0, 40).map((x) => ({ id: x.id, text: x.text.trim().slice(0, 120), ...(withDone ? { done: !!x.done } : {}) }));
+}
+/** Étapes cochées d'une corvée pour une date. */
+export const choreStepsDone = (c: Chore, date: string) => (c.stepsDone?.[date] ?? []).filter((id) => c.steps?.some((x) => x.id === id));
+
+/** Couché / levé « à l'heure » par défaut : au plus 15 min après l'heure visée (coucher tardif compté après minuit). */
+export function onTimeGuess(bed: string, wake: string, bedTarget: string, wakeTarget: string) {
+  const late = (t: number, target: number) => { let d = t - target; if (d > 720) d -= 1440; if (d < -720) d += 1440; return d > 15; };
+  return { bedOk: !late(toMin(bed), toMin(bedTarget)), wakeOk: !late(toMin(wake), toMin(wakeTarget)) };
+}
+export interface OnTimeCount { ok: number; late: number }
+/** Compteurs « à l'heure / pas à l'heure » (nuits renseignées), sur les `days` derniers jours (toutes si absent). */
+export function onTimeStats(logs: SleepLog[], today: string, days?: number) {
+  const ls = logs.filter((l) => l.date <= today && (days === undefined || daysBetween(l.date, today) < days));
+  const count = (k: "bedOk" | "wakeOk"): OnTimeCount => ({ ok: ls.filter((l) => l[k] === true).length, late: ls.filter((l) => l[k] === false).length });
+  // Série en cours : nuits consécutives (les plus récentes) où coucher ET réveil étaient à l'heure.
+  let streak = 0;
+  for (const l of [...ls].sort((a, b) => b.date.localeCompare(a.date))) { if (l.bedOk && l.wakeOk) streak++; else if (l.bedOk === false || l.wakeOk === false) break; }
+  return { bed: count("bedOk"), wake: count("wakeOk"), streak };
 }
