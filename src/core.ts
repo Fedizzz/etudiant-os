@@ -15,7 +15,9 @@ export type ExpenseCat = "Courses" | "Logement" | "Transport" | "Études" | "Res
 export interface Grade { id: ID; label: string; score: number; weight: number }
 /** target : moyenne visée pour le module (facultatif). */
 export interface Course { id: ID; name: string; code: string; coef: number; color: string; grades: Grade[]; target?: number | null }
-export interface ClassSession { id: ID; courseId: ID; day: number; start: string; end: string; room: string }
+export interface ClassSession { id: ID; courseId: ID; day: number; start: string; end: string; room: string; /** Périodes où le cours a lieu (dates incluses) ; absent = toutes les semaines. */ dates?: [string, string][] }
+/** Le cours a-t-il lieu à cette date ? (même jour de semaine, dans une de ses périodes si elles sont précisées) */
+export const classOn = (c: ClassSession, date: string) => c.day === weekday(parseISO(date)) && (!c.dates?.length || c.dates.some(([a, b]) => date >= a && date <= b));
 export interface Task {
   id: ID; title: string; courseId: ID | null; kind: TaskKind; status: TaskStatus;
   deadline: string; estimate: number; spent: number; priority: Priority; createdAt: string; doneAt?: string;
@@ -366,7 +368,10 @@ export function validateState(x: unknown): { ok: true; state: AppState; repaired
   }));
   const state: AppState = {
     version: 1, courses,
-    classes: keep<ClassSession>("créneaux", p.classes, (c) => isStr(c.id) && isNum(c.day) && isTime(c.start) && isTime(c.end)),
+    classes: keep<ClassSession>("créneaux", p.classes, (c) => isStr(c.id) && isNum(c.day) && isTime(c.start) && isTime(c.end)).map(({ dates, ...c }) => {
+      const ok = Array.isArray(dates) ? dates.filter((r) => Array.isArray(r) && isDate(r[0]) && isDate(r[1]) && r[0] <= r[1]) : [];
+      return ok.length ? { ...c, dates: ok } : c;
+    }),
     tasks: keep<Task>("tâches", p.tasks, (t) => isStr(t.id) && isStr(t.title) && isDate(t.deadline)).map((t) => ({ ...t, estimate: isNum(t.estimate) && t.estimate > 0 ? t.estimate : 60, spent: isNum(t.spent) && t.spent >= 0 ? t.spent : 0, priority: ([1, 2, 3].includes(t.priority) ? t.priority : 2) as Priority, status: (["todo", "doing", "review", "done"].includes(t.status) ? t.status : "todo") as TaskStatus, slot: t.slot && isDate(t.slot.date) && isTime(t.slot.start) && isTime(t.slot.end) && toMin(t.slot.end) > toMin(t.slot.start) ? t.slot : undefined })).map(({ slot, ...t }) => (slot ? { ...t, slot } : t)),
     groceries: keep<GroceryItem>("articles", p.groceries, (g) => isStr(g.id) && isStr(g.name)).map((g) => ({ ...g, price: isNum(g.price) && g.price >= 0 ? g.price : 0, checked: !!g.checked, qty: isStr(g.qty) ? g.qty : "" })),
     chores: keep<Chore>("corvées", p.chores, (c) => isStr(c.id) && isStr(c.name) && Array.isArray(c.assignees)).map((c) => {
@@ -644,9 +649,9 @@ export function planDay(state: AppState, date: string, remaining?: Map<ID, numbe
   const isHard = (k: Block["kind"]) => k === "class" || k === "busy" || k === "event";
   const dayEvents = (state.events ?? []).filter((e) => eventOn(e, date) && toMin(e.end) > toMin(e.start));
   const wd = weekday(d);
-  const dayClasses = classes.filter((c) => c.day === wd).sort((a, b) => toMin(a.start) - toMin(b.start));
+  const dayClasses = classes.filter((c) => classOn(c, date)).sort((a, b) => toMin(a.start) - toMin(b.start));
   const nextDay = addDays(d, 1);
-  const tomorrowFirst = classes.filter((c) => c.day === weekday(nextDay)).map((c) => toMin(c.start)).sort((a, b) => a - b)[0];
+  const tomorrowFirst = classes.filter((c) => classOn(c, iso(nextDay))).map((c) => toMin(c.start)).sort((a, b) => a - b)[0];
   const wake = dayClasses.length ? Math.min(toMin(settings.wakeDefault), toMin(dayClasses[0].start) - settings.prepMinutes) : toMin(settings.wakeDefault) + 60;
   let bed = toMin(settings.bedDefault);
   if (tomorrowFirst !== undefined) {

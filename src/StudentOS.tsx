@@ -664,7 +664,7 @@ const BLOCK_STYLE: Record<Block["kind"], string> = {
   class: "border-l-[3px] bg-sunken", task: "border-l-[3px] bg-accent/8", chore: "border-l-[3px] border-l-warn bg-warn/10", meal: "border-l-[3px] border-l-line bg-transparent text-muted", sleep: "", event: "border-l-[3px] border-l-pink bg-pink/10", busy: "border-l-[3px] border-l-muted bg-sunken/60 text-muted [background-image:repeating-linear-gradient(135deg,transparent_0_6px,rgb(var(--line)/.6)_6px_8px)]",
 };
 // ---------------------------------------------------------------- Import d'emploi du temps PDF
-interface Detected { key: string; day: number; start: string; end: string; title: string; room: string; on: boolean; note?: string }
+interface Detected { key: string; day: number; start: string; end: string; title: string; room: string; on: boolean; note?: string; dates?: [string, string][] }
 const TIME_RE = /(\d{1,2})\s*[h:]\s*(\d{2})?\s*(?:-|–|—|à|a|>)\s*(\d{1,2})\s*[h:]\s*(\d{2})?/gi;
 const ROOM_RE = /\b((?:salle|amphi(?:théâtre)?|room|labo|bât\.?|bat\.?|td|tp)\s*[\w.-]{1,8}|[a-z]\d{3})\b/i;
 async function extractTimetable(buf: ArrayBuffer): Promise<Detected[]> {
@@ -679,12 +679,12 @@ async function extractTimetable(buf: ArrayBuffer): Promise<Detected[]> {
     const grid = parseGrid(geo.items, geo.rects, today);
     if (grid.length) {
       for (const g of grid) {
-        const key = `${g.day}-${g.start}-${g.end}-${norm(g.title)}`;
+        const key = `${g.day}-${g.start}-${g.end}-${norm(g.title)}-${norm(g.room)}`;
+        if (out.some((o) => o.key === key)) continue;
         const over = !!g.lastDate && g.lastDate < today;
-        // Même cours, même créneau, salles différentes selon les semaines : une seule ligne, salles regroupées.
-        const same = out.find((o) => o.key === key);
-        if (same) { if (g.room && !same.room.includes(g.room)) same.room = `${same.room} / ${g.room}`.slice(0, 60); if (!over) { same.on = true; same.note = undefined; } continue; }
-        out.push({ key, day: g.day, start: g.start, end: g.end, title: g.title, room: g.room, on: !over, ...(g.lastDate ? { note: over ? `terminé le ${fmtDate(g.lastDate)}` : `jusqu'au ${fmtDate(g.lastDate)}` } : {}) });
+        const r = g.ranges ?? [];
+        const span = r.length ? `${fmtDate(r[0][0])} → ${fmtDate(g.lastDate!)}${r.length > 1 ? ` · ${r.length} périodes` : ""}` : "";
+        out.push({ key, day: g.day, start: g.start, end: g.end, title: g.title, room: g.room, on: !over, ...(r.length ? { dates: r, note: over ? `terminé (${span})` : span } : {}) });
       }
       continue;
     }
@@ -775,12 +775,18 @@ const TimetableImport: React.FC = () => {
     const newCourses: Course[] = [];
     const courseFor = (title: string) => {
       const k = norm(title);
-      const hit = [...state.courses, ...newCourses].find((c) => k.includes(norm(c.name)) || norm(c.name).includes(k) || (c.code && k.includes(norm(c.code))));
+      // Même module seulement si le nom correspond (pas le code : « Introducción al Álgebra » ≠ « Introducción al Cálculo »).
+      const all = [...state.courses, ...newCourses];
+      const hit = all.find((c) => norm(c.name) === k) ?? all.find((c) => norm(c.name).length > 6 && (k.startsWith(norm(c.name)) || norm(c.name).startsWith(k)) && Math.abs(norm(c.name).length - k.length) < 4);
       if (hit) return hit.id;
-      const c: Course = { id: uid(), name: title, code: title.replace(/[^A-Za-z0-9]/g, "").slice(0, 7).toUpperCase(), coef: 1, color: palette[(state.courses.length + newCourses.length) % palette.length], grades: [] };
+      const words = title.normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/[^A-Za-z0-9]+/).filter((w) => w.length > 2);
+      let code = (words.length > 1 ? words.map((w) => w[0]).join("") : (words[0] ?? title).slice(0, 5)).toUpperCase().slice(0, 6);
+      for (let n = 2; all.some((c) => c.code === code); n++) code = code.replace(/\d+$/, "") + n;
+      const c: Course = { id: uid(), name: title, code, coef: 1, color: palette[(state.courses.length + newCourses.length) % palette.length], grades: [] };
       newCourses.push(c); return c.id;
     };
-    const sessions = sel.map((r) => ({ id: uid(), courseId: courseFor(r.title), day: r.day, start: r.start, end: r.end, room: r.room }));
+    // Le module est le même pour la théorie, les TP et les labos (« Cours (TP) » → « Cours »).
+    const sessions = sel.map((r) => ({ id: uid(), courseId: courseFor(r.title.replace(/\s*\((?:TP|TD|Labo|Séminaire|Tutorat|Examen)\)$/, "")), day: r.day, start: r.start, end: r.end, room: r.room, ...(r.dates?.length ? { dates: r.dates } : {}) }));
     dispatch({ type: "class/addMany", sessions, courses: newCourses });
     toast(`${sessions.length} cours ajoutés${newCourses.length ? ` · ${newCourses.length} nouveaux modules` : ""}. Retrouvez-les dans Académique.`);
     setRows(null);
@@ -945,7 +951,7 @@ const Planning: React.FC = () => {
           <ul className="mb-3 flex max-h-56 flex-col gap-1 overflow-auto pr-1 text-xs">
             {[...state.classes].sort((a, b) => a.day - b.day || toMin(a.start) - toMin(b.start)).map((c) => { const co = state.courses.find((x) => x.id === c.courseId); return (
               <li key={c.id} className="group flex items-center gap-2 rounded px-1 py-1 hover:bg-sunken"><span className="w-8 text-muted">{DAYS[c.day]}</span><span className="font-mono tabular-nums">{c.start}–{c.end}</span>
-                <span className="h-2 w-2 rounded-full" style={{ background: co?.color }} /><span className="min-w-0 flex-1 truncate">{co?.code}</span>
+                <span className="h-2 w-2 rounded-full" style={{ background: co?.color }} /><span className="min-w-0 flex-1 truncate">{co?.code}{c.dates?.length ? <span className="text-muted" title={c.dates.map(([x, y]) => x === y ? fmtDate(x) : `${fmtDate(x)} → ${fmtDate(y)}`).join(", ")}> · {c.dates.length} période{c.dates.length > 1 ? "s" : ""}</span> : null}</span>
                 <button className="text-muted opacity-0 hover:text-bad group-hover:opacity-100" aria-label="Supprimer le créneau" onClick={() => undoable({ type: "class/remove", id: c.id }, "Créneau supprimé")}><Trash2 size={12} /></button></li>); })}
           </ul>
           <form className="grid grid-cols-2 gap-2" onSubmit={(e) => { e.preventDefault(); if (toMin(newClass.end) <= toMin(newClass.start)) { toast("L'heure de fin doit suivre l'heure de début.", "bad"); return; } const clash = state.classes.find((c) => c.day === newClass.day && toMin(c.start) < toMin(newClass.end) && toMin(newClass.start) < toMin(c.end));

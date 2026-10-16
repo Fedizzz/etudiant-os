@@ -25,9 +25,10 @@ test("grille : jours, heures, intitulés, salles, sous-colonnes", () => {
   const r = parseGrid(items, rects, "2026-10-16");
   assert.deepEqual(r.map((x) => [x.day, x.start, x.end, x.title, x.room]), [
     [0, "09:00", "10:30", "Expresión Oral y Escrita", "2.0.C15"],
-    [1, "10:45", "12:15", "Introducción a la Física", "LAB 1.0.G15 · Labo"],
-    [2, "10:45", "12:15", "Gen.-Programación", "Sala 4.0.E03 · TP"],
+    [1, "10:45", "12:15", "Introducción a la Física (Labo)", "LAB 1.0.G15"],
+    [2, "10:45", "12:15", "Gen.-Programación (TP)", "Sala 4.0.E03"],
   ]);
+  assert.deepEqual(r[0].ranges, [["2026-09-07", "2026-10-05"], ["2026-10-19", "2026-10-26"]]);
   assert.equal(r[0].lastDate, "2026-10-26"); assert.equal(r[1].lastDate, "2026-11-16"); assert.equal(r[2].lastDate, "2026-09-07");
 });
 
@@ -41,4 +42,16 @@ test("dates de fin et jours multilingues", () => {
   assert.equal(lastDateIn("12.ene-20.feb", "2026-10-16"), "2027-02-20");
   assert.equal(lastDateIn("Aula 2.0.C15", "2026-10-16"), undefined);
   for (const [w, d] of [["LUNES", 0], ["MIÉRCOLES", 2], ["miercoles", 2], ["Jeudi", 3], ["VIERNES", 4], ["Sábado", 5]] as const) assert.equal(dayOf(w), d, w);
+});
+
+test("cours limités à certaines périodes : présents seulement ces jours-là dans le planning", async () => {
+  const { blank, planDay, classOn } = await import("../src/core.ts");
+  const s = blank({ name: "T" }, 600);
+  s.courses = [{ id: "c", name: "Bio", code: "BIO", coef: 1, color: "#000", grades: [] } as never];
+  s.classes = [{ id: "k", courseId: "c", day: 0, start: "10:45", end: "12:15", room: "LAB", dates: [["2026-10-05", "2026-10-05"], ["2026-11-16", "2026-11-23"]] }];
+  assert.equal(classOn(s.classes[0], "2026-10-05"), true);
+  assert.equal(classOn(s.classes[0], "2026-10-12"), false);
+  assert.equal(classOn(s.classes[0], "2026-11-23"), true);
+  assert.equal(planDay(s, "2026-10-12", undefined, "2026-10-01").blocks.some((b) => b.kind === "class"), false);
+  assert.equal(planDay(s, "2026-11-16", undefined, "2026-10-01").blocks.some((b) => b.kind === "class"), true);
 });

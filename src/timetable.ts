@@ -4,9 +4,22 @@
 
 export interface TItem { s: string; x: number; y: number; w: number; h: number }
 export interface TRect { x0: number; y0: number; x1: number; y1: number }
-export interface GridSlot { day: number; start: string; end: string; title: string; room: string; /** Dernière date indiquée dans la case (« 07.sep-05.oct… »), si présente. */ lastDate?: string }
+export interface GridSlot { day: number; start: string; end: string; title: string; room: string; /** Dernière date indiquée dans la case (« 07.sep-05.oct… »), si présente. */ lastDate?: string; /** Périodes (dates incluses). */ ranges?: [string, string][] }
 
 const MONTHS: Record<string, number> = { ene: 1, jan: 1, janv: 1, feb: 2, fev: 2, fevr: 2, mar: 3, mars: 3, abr: 4, apr: 4, avr: 4, may: 5, mai: 5, jun: 6, juin: 6, jul: 7, juil: 7, ago: 8, aug: 8, aou: 8, sep: 9, sept: 9, oct: 10, nov: 11, dic: 12, dec: 12 };
+/** Périodes d'une liste « 07.sep-05.oct, 09.nov, 19.oct-26.oct » (dates seules = un jour). */
+export function rangesIn(text: string, today: string): [string, string][] {
+  const [ty, tm] = today.split("-").map(Number);
+  const startYear = tm >= 8 ? ty : ty - 1;
+  const date = (d: string, m: string) => { const mon = MONTHS[m.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()]; return mon && +d >= 1 && +d <= 31 ? `${mon >= 8 ? startYear : startYear + 1}-${pad(mon)}-${pad(+d)}` : null; };
+  const out: [string, string][] = [];
+  for (const m of text.matchAll(/\b(\d{1,2})[./ ]([a-zA-Zéû]{3,5})\.?(?:\s*[-–]\s*(\d{1,2})[./ ]([a-zA-Zéû]{3,5})\.?)?/g)) {
+    const a = date(m[1], m[2]); if (!a) continue;
+    const b = m[3] ? date(m[3], m[4]) : a;
+    if (b && b >= a) out.push([a, b]);
+  }
+  return out;
+}
 /** Dernière date d'une liste « 07.sep-05.oct, 19.oct-26.oct » (année scolaire déduite de `today`). */
 export function lastDateIn(text: string, today: string): string | undefined {
   const [ty, tm] = today.split("-").map(Number);
@@ -117,10 +130,13 @@ export function parseGrid(items: TItem[], rects: TRect[], today = new Date().toI
       .replace(/\s+\d+º.*$/, "")
       .replace(/\s+/g, " ").replace(/[\s,;:·-]+$/, "").trim();
     if (!title) title = ls[0] ?? "Cours";
-    let room = roomLine.replace(/^aula\s+/i, "").split(":")[0].replace(/\([^)]*\)/g, "").replace(/\s+/g, " ").trim();
-    if (kind) room = room ? `${room} · ${kind}` : kind;
-    const lastDate = roomLine ? lastDateIn(ls.slice(roomIdx).join(" "), today) : undefined;
-    out.push({ day: col.day, start: hhmm(start), end: hhmm(end), title: title.slice(0, 60), room: room.slice(0, 40), ...(lastDate ? { lastDate } : {}) });
+    // Plusieurs lignes « Aula X: dates » (salles différentes selon les semaines) : salles et périodes réunies.
+    const roomLines = ls.slice(Math.max(0, roomIdx)).filter((l) => /^(aula|salle|room|amphi|sala)\b/i.test(l) || /^\d{1,2}[./ ][a-z]/i.test(l));
+    const rooms = [...new Set(roomLines.filter((l) => /^(aula|salle|room|amphi|sala)\b/i.test(l)).map((l) => l.replace(/^aula\s+/i, "").split(":")[0].replace(/\([^)]*\)/g, "").replace(/\s+/g, " ").trim()).filter(Boolean))];
+    const room = rooms.join(" / ");
+    const ranges = roomIdx >= 0 ? rangesIn(roomLines.map((l) => l.includes(":") ? l.slice(l.indexOf(":") + 1) : l).join(", "), today).sort((x, y) => x[0].localeCompare(y[0])) : [];
+    const lastDate = ranges.length ? ranges.reduce((m, r) => (r[1] > m ? r[1] : m), ranges[0][1]) : undefined;
+    out.push({ day: col.day, start: hhmm(start), end: hhmm(end), title: (kind ? `${title} (${kind})` : title).slice(0, 70), room: room.slice(0, 50), ...(lastDate ? { lastDate, ranges } : {}) });
   }
   return out;
 }
