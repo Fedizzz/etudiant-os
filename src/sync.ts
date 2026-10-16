@@ -182,7 +182,7 @@ export class SyncEngine {
 }
 
 // ------------------------------------------------------------- Import des données locales dans un compte
-export interface ImportSummary { tasks: number; courses: number; classes: number; expenses: number; recurring: number; groceries: number; chores: number; sleep: number; focus: number; templates: number; products: number }
+export interface ImportSummary { tasks: number; courses: number; classes: number; expenses: number; recurring: number; groceries: number; chores: number; sleep: number; focus: number; templates: number; products: number; events: number }
 const byKey = <T,>(remote: T[], local: T[], key: (x: T) => string) => {
   const seen = new Set(remote.map(key));
   const add = local.filter((x) => !seen.has(key(x)));
@@ -198,17 +198,18 @@ export function mergeStates(remote: AppState, local: AppState): { state: AppStat
   const expenses = byKey(remote.budget.expenses, local.budget.expenses, id), recurring = byKey(remote.budget.recurring, local.budget.recurring, id);
   const groceries = byKey(remote.groceries, local.groceries, id), chores = byKey(remote.chores, local.chores, id);
   const sleep = byKey(remote.sleep, local.sleep, (l) => l.date), focus = byKey(remote.focus, local.focus, (f) => f.id ?? `${f.date}-${f.minutes}-${f.taskId}`);
+  const events = byKey(remote.events ?? [], local.events ?? [], id);
   const templates = byKey(remote.templates, local.templates, id), products = byKey(remote.products, local.products, (p) => norm(p.name));
   return {
     state: {
       ...remote, tasks: tasks.list, courses: courses.list, classes: classes.list, groceries: groceries.list, chores: chores.list, sleep: sleep.list, focus: focus.list,
-      templates: templates.list, products: products.list,
+      templates: templates.list, products: products.list, events: events.list,
       budget: { ...remote.budget, expenses: expenses.list, recurring: recurring.list, limits: { ...local.budget.limits, ...remote.budget.limits } },
     },
-    added: { tasks: tasks.added, courses: courses.added, classes: classes.added, expenses: expenses.added, recurring: recurring.added, groceries: groceries.added, chores: chores.added, sleep: sleep.added, focus: focus.added, templates: templates.added, products: products.added },
+    added: { tasks: tasks.added, courses: courses.added, classes: classes.added, expenses: expenses.added, recurring: recurring.added, groceries: groceries.added, chores: chores.added, sleep: sleep.added, focus: focus.added, templates: templates.added, products: products.added, events: events.added },
   };
 }
 export function summarize(s: AppState): ImportSummary {
-  return { tasks: s.tasks.length, courses: s.courses.length, classes: s.classes.length, expenses: s.budget.expenses.length, recurring: s.budget.recurring.length, groceries: s.groceries.length, chores: s.chores.length, sleep: s.sleep.length, focus: s.focus.length, templates: s.templates.length, products: s.products.length };
+  return { tasks: s.tasks.length, courses: s.courses.length, classes: s.classes.length, expenses: s.budget.expenses.length, recurring: s.budget.recurring.length, groceries: s.groceries.length, chores: s.chores.length, sleep: s.sleep.length, focus: s.focus.length, templates: s.templates.length, products: s.products.length, events: (s.events ?? []).length };
 }
 export const isEmptyState = (s: AppState) => Object.values(summarize(s)).every((n) => n === 0);

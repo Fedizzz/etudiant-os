@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, pad, parseAmount, parseISO, parseReceipt, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
-import type { Action, Aisle, AppState, Block, Budget, Course, DayPlan, Expense, ExpenseCat, GroceryTemplate, ID, Phase, PomodoroCfg, Priority, ReceiptResult, Recurrence, SettingsState, SleepLog, Task, TaskKind, TaskStatus, TemplateItem, ViewKey } from "./core.ts";
+import type { Action, Aisle, AppState, Block, Budget, Course, DayPlan, Expense, ExpenseCat, GroceryTemplate, ID, Phase, PomodoroCfg, Priority, ReceiptResult, Recurrence, EventRecurrence, SettingsState, SleepLog, Task, TaskKind, TaskStatus, TemplateItem, ViewKey } from "./core.ts";
 import type { AppEnv } from "./env.ts";
 
 /* ============================================================================
@@ -438,6 +438,7 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
     .sort((a, b) => Number(a.done || a.skipped) - Number(b.done || b.skipped) || Number(b.who === "Moi") - Number(a.who === "Moi"));
   const choresLeft = chores.filter((x) => !x.done && !x.skipped);
   const myLeft = choresLeft.filter((x) => x.who === "Moi").length;
+  const solo = isSolo(state);
   const lateChores = state.chores.reduce((n, c) => n + [1, 2, 3].filter((i) => { const d = addDays(todayDate, -i), k = iso(d); return choreScheduledOn(c, d) && !c.done.includes(k) && !(c.skipped ?? []).includes(k); }).length, 0);
   const bs = budgetStats(state.budget, monthKey(today), today, CATS);
   const open = state.tasks.filter((t) => t.status !== "done");
@@ -487,7 +488,7 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
         <button onClick={() => go("focus")} className="text-left"><Stat label="Focus · 7 jours" value={fmtDur(fs.week)} sub={delta === null ? (fs.week ? "pas de semaine précédente" : "aucune session") : `${delta >= 0 ? "+" : ""}${delta} % vs semaine précédente`} tone={delta === null ? undefined : delta >= 0 ? "ok" : "warn"} /></button>
         <button onClick={() => go("academic")} className="text-left"><Stat label="Terminées · 7 j" value={String(doneWeek)} sub={`${open.length} ouvertes · ${late.length} en retard`} tone={late.length ? "bad" : undefined} /></button>
         <button onClick={() => go("sleep")} className="text-left"><Stat label="Sommeil · 7 jours" value={ss.avg7 === null ? "—" : fmtDur(ss.avg7)} sub={ss.nights7 ? `moyenne sur ${ss.nights7} nuit${ss.nights7 > 1 ? "s" : ""} · dette ${ss.debt7 > 0 ? fmtDur(ss.debt7) : "0"}` : "aucune nuit saisie"} tone={debtTone} /></button>
-        <button onClick={() => go("chores")} className="text-left"><Stat label="Ménage aujourd'hui" value={chores.length ? `${chores.length - choresLeft.length}/${chores.length}` : "—"} sub={!chores.length ? "aucune corvée prévue" : choresLeft.length ? `${myLeft ? `${myLeft} pour vous` : "rien pour vous"} · ${choresLeft.length} à faire` : "tout est fait"} tone={!chores.length ? undefined : choresLeft.length ? (lateChores ? "warn" : undefined) : "ok"} /></button>
+        <button onClick={() => go("chores")} className="text-left"><Stat label="Ménage aujourd'hui" value={chores.length ? `${chores.length - choresLeft.length}/${chores.length}` : "—"} sub={!chores.length ? "aucune corvée prévue" : choresLeft.length ? (solo ? `${choresLeft.length} à faire` : `${myLeft ? `${myLeft} pour vous` : "rien pour vous"} · ${choresLeft.length} à faire`) : "tout est fait"} tone={!chores.length ? undefined : choresLeft.length ? (lateChores ? "warn" : undefined) : "ok"} /></button>
         <button onClick={() => go("budget")} className="text-left min-[360px]:col-span-2"><Stat label="Budget restant" value={money(bs.remaining, cur)} sub={`${money(bs.spent, cur)} dépensés ce mois${bs.overCats.length ? ` · ${bs.overCats.length} plafond${bs.overCats.length > 1 ? "s" : ""} dépassé${bs.overCats.length > 1 ? "s" : ""}` : ""}`} tone={bs.remaining < 0 || bs.overCats.length ? "bad" : bs.remaining < state.budget.monthly * 0.15 ? "warn" : "ok"} /></button>
       </div>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -564,16 +565,17 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
             <ul className="flex flex-col divide-y divide-line">
               {chores.map(({ c, who, done, skipped }) => (
                 <li key={c.id} className="flex items-center gap-2 py-2 first:pt-0 last:pb-0 text-[13px]">
-                  <button onClick={() => { if (skipped) return; dispatch({ type: "chore/toggle", id: c.id, date: today, who }); if (!done) toast(`${c.name} : fait par ${who}`); }} disabled={skipped}
+                  <button onClick={() => { if (skipped) return; dispatch({ type: "chore/toggle", id: c.id, date: today, who }); if (!done) toast(solo ? `${c.name} : faite` : `${c.name} : fait par ${who}`); }} disabled={skipped}
                     aria-label={done ? `Annuler ${c.name}` : `Marquer ${c.name} comme faite`}
                     className={cx("grid h-5 w-5 shrink-0 place-items-center rounded border-2 transition", done ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-fg/40 hover:border-accent", skipped && "opacity-40")}>{done && <Check className="tick" size={11} strokeWidth={3} />}</button>
                   <span className={cx("min-w-0 flex-1 truncate", (done || skipped) && "text-muted line-through")}>{c.name}</span>
-                  <Pill tone={who === "Moi" ? "info" : "muted"}>{who}</Pill>
+                  {c.time && <span className="font-mono text-[11px] text-muted">{c.time}</span>}
+                  {!solo && <Pill tone={who === "Moi" ? "info" : "muted"}>{who}</Pill>}
                   {!done && !skipped && <Btn size="sm" variant="ghost" title="Reporter" aria-label={`Reporter ${c.name}`} onClick={() => { dispatch({ type: "chore/skip", id: c.id, date: today }); toast(`${c.name} reportée`, "info"); }}>↷</Btn>}
                   {skipped && <span className="text-[11px] text-muted">reportée</span>}
                 </li>))}
             </ul>
-          ) : <Empty icon={<Home size={18} />} title={state.chores.length ? "Rien aujourd'hui" : "Aucune corvée"} hint={state.chores.length ? "Aucune corvée n'est prévue aujourd'hui dans la rotation." : "Créez vos corvées et la rotation entre colocataires dans Ménage."} action={!state.chores.length ? <Btn onClick={() => go("chores")}><Plus size={13} />Créer une corvée</Btn> : undefined} />}
+          ) : <Empty icon={<Home size={18} />} title={state.chores.length ? "Rien aujourd'hui" : "Aucune corvée"} hint={state.chores.length ? "Aucune corvée n'est prévue aujourd'hui dans la rotation." : solo ? "Créez vos corvées dans Ménage." : "Créez vos corvées et la rotation entre colocataires dans Ménage."} action={!state.chores.length ? <Btn onClick={() => go("chores")}><Plus size={13} />Créer une corvée</Btn> : undefined} />}
           {lateChores > 0 && <p className="mt-2 text-[11px] text-warn">{lateChores} corvée{lateChores > 1 ? "s" : ""} non faite{lateChores > 1 ? "s" : ""} ces 3 derniers jours.</p>}
         </Card>
       </div>
@@ -583,7 +585,7 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
 
 // ---------------------------------------------------------------- Module : Planning / Time-blocking
 const BLOCK_STYLE: Record<Block["kind"], string> = {
-  class: "border-l-[3px] bg-sunken", task: "border-l-[3px] bg-accent/8", chore: "border-l-[3px] border-l-warn bg-warn/10", meal: "border-l-[3px] border-l-line bg-transparent text-muted", sleep: "", busy: "border-l-[3px] border-l-muted bg-sunken/60 text-muted [background-image:repeating-linear-gradient(135deg,transparent_0_6px,rgb(var(--line)/.6)_6px_8px)]",
+  class: "border-l-[3px] bg-sunken", task: "border-l-[3px] bg-accent/8", chore: "border-l-[3px] border-l-warn bg-warn/10", meal: "border-l-[3px] border-l-line bg-transparent text-muted", sleep: "", event: "border-l-[3px] border-l-pink bg-pink/10", busy: "border-l-[3px] border-l-muted bg-sunken/60 text-muted [background-image:repeating-linear-gradient(135deg,transparent_0_6px,rgb(var(--line)/.6)_6px_8px)]",
 };
 // ---------------------------------------------------------------- Import d'emploi du temps PDF
 interface Detected { key: string; day: number; start: string; end: string; title: string; room: string; on: boolean }
@@ -738,6 +740,8 @@ const Planning: React.FC = () => {
   // Semaine affichée : jours passés tels quels, jours à venir simulés depuis aujourd'hui (charge cohérente avec le tableau de bord).
   const week = useMemo(() => { const mon = iso(addDays(parseISO(date), -weekday(parseISO(date)))); return Array.from({ length: 7 }, (_, i) => planFor(state, iso(addDays(parseISO(mon), i)), today)); }, [state, date, today]);
   const [unav, setUnav] = useState({ day: 0, start: "18:00", end: "21:00", label: "" });
+  const [ev, setEv] = useState({ title: "", date: today, start: "18:00", end: "19:00", recurrence: "none" as EventRecurrence, until: "" });
+  const upcomingEvents = [...(state.events ?? [])].filter((e) => e.recurrence !== "none" ? !e.until || e.until >= today : e.date >= today).sort((a, b) => a.date.localeCompare(b.date) || toMin(a.start) - toMin(b.start));
   const startH = Math.floor(plan.wake / 60), endH = Math.ceil(Math.min(plan.bed, 1440 + 120) / 60);
   const PX = 52; // pixels par heure
   const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
@@ -774,7 +778,10 @@ const Planning: React.FC = () => {
               style={{ top: ((b.start - startH * 60) / 60) * PX + 1, height: Math.max(18, ((b.end - b.start) / 60) * PX - 2), borderLeftColor: b.color }}>
               <div className="flex items-center gap-1.5">
                 <span className="font-mono text-[10px] tabular-nums text-muted">{toHHMM(b.start)}–{toHHMM(b.end)}</span>
-                {b.kind === "task" && <Zap size={10} className="text-accent" />}{b.kind === "chore" && <Home size={10} className="text-warn" />}{b.kind === "meal" && <Coffee size={10} />}
+                {b.kind === "task" && <Zap size={10} className="text-accent" />}{b.kind === "chore" && <Home size={10} className="text-warn" />}{b.kind === "meal" && <Coffee size={10} />}{b.kind === "event" && <CalendarClock size={10} className="text-pink" />}
+                {b.kind === "event" && b.refId && <button className="ml-auto rounded px-1 text-[10px] text-muted hover:bg-sunken hover:text-bad" aria-label={`Retirer ${b.label} ce jour-là`} title="Retirer cette occurrence"
+                  onClick={(e) => { e.stopPropagation(); const evt = state.events.find((x) => x.id === b.refId); if (!evt) return;
+                    if (evt.recurrence === "none") undoable({ type: "event/remove", id: evt.id }, `« ${evt.title} » supprimé`); else undoable({ type: "event/skip", id: evt.id, date }, `« ${evt.title} » retiré ce jour-là`); }}>✕</button>}
               </div>
               <p className="truncate font-medium text-fg">{b.label}</p>
             </div>
@@ -798,6 +805,30 @@ const Planning: React.FC = () => {
                 <div className="flex h-20 w-full items-end justify-center rounded bg-sunken/60"><div className={cx("w-3 rounded-sm", tone)} style={{ height: `${(h / 1.2) * 100}%` }} /></div>
                 <span className="text-[10px] text-muted">{DAYS[weekday(parseISO(p.date))]}</span><span className="font-mono text-[10px] tabular-nums">{Math.round(p.load * 100)}%</span></button>); })}
           </div>
+        </Card>
+        <Card title={<span className="flex items-center gap-2"><CalendarClock size={15} />Événements</span>} action={<span className="text-[11px] text-muted">rendez-vous, sport, sorties…</span>}>
+          {upcomingEvents.length ? (
+            <ul className="mb-3 flex flex-col gap-1 text-xs" data-testid="events-list">{upcomingEvents.map((e) => (
+              <li key={e.id} className="group flex items-center gap-2 rounded px-1 py-1 hover:bg-sunken">
+                <span className="w-16 shrink-0 text-muted">{e.recurrence === "none" ? fmtDate(e.date) : EVENT_REC_LABEL[e.recurrence]}</span>
+                <span className="font-mono tabular-nums">{e.start}–{e.end}</span><span className="min-w-0 flex-1 truncate">{e.title}</span>
+                <button className="text-muted opacity-60 hover:text-bad group-hover:opacity-100" aria-label={`Supprimer l'événement ${e.title}`} onClick={() => undoable({ type: "event/remove", id: e.id }, `« ${e.title} » supprimé${e.recurrence !== "none" ? " (toutes les occurrences)" : ""}`)}><Trash2 size={12} /></button></li>))}</ul>
+          ) : <p className="mb-3 text-xs text-muted">Aucun événement à venir. Ils apparaissent dans le planning à l'heure choisie ; aucun travail n'y est placé.</p>}
+          <form className="grid grid-cols-2 gap-2" onSubmit={(e) => { e.preventDefault();
+            if (!ev.title.trim()) { toast("Donne un nom à l'événement.", "bad"); return; }
+            if (!ev.date) { toast("Choisis une date.", "bad"); return; }
+            if (toMin(ev.end) <= toMin(ev.start)) { toast("L'heure de fin doit suivre l'heure de début.", "bad"); return; }
+            if (ev.recurrence !== "none" && ev.until && ev.until < ev.date) { toast("La fin de la répétition doit suivre la première date.", "bad"); return; }
+            dispatch({ type: "event/add", event: { id: uid(), title: ev.title.trim(), date: ev.date, start: ev.start, end: ev.end, recurrence: ev.recurrence, until: ev.recurrence !== "none" && ev.until ? ev.until : null } });
+            toast(ev.recurrence === "none" ? "Événement ajouté au planning" : `Événement ajouté (${EVENT_REC_LABEL[ev.recurrence].toLowerCase()})`); setEv({ ...ev, title: "" }); }}>
+            <Input id="ev-title" aria-label="Événement" placeholder="Ex. Dentiste, Foot, Anniversaire" className="col-span-2" value={ev.title} onChange={(e) => setEv({ ...ev, title: e.target.value })} />
+            <Field label="Date" htmlFor="ev-date" className="col-span-2"><Input id="ev-date" type="date" value={ev.date} onChange={(e) => setEv({ ...ev, date: e.target.value })} /></Field>
+            <Field label="Début" htmlFor="ev-start"><Input id="ev-start" type="time" value={ev.start} onChange={(e) => setEv({ ...ev, start: e.target.value })} /></Field>
+            <Field label="Fin" htmlFor="ev-end"><Input id="ev-end" type="time" value={ev.end} onChange={(e) => setEv({ ...ev, end: e.target.value })} /></Field>
+            <Field label="Répétition" htmlFor="ev-rec" className={ev.recurrence === "none" ? "col-span-2" : ""}><Select id="ev-rec" value={ev.recurrence} onChange={(e) => setEv({ ...ev, recurrence: e.target.value as EventRecurrence })}>{(Object.keys(EVENT_REC_LABEL) as EventRecurrence[]).map((r) => <option key={r} value={r}>{EVENT_REC_LABEL[r]}</option>)}</Select></Field>
+            {ev.recurrence !== "none" && <Field label="Jusqu'au (facultatif)" htmlFor="ev-until"><Input id="ev-until" type="date" min={ev.date} value={ev.until} onChange={(e) => setEv({ ...ev, until: e.target.value })} /></Field>}
+            <Btn type="submit" className="col-span-2"><Plus size={14} />Ajouter l'événement</Btn>
+          </form>
         </Card>
         <Card title="Indisponibilités" action={<span className="text-[11px] text-muted">job, sport, trajets…</span>}>
           {state.settings.unavailable.length ? (
@@ -1448,13 +1479,18 @@ const ExpenseEdit: React.FC<{ e: Expense; onDone: () => void }> = ({ e, onDone }
 };
 
 // ---------------------------------------------------------------- Module : Ménage
+const EVENT_REC_LABEL: Record<EventRecurrence, string> = { none: "Une seule fois", daily: "Tous les jours", weekly: "Chaque semaine", biweekly: "Toutes les 2 semaines", monthly: "Chaque mois" };
+/** Personne d'autre que « Moi » : pas de colocataire et aucune corvée partagée. */
+const isSolo = (s: AppState) => !s.settings.roommates.length && s.chores.every((c) => c.assignees.every((a) => a === "Moi"));
 const REC_LABEL: Record<Recurrence, string> = { daily: "Quotidienne", weekly: "Hebdomadaire", biweekly: "Bimensuelle" };
 const Chores: React.FC = () => {
   const { state, dispatch, toast, undoable } = useStore();
   const [offset, setOffset] = useState(0);
   const monday = addDays(new Date(), offset * 7 - weekday(new Date()));
   const days = Array.from({ length: 7 }, (_, i) => addDays(monday, i));
-  const [f, setF] = useState({ name: "", recurrence: "weekly" as Recurrence, day: 5, minutes: 20, assignees: ["Moi", ...state.settings.roommates].join(", ") });
+  // Sans colocataire (et sans corvée partagée), on masque tout ce qui concerne la rotation.
+  const solo = isSolo(state);
+  const [f, setF] = useState({ name: "", recurrence: "weekly" as Recurrence, day: 5, minutes: 20, time: "", assignees: ["Moi", ...state.settings.roommates].join(", ") });
   const people = Array.from(new Set(state.chores.flatMap((c) => c.assignees)));
   const minutesBy = people.map((p) => ({ p, min: state.chores.reduce((n, c) => n + days.filter((d) => choreScheduledOn(c, d) && choreAssignee(c, d) === p).length * c.minutes, 0) }));
   const maxMin = Math.max(1, ...minutesBy.map((x) => x.min));
@@ -1472,15 +1508,15 @@ const Chores: React.FC = () => {
               <tbody>
                 {state.chores.map((c) => (
                   <tr key={c.id} className="group">
-                    <td className="pr-2"><p className="font-medium text-fg">{c.name}</p><p className="text-[11px] text-muted">{REC_LABEL[c.recurrence]} · {c.minutes} min</p></td>
+                    <td className="pr-2"><p className="font-medium text-fg">{c.name}</p><p className="text-[11px] text-muted">{REC_LABEL[c.recurrence]}{c.time ? ` · ${c.time}` : ""} · {c.minutes} min</p></td>
                     {days.map((d) => { const on = choreScheduledOn(c, d); const k = iso(d); const done = c.done.includes(k); const skipped = (c.skipped ?? []).includes(k); const who = choreAssignee(c, d); const by = c.doneBy?.[k] ?? who; return (
                       <td key={k} className="relative text-center">{on ? (<>
                         {skipped ? (
                           <button onClick={() => { dispatch({ type: "chore/skip", id: c.id, date: k }); toast("Report annulé", "info"); }} title="Reportée · cliquer pour annuler le report"
                             className="flex h-10 w-full flex-col items-center justify-center rounded-md border border-dashed border-line text-[10px] text-muted">reportée</button>
-                        ) : <button onClick={() => { dispatch({ type: "chore/toggle", id: c.id, date: k, who }); if (!done) toast(`${c.name} : fait par ${who}`); }} title={done ? `Faite par ${by} · cliquer pour annuler` : `À faire par ${who} · cliquer quand c'est fait`}
+                        ) : <button onClick={() => { dispatch({ type: "chore/toggle", id: c.id, date: k, who }); if (!done) toast(solo ? `${c.name} : faite` : `${c.name} : fait par ${who}`); }} title={done ? `Faite par ${by} · cliquer pour annuler` : `À faire par ${who} · cliquer quand c'est fait`}
                           className={cx("flex h-10 w-full flex-col items-center justify-center rounded-md border text-[11px] transition", done ? "border-ok/40 bg-ok/12 text-ok" : k < today ? "border-bad/30 bg-bad/6 text-bad" : who === "Moi" ? "border-accent/40 bg-accent/8 text-fg" : "border-line bg-sunken text-fg hover:border-accent/50")}>
-                          {done ? <><Check size={14} />{by !== who && <span className="text-[9px]">{by}</span>}</> : <span className="font-medium">{who}</span>}
+                          {done ? <><Check size={14} />{!solo && by !== who && <span className="text-[9px]">{by}</span>}</> : <span className="font-medium">{solo ? "à faire" : who}</span>}
                         </button>}
                         {!done && !skipped && k >= iso(addDays(parseISO(today), -7)) && <button aria-label={`Reporter ${c.name}`} title="Reporter (non faite, sans pénalité)" onClick={() => { dispatch({ type: "chore/skip", id: c.id, date: k }); toast(`${c.name} reportée`, "info"); }}
                           className="absolute right-1 top-1 rounded px-0.5 text-[9px] leading-none text-muted opacity-60 hover:text-fg hover:opacity-100">↷</button>}
@@ -1490,32 +1526,35 @@ const Chores: React.FC = () => {
               </tbody>
             </table>
           </div>)}
-        <p className="mt-2 text-xs text-muted">La rotation avance automatiquement : chaque jour pour les tâches quotidiennes, chaque semaine (ou toutes les deux semaines) pour les autres. Les cases « Moi » non faites sont injectées dans le planning du jour. ↷ reporte une corvée sans la marquer faite. Les données restent sur cet appareil (pas de partage entre colocataires).</p>
+        {solo ? <p className="mt-2 text-xs text-muted">Cliquez une case quand la corvée est faite. Les corvées non faites sont ajoutées à votre planning du jour, à l'heure choisie ou dans un créneau libre. ↷ reporte une corvée sans la marquer faite.</p> :
+        <p className="mt-2 text-xs text-muted">La rotation avance automatiquement : chaque jour pour les tâches quotidiennes, chaque semaine (ou toutes les deux semaines) pour les autres. Les cases « Moi » non faites sont injectées dans le planning du jour. ↷ reporte une corvée sans la marquer faite. Les données restent sur cet appareil (pas de partage entre colocataires).</p>}
       </Card>
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-        <Card title={<span className="flex items-center gap-2"><Users size={15} />Répartition de la semaine</span>} action={<span className="text-[11px] text-muted">temps prévu</span>}>
+      <div className={cx("grid grid-cols-1 gap-4 md:grid-cols-2", !solo && "xl:grid-cols-3")}>
+        {!solo && <Card title={<span className="flex items-center gap-2"><Users size={15} />Répartition de la semaine</span>} action={<span className="text-[11px] text-muted">temps prévu</span>}>
           <div className="flex flex-col gap-3">{minutesBy.map(({ p, min }) => (
             <div key={p} className="grid grid-cols-[64px_1fr_56px] items-center gap-2 text-[13px]"><span className="truncate">{p}</span><div className="h-2 rounded-full bg-sunken"><div className="h-full rounded-full bg-accent" style={{ width: `${(min / maxMin) * 100}%` }} /></div><span className="text-right font-mono text-xs tabular-nums text-muted">{fmtDur(min)}</span></div>))}</div>
-        </Card>
+        </Card>}
         <Card title="Historique · 4 semaines">
           {people.length ? (
             <div className="overflow-x-auto"><table className="w-full min-w-[320px] text-left text-[13px]">
-              <thead><tr className="text-[11px] uppercase tracking-wider text-muted"><th className="pb-2 font-medium">Personne</th><th className="pb-2 text-right font-medium">Faites</th><th className="pb-2 text-right font-medium">Prévues</th><th className="pb-2 text-right font-medium">Reportées</th><th className="pb-2 text-right font-medium">Temps</th></tr></thead>
+              <thead><tr className="text-[11px] uppercase tracking-wider text-muted">{!solo && <th className="pb-2 font-medium">Personne</th>}<th className="pb-2 text-right font-medium">Faites</th><th className="pb-2 text-right font-medium">Prévues</th><th className="pb-2 text-right font-medium">Reportées</th><th className="pb-2 text-right font-medium">Temps</th></tr></thead>
               <tbody className="divide-y divide-line">{history.map((r) => (
-                <tr key={r.person}><td className="py-1.5">{r.person}</td><td className="text-right font-mono tabular-nums">{r.done}</td><td className="text-right font-mono tabular-nums text-muted">{r.assigned}</td>
+                <tr key={r.person}>{!solo && <td className="py-1.5">{r.person}</td>}<td className="py-1.5 text-right font-mono tabular-nums">{r.done}</td><td className="text-right font-mono tabular-nums text-muted">{r.assigned}</td>
                   <td className="text-right font-mono tabular-nums text-muted">{r.skipped}</td><td className="text-right font-mono text-xs tabular-nums text-muted">{fmtDur(r.minutes)}</td></tr>))}</tbody>
             </table></div>) : <p className="text-xs text-muted">L'historique apparaîtra avec vos premières corvées.</p>}
-          <p className="mt-2 text-[11px] text-muted">« Prévues » : selon la rotation automatique. Une corvée faite par quelqu'un d'autre est comptée pour la personne qui l'a faite.</p>
+          {!solo && <p className="mt-2 text-[11px] text-muted">« Prévues » : selon la rotation automatique. Une corvée faite par quelqu'un d'autre est comptée pour la personne qui l'a faite.</p>}
         </Card>
         <Card title="Nouvelle corvée">
-          <form className="grid grid-cols-2 gap-2" onSubmit={(e) => { e.preventDefault(); const assignees = f.assignees.split(",").map((s) => s.trim()).filter(Boolean);
+          <form className="grid grid-cols-2 gap-2" onSubmit={(e) => { e.preventDefault(); const assignees = state.settings.roommates.length ? f.assignees.split(",").map((s) => s.trim()).filter(Boolean) : ["Moi"];
             if (!f.name.trim() || !assignees.length) { toast("Nom et au moins une personne requis.", "bad"); return; }
-            dispatch({ type: "chore/add", chore: { id: uid(), name: f.name.trim(), recurrence: f.recurrence, day: f.day, minutes: f.minutes, assignees, done: [] } }); setF({ ...f, name: "" }); toast("Corvée ajoutée à la rotation"); }}>
+            dispatch({ type: "chore/add", chore: { id: uid(), name: f.name.trim(), recurrence: f.recurrence, day: f.day, minutes: f.minutes, assignees, done: [], ...(f.time ? { time: f.time } : {}) } }); setF({ ...f, name: "" }); toast(state.settings.roommates.length ? "Corvée ajoutée à la rotation" : "Corvée ajoutée"); }}>
             <Input id="ch-name" aria-label="Corvée" placeholder="Ex. Nettoyer la plaque" className="col-span-2" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
             <Select id="ch-rec" aria-label="Récurrence" value={f.recurrence} onChange={(e) => setF({ ...f, recurrence: e.target.value as Recurrence })}>{(Object.keys(REC_LABEL) as Recurrence[]).map((r) => <option key={r} value={r}>{REC_LABEL[r]}</option>)}</Select>
             <Select id="ch-day" aria-label="Jour" value={f.day} disabled={f.recurrence === "daily"} onChange={(e) => setF({ ...f, day: Number(e.target.value) })}>{DAYS_LONG.map((d, i) => <option key={d} value={i}>{d}</option>)}</Select>
             <Input id="ch-min" aria-label="Durée (min)" type="number" min={5} step={5} value={f.minutes} onChange={(e) => setF({ ...f, minutes: Number(e.target.value) })} />
-            <Input id="ch-who" aria-label="Rotation (virgules)" placeholder="Moi, Inès" value={f.assignees} onChange={(e) => setF({ ...f, assignees: e.target.value })} />
+            <Input id="ch-time" aria-label="Heure (facultatif)" title="Heure précise (facultatif) : sinon placée dans un créneau libre" type="time" value={f.time} onChange={(e) => setF({ ...f, time: e.target.value })} />
+            {state.settings.roommates.length > 0 && <Input id="ch-who" aria-label="Rotation (virgules)" placeholder="Moi, Inès" className="col-span-2" value={f.assignees} onChange={(e) => setF({ ...f, assignees: e.target.value })} />}
+            <p className="col-span-2 text-[11px] text-muted">Heure facultative : sans heure, la corvée est placée dans un créneau libre de votre planning.{!state.settings.roommates.length && " Ajoutez des colocataires dans Réglages pour activer la rotation."}</p>
             <Btn type="submit" variant="primary" className="col-span-2"><Plus size={14} />Ajouter</Btn>
           </form>
         </Card>

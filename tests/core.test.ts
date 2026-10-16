@@ -237,3 +237,33 @@ test("lecture de ticket : total, date, magasin", () => {
   const r = C.parseReceipt("CARREFOUR CITY\n14/10/2026 18:42\nLAIT 1,05\nSOUS-TOTAL 2,00\nTVA 0,10\nTOTAL A PAYER 12,47\nCB 12,47");
   close(r.amount!, 12.47); assert.equal(r.date, "2026-10-14"); assert.equal(r.store, "CARREFOUR CITY");
 });
+
+test("événements : ponctuels et récurrents, occurrences retirées, fin de répétition", async () => {
+  const { eventOn } = await import("../src/core.ts");
+  const e = (recurrence: string, extra = {}) => ({ id: "e", title: "Foot", date: "2026-10-05", start: "18:00", end: "19:30", recurrence, until: null, ...extra }) as never;
+  assert.equal(eventOn(e("none"), "2026-10-05"), true); assert.equal(eventOn(e("none"), "2026-10-12"), false);
+  assert.equal(eventOn(e("weekly"), "2026-10-12"), true); assert.equal(eventOn(e("weekly"), "2026-10-13"), false); assert.equal(eventOn(e("weekly"), "2026-09-28"), false);
+  assert.equal(eventOn(e("biweekly"), "2026-10-12"), false); assert.equal(eventOn(e("biweekly"), "2026-10-19"), true);
+  assert.equal(eventOn(e("monthly"), "2026-11-05"), true); assert.equal(eventOn(e("daily"), "2026-10-09"), true);
+  assert.equal(eventOn(e("weekly", { until: "2026-10-12" }), "2026-10-19"), false);
+  assert.equal(eventOn(e("weekly", { skipped: ["2026-10-12"] }), "2026-10-12"), false);
+});
+
+test("planning : événement bloquant et corvée à heure fixe", async () => {
+  const { planDay, blank, validateState } = await import("../src/core.ts");
+  const s = blank({ name: "T" }, 600);
+  s.events = [{ id: "ev", title: "Dentiste", date: "2026-10-14", start: "14:00", end: "15:00", recurrence: "none", until: null }];
+  s.chores = [{ id: "ch", name: "Vaisselle", recurrence: "daily", day: 0, minutes: 20, assignees: ["Moi"], done: [], time: "21:00" }];
+  s.tasks = [{ id: "t", title: "Projet", courseId: null, kind: "projet", deadline: "2026-10-15", estimate: 600, spent: 0, priority: 3, status: "todo" } as never];
+  const p = planDay(s, "2026-10-14", undefined, "2026-10-14");
+  const ev = p.blocks.find((b) => b.kind === "event")!;
+  assert.deepEqual([ev.start, ev.end, ev.label], [14 * 60, 15 * 60, "Dentiste"]);
+  const ch = p.blocks.find((b) => b.kind === "chore")!;
+  assert.deepEqual([ch.start, ch.end], [21 * 60, 21 * 60 + 20]);
+  for (const b of p.blocks.filter((x) => x.kind === "task")) assert.ok(b.end <= 14 * 60 || b.start >= 15 * 60 + 10, "travail placé pendant l'événement");
+  assert.equal(planDay(s, "2026-10-15", undefined, "2026-10-14").blocks.some((b) => b.kind === "event"), false);
+  const v = validateState(JSON.parse(JSON.stringify(s)));
+  assert.ok(v.ok); if (v.ok) { assert.equal(v.state.events.length, 1); assert.equal(v.state.chores[0].time, "21:00"); }
+  const bad = validateState(JSON.parse(JSON.stringify({ ...s, chores: [{ ...s.chores[0], time: "25:99" }], events: [{ id: "x", title: "y" }] })));
+  assert.ok(bad.ok); if (bad.ok) { assert.equal(bad.state.chores[0].time, undefined); assert.equal(bad.state.events.length, 0); }
+});

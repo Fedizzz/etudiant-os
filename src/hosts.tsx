@@ -166,7 +166,7 @@ export function CloudHost({ sb, session, view, onView, onSignedOut, support, nav
           <div className="flex flex-col gap-3 text-[13px]">
             <p>Des données Étudiant.OS utilisées <b>sans compte</b> existent sur cet appareil. {snap.remoteEmpty ? "Votre compte est vide : elles deviendront le contenu de votre compte." : "Elles seront ajoutées à votre compte, sans doublon (les éléments déjà présents sont ignorés)."}</p>
             <ul className="grid grid-cols-2 gap-x-4 gap-y-1 rounded-xl bg-sunken p-3 text-xs sm:grid-cols-3" data-testid="import-preview">
-              {([["tasks", "tâches"], ["courses", "modules"], ["classes", "créneaux"], ["expenses", "dépenses"], ["recurring", "récurrentes"], ["groceries", "articles"], ["chores", "corvées"], ["sleep", "nuits"], ["focus", "sessions"], ["templates", "listes"], ["products", "produits"]] as [keyof ImportSummary, string][])
+              {([["tasks", "tâches"], ["courses", "modules"], ["classes", "créneaux"], ["expenses", "dépenses"], ["recurring", "récurrentes"], ["groceries", "articles"], ["chores", "corvées"], ["sleep", "nuits"], ["focus", "sessions"], ["templates", "listes"], ["products", "produits"], ["events", "événements"]] as [keyof ImportSummary, string][])
                 .filter(([k]) => importOffer.summary[k]).map(([k, l]) => <li key={k}><b className="font-mono">{importOffer.summary[k]}</b> {l}</li>)}
             </ul>
             <p className="text-xs text-muted">Une copie de sécurité de votre compte est faite avant l'import. Les données locales ne sont jamais effacées automatiquement.</p>
