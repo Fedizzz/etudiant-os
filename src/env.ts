@@ -25,4 +25,6 @@ export interface AppEnv {
   support?: SupportInfo;
   /** Télécharge un calendrier .ics (via la base en mode compte : contourne le blocage CORS des navigateurs). */
   fetchCalendar?: (url: string) => Promise<string>;
+  /** Relit les données du compte (et envoie les modifications en attente). */
+  refresh?: () => Promise<void>;
 }

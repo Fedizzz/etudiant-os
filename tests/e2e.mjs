@@ -32,6 +32,8 @@ const until = async (fn, ms = 8000) => { const t = Date.now(); while (Date.now()
   // Lecture directe du document du compte via l'API (jeton de la session du navigateur) : vérifie ce qui est VRAIMENT en base.
   const remote = (p) => p.evaluate(async (key) => { const s = JSON.parse(localStorage.getItem("etudiant-os/auth")); const r = await fetch("http://127.0.0.1:54321/rest/v1/user_data?select=state,version", { headers: { apikey: key, Authorization: "Bearer " + s.access_token } }); return (await r.json())[0]?.state ?? null; }, ANON);
   const addTask = async (p, title) => {
+    // Sur téléphone le menu du haut se cache en descendant : on remonte comme le ferait l'utilisateur.
+    await p.evaluate(() => window.scrollTo(0, 0)); await sleep(350);
     await p.locator("button:has-text('Tâche')").first().click(); await p.fill("#tf-title", title); await p.keyboard.press("Enter"); await sleep(150);
   };
   const login = async (p, mail, pw, path = "login") => {

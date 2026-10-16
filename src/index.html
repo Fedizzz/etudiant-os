@@ -14,7 +14,9 @@
 <meta property="og:image" content="%SITE_URL%og-image.jpg">
 <meta property="og:locale" content="fr_FR">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="theme-color" content="#eeecf4">
+<meta name="theme-color" content="#eeecf4" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#131821" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="manifest" href="%BASE%manifest.webmanifest">
 <link rel="icon" href="%BASE%favicon-32.png?v=2" type="image/png" sizes="32x32">
 <link rel="icon" href="%BASE%icon.svg?v=2" type="image/svg+xml">
@@ -31,6 +33,9 @@
   // Thème appliqué avant le premier rendu (évite un flash clair en mode sombre).
   try { var t = JSON.parse(localStorage.getItem("etudiant-os/theme") || "null"); if (t === "dark" || t === "light") document.documentElement.setAttribute("data-theme", t); } catch (e) {}
   // Thème sombre du système : attribut data-night (styles du mode « carnet de nuit »), suivi en direct.
+  // Couleur de la barre d'état / barre d'adresse = fond de l'app, aussi quand le thème est forcé dans les réglages.
+  try { var syncBar = function () { var bg = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim().split(/\s+/).join(","); if (bg) document.querySelectorAll('meta[name="theme-color"]').forEach(function (m) { m.setAttribute("content", "rgb(" + bg + ")"); m.removeAttribute("media"); }); };
+    new MutationObserver(syncBar).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "data-night"] }); document.addEventListener("DOMContentLoaded", syncBar); } catch (e) {}
   try { var mq = matchMedia("(prefers-color-scheme: dark)"), night = function () { document.documentElement.toggleAttribute("data-night", mq.matches); }; night(); mq.addEventListener("change", night); } catch (e) {}
 </script>
 </head>

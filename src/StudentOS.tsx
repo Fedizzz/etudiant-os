@@ -51,6 +51,88 @@ export function useFixedHeader(): [(el: HTMLElement | null) => void, number] {
   useEffect(() => () => ro.current?.disconnect(), []);
   return [ref, h];
 }
+/** Menu du haut qui se cache en descendant et réapparaît dès qu'on remonte (téléphone). */
+export function useHideOnScroll(height: number, disabled = false): boolean {
+  const [hidden, setHidden] = useState(false);
+  useEffect(() => {
+    if (disabled) { setHidden(false); return; }
+    let last = window.scrollY, ticking = false;
+    const onScroll = () => {
+      if (ticking) return; ticking = true;
+      requestAnimationFrame(() => {
+        const y = Math.max(0, window.scrollY), dy = y - last;
+        if (y < height) setHidden(false);              // près du haut : toujours visible
+        else if (dy > 6) setHidden(true);               // on descend : on cache
+        else if (dy < -4) setHidden(false);             // on remonte : on montre tout de suite
+        if (Math.abs(dy) > 4) last = y;
+        ticking = false;
+      });
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [height, disabled]);
+  return hidden && !disabled;
+}
+
+/**
+ * « Tirer pour actualiser » (écrans tactiles) : seulement quand la page est tout en haut ; indicateur flèche → roue ;
+ * au relâchement au-delà du seuil, appelle onRefresh (actualisation ciblée des données, pas de rechargement de page).
+ */
+export const PullToRefresh: React.FC<{ onRefresh: () => Promise<unknown>; top: number }> = ({ onRefresh, top }) => {
+  const [pull, setPull] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const st = useRef({ y0: 0, active: false, pull: 0, busy: false });
+  const THRESHOLD = 72, MAX = 120;
+  useEffect(() => {
+    if (!matchMedia("(pointer: coarse)").matches) return;
+    const blocked = (t: EventTarget | null) => {
+      const el = t as HTMLElement | null;
+      // Pas dans une fenêtre, un menu, un champ, ni dans une zone qui défile elle-même et n'est pas en haut.
+      if (!el?.closest || el.closest('[role="dialog"], [role="menu"], input, textarea, select, [data-no-ptr]')) return true;
+      for (let n: HTMLElement | null = el; n && n !== document.body; n = n.parentElement) {
+        const o = getComputedStyle(n).overflowY;
+        if ((o === "auto" || o === "scroll") && n.scrollHeight > n.clientHeight && n.scrollTop > 0) return true;
+      }
+      return false;
+    };
+    const start = (e: TouchEvent) => {
+      if (st.current.busy || e.touches.length !== 1 || window.scrollY > 0 || blocked(e.target)) { st.current.active = false; return; }
+      st.current = { ...st.current, y0: e.touches[0].clientY, active: true, pull: 0 };
+    };
+    const move = (e: TouchEvent) => {
+      if (!st.current.active) return;
+      const dy = e.touches[0].clientY - st.current.y0;
+      if (window.scrollY > 0 || dy <= 0) { if (st.current.pull) { st.current.pull = 0; setPull(0); } if (dy < 0) st.current.active = false; return; }
+      const p = Math.min(MAX, dy * 0.5); // résistance : la flèche suit le doigt à moitié
+      st.current.pull = p; setPull(p);
+    };
+    const end = async () => {
+      if (!st.current.active) return;
+      st.current.active = false;
+      if (st.current.pull >= THRESHOLD) {
+        st.current.busy = true; setBusy(true); setPull(THRESHOLD);
+        try { await Promise.all([onRefresh(), new Promise((r) => setTimeout(r, 600))]); } finally { st.current.busy = false; setBusy(false); setPull(0); st.current.pull = 0; }
+      } else { setPull(0); st.current.pull = 0; }
+    };
+    window.addEventListener("touchstart", start, { passive: true });
+    window.addEventListener("touchmove", move, { passive: true });
+    window.addEventListener("touchend", end); window.addEventListener("touchcancel", end);
+    return () => { window.removeEventListener("touchstart", start); window.removeEventListener("touchmove", move); window.removeEventListener("touchend", end); window.removeEventListener("touchcancel", end); };
+  }, [onRefresh]);
+  if (!pull && !busy) return null;
+  const ratio = Math.min(1, pull / THRESHOLD), ready = ratio >= 1;
+  return (
+    <div aria-live="polite" className="pointer-events-none fixed inset-x-0 z-40 flex justify-center" style={{ top: top + pull * 0.55 - 20, transition: st.current.active ? "none" : "top .3s var(--ease)" }} data-testid="ptr">
+      <div className={cx("grid h-10 w-10 place-items-center rounded-full border-2 border-fg shadow-[3px_3px_0_0_rgb(var(--ink))] transition-colors", ready && !busy ? "bg-hi text-[rgb(24_22_46)]" : "bg-panel")}
+        style={{ opacity: busy ? 1 : 0.35 + ratio * 0.65 }}>
+        {busy ? <svg className="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none" aria-label="Actualisation…"><circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity=".25" strokeWidth="3" /><path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" /></svg>
+          : <svg className="h-5 w-5 transition-transform duration-200" style={{ transform: `rotate(${ready ? 180 : ratio * 150}deg)` }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-label={ready ? "Relâcher pour actualiser" : "Tirer pour actualiser"}><path d="M12 4v15M6 13l6 6 6-6" /></svg>}
+      </div>
+      <span className="sr-only">{busy ? "Actualisation…" : ready ? "Relâchez pour actualiser" : "Tirez pour actualiser"}</span>
+    </div>
+  );
+};
+
 /** Filtre global de tremblé crayon, monté une fois à la racine. */
 export const PencilDefs: React.FC = () => (
   <svg width="0" height="0" style={{ position: "absolute" }} aria-hidden>
@@ -2413,6 +2495,15 @@ export default function StudentOS({ state, dispatch, env, view, onView, notice, 
   const greet = hour < 6 ? "Bonne nuit" : hour < 18 ? "Bonjour" : "Bonsoir";
   const current = NAV.find((n) => n.key === view)!;
   const [headerRef, headerH] = useFixedHeader();
+  const headerHidden = useHideOnScroll(headerH, menu || palette);
+  // Tirer pour actualiser : données du compte, calendriers abonnés, notifications — sans recharger la page.
+  const pullRefresh = useCallback(async () => {
+    const jobs: Promise<unknown>[] = [env.refresh?.() ?? Promise.resolve()];
+    if (env.fetchCalendar) for (const f of stateRef.current.settings.feeds ?? []) jobs.push(syncFeed(f, env.fetchCalendar, dispatch).catch(() => {}));
+    dispatch({ type: "recurring/sync", today: todayISO() });
+    await Promise.all(jobs);
+    toast(navigator.onLine ? "À jour" : "Hors ligne : affichage des données de l'appareil", navigator.onLine ? "ok" : "info");
+  }, [env, dispatch]);
   const navItems = NAV.filter((n) => !state.settings.hiddenViews.includes(n.key));
 
   if (!state.settings.onboarded && !override) return (
@@ -2443,7 +2534,7 @@ export default function StudentOS({ state, dispatch, env, view, onView, notice, 
         </aside>
         <div className="flex min-w-0 flex-1 flex-col">
           <div aria-hidden className="md:hidden" style={{ height: headerH }} />
-          <header ref={headerRef} className="fixed inset-x-0 top-0 z-30 border-b-2 border-dashed border-line bg-bg/85 backdrop-blur-md md:sticky md:inset-x-auto md:z-20" style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
+          <header ref={headerRef} className={cx("fixed inset-x-0 top-0 z-30 border-b-2 border-dashed border-line bg-bg transition-transform duration-300 [transition-timing-function:var(--ease)] md:sticky md:inset-x-auto md:z-20 md:bg-bg/80 md:backdrop-blur-md md:!translate-y-0", headerHidden && "-translate-y-full")} style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
             <div className="mx-auto flex max-w-6xl 2xl:max-w-[1560px] min-[2200px]:max-w-[1880px] items-center gap-3 py-3 px-4 sm:px-6">
               <div className="min-w-0 flex-1"><p className="truncate text-xs text-muted">{greet} {state.settings.name}<span className="hidden min-[400px]:inline"> · {new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}</span></p>
                 <h1 className="truncate pb-0.5 font-display text-[19px] min-[400px]:text-[21px] sm:text-[26px] font-extrabold leading-tight tracking-tight"><span key={override?.key ?? view} className="marker">{override?.title ?? current.label}<svg viewBox="0 0 200 20" preserveAspectRatio="none" aria-hidden><path d="M2 12 C 40 6, 80 16, 120 9 S 180 6, 198 11" /></svg></span></h1></div>
@@ -2474,6 +2565,7 @@ export default function StudentOS({ state, dispatch, env, view, onView, notice, 
         </div>
       </div>
 
+      <PullToRefresh onRefresh={pullRefresh} top={headerH} />
       {palette && <CommandPalette commands={commands} onClose={() => setPalette(false)} />}
       {newTask && <Modal title="Nouvelle tâche" onClose={() => setNewTask(false)}><TaskForm onDone={() => setNewTask(false)} /></Modal>}
       {editTask && state.tasks.some((t) => t.id === editTask) && <Modal title="Modifier la tâche" onClose={() => setEditTask(null)}><TaskForm task={state.tasks.find((t) => t.id === editTask)} onDone={() => setEditTask(null)} /></Modal>}

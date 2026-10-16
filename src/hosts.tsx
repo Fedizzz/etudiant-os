@@ -131,9 +131,10 @@ export function CloudHost({ sb, session, view, onView, onSignedOut, support, nav
   const env = useMemo<AppEnv>(() => ({
     mode: "cloud", ns: `etudiant-os/u/${uid}`, files: cloudFiles(sb, uid), account,
     sync: { status: snap.status, pending: snap.pending, lastSyncedAt: snap.lastSyncedAt, error: snap.error, conflicts: snap.conflicts, online: snap.status !== "offline", retry: () => void engine.reconnect() },
+    refresh: async () => { await engine.refresh(); await engine.flush(); await notif.refresh(); },
     fetchCalendar: async (url: string) => { const { data, error } = await sb.rpc("fetch_calendar", { p_url: url }); if (error) throw new Error(error.message); return data as string; },
     support: { isAdmin, unread, open: (page) => nav({ name: "support", page }), openAdmin: () => nav({ name: "admin", section: "dashboard" }) },
-  }), [sb, uid, account, snap, engine, isAdmin, unread, nav]);
+  }), [sb, uid, account, snap, engine, isAdmin, unread, nav, notif.refresh]);
 
   if (role && !role.active) return <Suspended onSignOut={() => void reallySignOut()} />;
   if (!snap.ready || !snap.state) return <Splash text="Chargement de votre espace…" />;
