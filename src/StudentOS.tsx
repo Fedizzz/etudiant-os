@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { MiniPdf } from "./pdf.ts";
+import { DAY_WORDS, dayOf, pageGeometry, parseGrid } from "./timetable.ts";
 import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, pad, parseAmount, parseISO, parseReceipt, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
 import type { Action, Aisle, AppState, Block, Budget, Course, DayPlan, Expense, ExpenseCat, GroceryTemplate, ID, Phase, PomodoroCfg, Priority, ReceiptResult, Recurrence, EventRecurrence, SettingsState, SleepLog, Task, TaskKind, TaskStatus, TemplateItem, ViewKey } from "./core.ts";
 import type { AppEnv } from "./env.ts";
@@ -663,20 +664,30 @@ const BLOCK_STYLE: Record<Block["kind"], string> = {
   class: "border-l-[3px] bg-sunken", task: "border-l-[3px] bg-accent/8", chore: "border-l-[3px] border-l-warn bg-warn/10", meal: "border-l-[3px] border-l-line bg-transparent text-muted", sleep: "", event: "border-l-[3px] border-l-pink bg-pink/10", busy: "border-l-[3px] border-l-muted bg-sunken/60 text-muted [background-image:repeating-linear-gradient(135deg,transparent_0_6px,rgb(var(--line)/.6)_6px_8px)]",
 };
 // ---------------------------------------------------------------- Import d'emploi du temps PDF
-interface Detected { key: string; day: number; start: string; end: string; title: string; room: string; on: boolean }
-const DAY_WORDS: RegExp[] = [
-  /\b(lundi|lun\.?|monday|mon)\b/i, /\b(mardi|tuesday|tue)\b/i, /\b(mercredi|mer\.?|wednesday|wed)\b/i, /\b(jeudi|jeu\.?|thursday|thu)\b/i,
-  /\b(vendredi|ven\.?|friday|fri)\b/i, /\b(samedi|sam\.?|saturday|sat)\b/i, /\b(dimanche|dim\.?|sunday|sun)\b/i,
-];
-const dayOf = (t: string) => DAY_WORDS.findIndex((re) => re.test(t));
+interface Detected { key: string; day: number; start: string; end: string; title: string; room: string; on: boolean; note?: string }
 const TIME_RE = /(\d{1,2})\s*[h:]\s*(\d{2})?\s*(?:-|–|—|à|a|>)\s*(\d{1,2})\s*[h:]\s*(\d{2})?/gi;
 const ROOM_RE = /\b((?:salle|amphi(?:théâtre)?|room|labo|bât\.?|bat\.?|td|tp)\s*[\w.-]{1,8}|[a-z]\d{3})\b/i;
 async function extractTimetable(buf: ArrayBuffer): Promise<Detected[]> {
   const lib = await pdfjs();
   const doc = await lib.getDocument({ data: buf }).promise;
   const out: Detected[] = [];
+  const today = todayISO();
   for (let n = 1; n <= doc.numPages; n++) {
     const page = await doc.getPage(n);
+    // Grille avec cases dessinées (Cronos, Hyperplanning, ADE…) : lecture par position, la plus fiable.
+    const geo = await pageGeometry(lib as unknown as Parameters<typeof pageGeometry>[0], page as unknown as Parameters<typeof pageGeometry>[1]);
+    const grid = parseGrid(geo.items, geo.rects, today);
+    if (grid.length) {
+      for (const g of grid) {
+        const key = `${g.day}-${g.start}-${g.end}-${norm(g.title)}`;
+        const over = !!g.lastDate && g.lastDate < today;
+        // Même cours, même créneau, salles différentes selon les semaines : une seule ligne, salles regroupées.
+        const same = out.find((o) => o.key === key);
+        if (same) { if (g.room && !same.room.includes(g.room)) same.room = `${same.room} / ${g.room}`.slice(0, 60); if (!over) { same.on = true; same.note = undefined; } continue; }
+        out.push({ key, day: g.day, start: g.start, end: g.end, title: g.title, room: g.room, on: !over, ...(g.lastDate ? { note: over ? `terminé le ${fmtDate(g.lastDate)}` : `jusqu'au ${fmtDate(g.lastDate)}` } : {}) });
+      }
+      continue;
+    }
     const items = (await page.getTextContent()).items.filter((i) => i.str.trim()).map((i) => ({ s: i.str.trim(), x: i.transform[4], y: i.transform[5] }));
     // En-têtes de colonnes (emplois du temps en grille : un jour par colonne)
     const headers = items.map((i) => ({ day: i.s.length < 14 ? dayOf(i.s) : -1, x: i.x })).filter((h) => h.day >= 0);
@@ -789,7 +800,8 @@ const TimetableImport: React.FC = () => {
             {rows.map((r) => (
               <li key={r.key} className={cx("grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 rounded-xl border-2 p-2 text-xs transition", r.on ? "border-fg/60" : "border-line opacity-50")}>
                 <input type="checkbox" aria-label="Importer ce créneau" checked={r.on} onChange={(e) => upd(r.key, { on: e.target.checked })} className="mt-1.5 h-4 w-4 accent-[rgb(var(--accent))]" />
-                <Input aria-label="Intitulé" className="h-7 text-xs" value={r.title} onChange={(e) => upd(r.key, { title: e.target.value })} />
+                <div className="min-w-0"><Input aria-label="Intitulé" className="h-7 text-xs" value={r.title} onChange={(e) => upd(r.key, { title: e.target.value })} />
+                  {r.note && <p className={cx("mt-0.5 text-[10.5px]", r.note.startsWith("terminé") ? "text-warn" : "text-muted")}>{r.note}</p>}</div>
                 <span />
                 <div className="flex min-w-0 flex-wrap gap-1">
                   <Select aria-label="Jour" className="h-7 w-auto text-xs" value={r.day} onChange={(e) => upd(r.key, { day: Number(e.target.value) })}>{DAYS.map((d, i) => <option key={d} value={i}>{d}</option>)}</Select>
