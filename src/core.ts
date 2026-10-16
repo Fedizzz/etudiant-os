@@ -10,7 +10,8 @@ export type Priority = 1 | 2 | 3;
 export type Recurrence = "daily" | "weekly" | "biweekly";
 export type Aisle = "Frais" | "Fruits & légumes" | "Épicerie" | "Boissons" | "Surgelés" | "Hygiène" | "Entretien";
 export type ViewKey = "dashboard" | "planning" | "academic" | "focus" | "groceries" | "budget" | "chores" | "sleep" | "settings";
-export type ExpenseCat = "Courses" | "Logement" | "Transport" | "Études" | "Restauration" | "Loisirs" | "Santé" | "Autre";
+/** Catégories intégrées ; l'utilisateur peut en ajouter (settings.customCats). */
+export type ExpenseCat = "Courses" | "Logement" | "Transport" | "Études" | "Restauration" | "Loisirs" | "Santé" | "Autre" | (string & {});
 
 export interface Grade { id: ID; label: string; score: number; weight: number }
 /** target : moyenne visée pour le module (facultatif). */
@@ -50,6 +51,8 @@ export interface SettingsState {
   accent: string; hiddenViews: ViewKey[]; quickExpenses: QuickExpense[];
   /** Objectif de moyenne générale, objectif de focus quotidien (min), indisponibilités hebdomadaires. */
   gradeTarget: number | null; focusGoal: number; unavailable: Unavailability[];
+  /** Catégories de dépenses ajoutées par l'utilisateur. */
+  customCats?: string[];
 }
 export interface QuickExpense { label: string; amount: number; category: ExpenseCat }
 export interface TemplateItem { name: string; aisle: Aisle; qty: string; price: number }
@@ -357,6 +360,7 @@ export function validateState(x: unknown): { ok: true; state: AppState; repaired
   settings.roommates = Array.isArray(settings.roommates) ? settings.roommates.filter(isStr) : [];
   settings.hiddenViews = Array.isArray(settings.hiddenViews) ? settings.hiddenViews : [];
   settings.quickExpenses = Array.isArray(settings.quickExpenses) ? settings.quickExpenses.filter((q) => q && isStr(q.label) && isNum(q.amount)) : DEFAULT_SETTINGS.quickExpenses;
+  settings.customCats = Array.isArray(settings.customCats) ? [...new Set(settings.customCats.filter((c) => isStr(c) && c.trim()).map((c) => c.trim().slice(0, 24)))].slice(0, 30) : [];
   settings.unavailable = Array.isArray(settings.unavailable) ? settings.unavailable.filter((u) => u && isTime(u.start) && isTime(u.end) && isNum(u.day)) : [];
   if (!isNum(settings.focusGoal) || settings.focusGoal < 0) settings.focusGoal = DEFAULT_SETTINGS.focusGoal;
   if (settings.gradeTarget !== null && !(isNum(settings.gradeTarget) && settings.gradeTarget >= 0 && settings.gradeTarget <= 20)) settings.gradeTarget = null;

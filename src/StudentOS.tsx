@@ -516,7 +516,7 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
   const myLeft = choresLeft.filter((x) => x.who === "Moi").length;
   const solo = isSolo(state);
   const lateChores = state.chores.reduce((n, c) => n + [1, 2, 3].filter((i) => { const d = addDays(todayDate, -i), k = iso(d); return choreScheduledOn(c, d) && !c.done.includes(k) && !(c.skipped ?? []).includes(k); }).length, 0);
-  const bs = budgetStats(state.budget, monthKey(today), today, CATS);
+  const bs = budgetStats(state.budget, monthKey(today), today, catsOf(state));
   const open = state.tasks.filter((t) => t.status !== "done");
   const late = open.filter((t) => t.deadline < today).sort((a, b) => a.deadline.localeCompare(b.deadline));
   const doneWeek = state.tasks.filter((t) => t.doneAt && daysBetween(t.doneAt, today) < 7).length;
@@ -1433,8 +1433,34 @@ const Groceries: React.FC = () => {
 
 // ---------------------------------------------------------------- Module : Budget & dépenses
 const CATS: ExpenseCat[] = ["Courses", "Restauration", "Logement", "Transport", "Études", "Loisirs", "Santé", "Autre"];
-const CAT_COLOR: Record<ExpenseCat, string> = {
+const BASE_COLOR: Record<string, string> = {
   Courses: "#10a37f", Restauration: "#e0802a", Logement: "#5b6b8c", Transport: "#2b8bd6", Études: "#6d5bd0", Loisirs: "#d6457a", Santé: "#1aa3a3", Autre: "#8a8f98",
+};
+const EXTRA_COLORS = ["#c2417a", "#b5651d", "#3d8b37", "#7a5af5", "#d4a017", "#1d9bb5", "#a0522d", "#e05d5d"];
+/** Couleur d'une catégorie (intégrée, ou stable pour une catégorie perso). */
+const CAT_COLOR = new Proxy(BASE_COLOR, { get: (t, k: string) => t[k] ?? EXTRA_COLORS[[...k].reduce((n, ch) => (n * 31 + ch.charCodeAt(0)) >>> 0, 7) % EXTRA_COLORS.length] }) as Record<string, string>;
+/** Catégories proposées : intégrées + perso (+ celles encore utilisées par des dépenses), « Autre » en dernier. */
+const catsOf = (s: AppState): ExpenseCat[] => {
+  const used = [...s.budget.expenses.map((e) => e.category), ...s.budget.recurring.map((r) => r.category)];
+  const extra = [...new Set([...(s.settings.customCats ?? []), ...used])].filter((c) => !CATS.includes(c));
+  return [...CATS.filter((c) => c !== "Autre"), ...extra, "Autre"];
+};
+/** Liste de catégories avec « + Nouvelle catégorie… » (ajoutée aux réglages et sélectionnée). */
+const CatSelect: React.FC<Omit<React.SelectHTMLAttributes<HTMLSelectElement>, "onChange" | "value"> & { value: string; onPick: (c: ExpenseCat) => void }> = ({ value, onPick, ...rest }) => {
+  const { state, dispatch, toast } = useStore();
+  return (
+    <Select {...rest} value={value} onChange={(e) => {
+      if (e.target.value !== "__new") { onPick(e.target.value); return; }
+      const name = window.prompt("Nom de la nouvelle catégorie (ex. Abonnements, Sport, Cadeaux)")?.trim().slice(0, 24);
+      if (!name) return;
+      const existing = catsOf(state).find((c) => norm(c) === norm(name));
+      if (!existing) { dispatch({ type: "settings", patch: { customCats: [...(state.settings.customCats ?? []), name] } }); toast(`Catégorie « ${name} » ajoutée`); }
+      onPick(existing ?? name);
+    }}>
+      {catsOf(state).map((c) => <option key={c} value={c}>{c}</option>)}
+      <option value="__new">+ Nouvelle catégorie…</option>
+    </Select>
+  );
 };
 const BudgetView: React.FC = () => {
   const { state, dispatch, toast, undoable } = useStore();
@@ -1447,7 +1473,7 @@ const BudgetView: React.FC = () => {
   const today = todayISO();
   const exp = state.budget.expenses.filter((e) => monthKey(e.date) === mk).sort((a, b) => b.date.localeCompare(a.date));
   // Tous les chiffres viennent de budgetStats (mêmes calculs que le tableau de bord), recalculés à chaque modification.
-  const bs = budgetStats(state.budget, mk, today, CATS);
+  const bs = budgetStats(state.budget, mk, today, catsOf(state));
   const { spent, remaining, dim, elapsed, projection, perDayLeft, daily } = bs;
   const byCat = bs.byCat.filter((x) => x.spent > 0 || x.limit).map((x) => ({ c: x.cat, v: x.spent, lim: x.limit }));
   const [f, setF] = useState({ label: "", amount: "", category: "Courses" as ExpenseCat, date: today, source: "manuel" as Expense["source"] });
@@ -1524,10 +1550,13 @@ const BudgetView: React.FC = () => {
             <form onSubmit={add} className="grid grid-cols-2 gap-2">
               <Input id="bd-label" aria-label="Libellé" placeholder="Libellé (ex. Pharmacie)" className="col-span-2" value={f.label} onChange={(e) => setF({ ...f, label: e.target.value })} />
               <Input id="bd-amount" aria-label="Montant" inputMode="decimal" placeholder={`Montant (${cur})`} value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
-              <Select id="bd-cat" aria-label="Catégorie" value={f.category} onChange={(e) => setF({ ...f, category: e.target.value as ExpenseCat })}>{CATS.map((c) => <option key={c} value={c}>{c}</option>)}</Select>
+              <CatSelect id="bd-cat" aria-label="Catégorie" value={f.category} onPick={(c) => setF({ ...f, category: c })} />
               <Input id="bd-date" aria-label="Date" type="date" className="col-span-2" value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />
               <Btn type="submit" variant="primary" className="col-span-2"><Plus size={14} />Ajouter la dépense</Btn>
             </form>
+            {(state.settings.customCats ?? []).length > 0 && <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]"><span className="text-muted">Mes catégories :</span>
+              {(state.settings.customCats ?? []).map((c) => <span key={c} className="inline-flex items-center gap-1 rounded-full border border-line bg-sunken py-0.5 pl-2 pr-1"><span className="h-2 w-2 rounded-full" style={{ background: CAT_COLOR[c] }} />{c}
+                <button aria-label={`Retirer la catégorie ${c}`} title="Retirer (les dépenses existantes gardent cette catégorie)" className="rounded-full px-1 text-muted hover:text-bad" onClick={() => undoable({ type: "settings", patch: { customCats: (state.settings.customCats ?? []).filter((x) => x !== c) } }, `Catégorie « ${c} » retirée de la liste`)}>×</button></span>)}</div>}
             <p className="mb-1.5 mt-3 text-[11px] uppercase tracking-wider text-muted">Ajout rapide</p>
             <div className="flex flex-wrap gap-1.5">{state.settings.quickExpenses.map((q) => (
               <button key={q.label} onClick={() => { const id = uid(); dispatch({ type: "expense/add", expense: { id, date: todayISO(), amount: q.amount, category: q.category, label: q.label, source: "manuel" } }); toast(`${q.label} : ${money(q.amount, cur)}`, "ok", { label: "Annuler", run: () => dispatch({ type: "expense/remove", id }) }); }}
@@ -1549,7 +1578,7 @@ const BudgetView: React.FC = () => {
               toast(day <= Number(todayISO().slice(8)) ? `« ${rec.label.trim()} » ajoutée pour ce mois puis chaque mois` : `« ${rec.label.trim()} » sera ajoutée le ${day} de chaque mois`); setRec({ ...rec, label: "", amount: "" }); }}>
               <Input id="rc-label" aria-label="Libellé" placeholder="Ex. Loyer" className="h-8 text-xs" value={rec.label} onChange={(e) => setRec({ ...rec, label: e.target.value })} />
               <Input id="rc-amount" aria-label="Montant" inputMode="decimal" placeholder="0,00" className="h-8 text-xs" value={rec.amount} onChange={(e) => setRec({ ...rec, amount: e.target.value })} />
-              <Select id="rc-cat" aria-label="Catégorie" className="h-8 text-xs" value={rec.category} onChange={(e) => setRec({ ...rec, category: e.target.value as ExpenseCat })}>{CATS.map((c) => <option key={c} value={c}>{c}</option>)}</Select>
+              <CatSelect id="rc-cat" aria-label="Catégorie" className="h-8 text-xs" value={rec.category} onPick={(c) => setRec({ ...rec, category: c })} />
               <Input id="rc-day" aria-label="Jour du mois" type="number" min={1} max={31} className="h-8 text-xs" value={rec.day} onChange={(e) => setRec({ ...rec, day: e.target.value })} />
               <Btn type="submit" size="sm" className="col-span-2"><Plus size={12} />Ajouter</Btn>
             </form>
@@ -1557,7 +1586,7 @@ const BudgetView: React.FC = () => {
           </Card>
           <Card title="Par catégorie" action={<Btn size="sm" variant="ghost" onClick={() => setEditLimits(!editLimits)}>{editLimits ? "Terminé" : "Plafonds"}</Btn>}>
             <div className="flex flex-col gap-3">
-              {(editLimits ? CATS.map((c) => ({ c, v: exp.filter((e) => e.category === c).reduce((n, e) => n + e.amount, 0), lim: state.budget.limits[c] })) : byCat).map(({ c, v, lim }) => (
+              {(editLimits ? catsOf(state).map((c) => ({ c, v: exp.filter((e) => e.category === c).reduce((n, e) => n + e.amount, 0), lim: state.budget.limits[c] })) : byCat).map(({ c, v, lim }) => (
                 <div key={c}>
                   <div className="mb-1 flex items-center justify-between gap-2 text-xs"><span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ background: CAT_COLOR[c] }} />{c}</span>
                     {editLimits ? <Input id={`lim-${c}`} aria-label={`Plafond ${c}`} inputMode="decimal" placeholder="aucun" className="h-7 w-24 text-xs" defaultValue={lim ? String(lim) : ""}
@@ -1584,7 +1613,7 @@ const ExpenseEdit: React.FC<{ e: Expense; onDone: () => void }> = ({ e, onDone }
       dispatch({ type: "expense/update", id: e.id, patch: { label: f.label.trim() || f.category, amount, category: f.category, date: f.date } }); toast("Dépense modifiée, statistiques recalculées"); onDone(); }}>
       <Field label="Libellé" htmlFor="ee-label" className="col-span-2"><Input id="ee-label" autoFocus value={f.label} onChange={(x) => setF({ ...f, label: x.target.value })} /></Field>
       <Field label={`Montant (${state.settings.currency})`} htmlFor="ee-amount"><Input id="ee-amount" inputMode="decimal" value={f.amount} onChange={(x) => setF({ ...f, amount: x.target.value })} /></Field>
-      <Field label="Catégorie" htmlFor="ee-cat"><Select id="ee-cat" value={f.category} onChange={(x) => setF({ ...f, category: x.target.value as ExpenseCat })}>{CATS.map((c) => <option key={c} value={c}>{c}</option>)}</Select></Field>
+      <Field label="Catégorie" htmlFor="ee-cat"><CatSelect id="ee-cat" value={f.category} onPick={(c) => setF({ ...f, category: c })} /></Field>
       <Field label="Date" htmlFor="ee-date" className="col-span-2"><Input id="ee-date" type="date" value={f.date} onChange={(x) => setF({ ...f, date: x.target.value })} /></Field>
       {e.recurringId && <p className="col-span-2 text-xs text-muted">Dépense récurrente : la modification ne concerne que ce mois-ci.</p>}
       <div className="col-span-2 flex justify-end gap-2"><Btn type="button" variant="ghost" onClick={onDone}>Annuler</Btn><Btn type="submit" variant="primary"><Check size={14} />Enregistrer</Btn></div>
@@ -1594,6 +1623,17 @@ const ExpenseEdit: React.FC<{ e: Expense; onDone: () => void }> = ({ e, onDone }
 
 // ---------------------------------------------------------------- Module : Ménage
 const EVENT_REC_LABEL: Record<EventRecurrence, string> = { none: "Une seule fois", daily: "Tous les jours", weekly: "Chaque semaine", biweekly: "Toutes les 2 semaines", monthly: "Chaque mois" };
+/** Corvées courantes : un clic préremplit le formulaire (modifiable avant d'ajouter). */
+const CHORE_PRESETS: { name: string; recurrence: Recurrence; day: number; minutes: number }[] = [
+  { name: "Vaisselle", recurrence: "daily", day: 0, minutes: 15 }, { name: "Sortir les poubelles", recurrence: "weekly", day: 1, minutes: 5 },
+  { name: "Aspirateur", recurrence: "weekly", day: 5, minutes: 25 }, { name: "Serpillière", recurrence: "biweekly", day: 5, minutes: 25 },
+  { name: "Salle de bain", recurrence: "weekly", day: 6, minutes: 30 }, { name: "Toilettes", recurrence: "weekly", day: 2, minutes: 10 },
+  { name: "Cuisine (plans de travail)", recurrence: "weekly", day: 3, minutes: 20 }, { name: "Frigo (vider et nettoyer)", recurrence: "biweekly", day: 6, minutes: 20 },
+  { name: "Lessive", recurrence: "weekly", day: 6, minutes: 20 }, { name: "Étendre / plier le linge", recurrence: "weekly", day: 6, minutes: 15 },
+  { name: "Changer les draps", recurrence: "biweekly", day: 0, minutes: 15 }, { name: "Poussière", recurrence: "biweekly", day: 4, minutes: 15 },
+  { name: "Ranger la chambre", recurrence: "weekly", day: 0, minutes: 15 }, { name: "Recyclage / verre", recurrence: "biweekly", day: 4, minutes: 10 },
+  { name: "Arroser les plantes", recurrence: "weekly", day: 2, minutes: 5 }, { name: "Vitres", recurrence: "biweekly", day: 6, minutes: 30 },
+];
 /** Personne d'autre que « Moi » : pas de colocataire et aucune corvée partagée. */
 const isSolo = (s: AppState) => !s.settings.roommates.length && s.chores.every((c) => c.assignees.every((a) => a === "Moi"));
 const REC_LABEL: Record<Recurrence, string> = { daily: "Quotidienne", weekly: "Hebdomadaire", biweekly: "Bimensuelle" };
@@ -1665,6 +1705,14 @@ const Chores: React.FC = () => {
             if (cmode === "slot" && toMin(f.end) <= toMin(f.time)) { toast("L'heure de fin doit suivre l'heure de début.", "bad"); return; }
             const minutes = cmode === "slot" ? toMin(f.end) - toMin(f.time) : f.minutes;
             dispatch({ type: "chore/add", chore: { id: uid(), name: f.name.trim(), recurrence: f.recurrence, day: f.day, minutes, assignees, done: [], ...(cmode === "slot" ? { time: f.time } : {}) } }); setF({ ...f, name: "" }); toast(state.settings.roommates.length ? "Corvée ajoutée à la rotation" : "Corvée ajoutée"); }}>
+            <div className="col-span-2">
+              <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">Suggestions</p>
+              <div className="flex flex-wrap gap-1.5" data-testid="chore-presets">
+                {CHORE_PRESETS.filter((p) => !state.chores.some((c) => norm(c.name) === norm(p.name))).map((p) => (
+                  <button key={p.name} type="button" onClick={() => { setF({ ...f, name: p.name, recurrence: p.recurrence, day: p.day, minutes: p.minutes }); setCmode("duration"); }}
+                    className={cx("rounded-full border px-2.5 py-1 text-[12px] transition", f.name === p.name ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-line bg-sunken hover:border-fg/60")}>{p.name}</button>))}
+              </div>
+            </div>
             <Field label="Corvée" htmlFor="ch-name" className="col-span-2"><Input id="ch-name" placeholder="Ex. Nettoyer la plaque" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
             <Field label="Récurrence" htmlFor="ch-rec"><Select id="ch-rec" value={f.recurrence} onChange={(e) => setF({ ...f, recurrence: e.target.value as Recurrence })}>{(Object.keys(REC_LABEL) as Recurrence[]).map((r) => <option key={r} value={r}>{REC_LABEL[r]}</option>)}</Select></Field>
             <Field label="Jour" htmlFor="ch-day"><Select id="ch-day" value={f.day} disabled={f.recurrence === "daily"} onChange={(e) => setF({ ...f, day: Number(e.target.value) })}>{DAYS_LONG.map((d, i) => <option key={d} value={i}>{d}</option>)}</Select></Field>
@@ -1808,7 +1856,7 @@ const Personalize: React.FC = () => {
             set({ quickExpenses: [...s.quickExpenses, { label: q.label.trim(), amount, category: q.category }] }); setQ({ ...q, label: "", amount: "" }); toast("Raccourci ajouté"); }}>
             <Input aria-label="Nom" placeholder="Ex. Kebab" className="h-8 text-xs" value={q.label} onChange={(e) => setQ({ ...q, label: e.target.value })} />
             <Input aria-label="Montant" inputMode="decimal" placeholder="0,00" className="h-8 text-xs" value={q.amount} onChange={(e) => setQ({ ...q, amount: e.target.value })} />
-            <Select aria-label="Catégorie" className="h-8 text-xs" value={q.category} onChange={(e) => setQ({ ...q, category: e.target.value as ExpenseCat })}>{CATS.map((c) => <option key={c} value={c}>{c}</option>)}</Select>
+            <CatSelect aria-label="Catégorie" className="h-8 text-xs" value={q.category} onPick={(c) => setQ({ ...q, category: c })} />
             <Btn type="submit" size="sm" className="h-8"><Plus size={12} /></Btn>
           </form>
         </div>
