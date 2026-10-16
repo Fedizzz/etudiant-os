@@ -335,3 +335,14 @@ test("sommeil à l'heure : proposition automatique et compteurs", () => {
   const v = C.validateState(JSON.parse(JSON.stringify({ ...base(), sleep: [L("2026-10-15", true, "x" as never)] })));
   assert.ok(v.ok && v.state.sleep[0].bedOk === true && !("wakeOk" in v.state.sleep[0]));
 });
+
+test("tâches et ménage à l'heure : compteurs", () => {
+  const ts = [task({ id: "a", status: "done", deadline: "2026-10-10", doneAt: "2026-10-09" }), task({ id: "b", status: "done", deadline: "2026-10-10", doneAt: "2026-10-12" }),
+    task({ id: "c", deadline: "2026-10-14" }), task({ id: "d", deadline: TODAY }), task({ id: "e", status: "done", deadline: "2026-01-10", doneAt: "2026-01-10" })];
+  assert.deepEqual(C.taskOnTimeStats(ts, TODAY), { ok: 2, late: 2 });
+  assert.deepEqual(C.taskOnTimeStats(ts, TODAY, 30), { ok: 1, late: 2 });
+  // Corvée quotidienne : 1re trace le 12 ; faite 12 et 14, oubliée 13, reportée… rien avant le 12, aujourd'hui pas encore en retard.
+  const c: C.Chore = { id: "c", name: "Vaisselle", recurrence: "daily", day: 0, minutes: 10, assignees: ["Moi"], done: ["2026-10-12", "2026-10-14"], skipped: [] };
+  assert.deepEqual(C.choreOnTimeStats([c], TODAY), { ok: 2, late: 1 });
+  assert.deepEqual(C.choreOnTimeStats([{ ...c, done: [] }], TODAY), { ok: 0, late: 0 }); // aucune trace : rien compté
+});

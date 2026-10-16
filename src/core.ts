@@ -888,3 +888,32 @@ export function onTimeStats(logs: SleepLog[], today: string, days?: number) {
   for (const l of [...ls].sort((a, b) => b.date.localeCompare(a.date))) { if (l.bedOk && l.wakeOk) streak++; else if (l.bedOk === false || l.wakeOk === false) break; }
   return { bed: count("bedOk"), wake: count("wakeOk"), streak };
 }
+
+/** Tâches à l'heure : terminées au plus tard le jour de l'échéance ; en retard : terminées après, ou encore ouvertes après l'échéance. */
+export function taskOnTimeStats(tasks: Task[], today: string, days?: number): OnTimeCount {
+  const inWin = (d: string) => days === undefined || daysBetween(d, today) < days;
+  let ok = 0, late = 0;
+  for (const t of tasks) {
+    if (t.status === "done" && t.doneAt) { if (!inWin(t.doneAt)) continue; if (t.doneAt <= t.deadline) ok++; else late++; }
+    else if (t.status !== "done" && t.deadline < today && inWin(t.deadline)) late++;
+  }
+  return { ok, late };
+}
+/** Corvées (les miennes) : faites le jour prévu = à l'heure ; jour passé sans être faite ni reportée = en retard. Comptées à partir de la première corvée faite/reportée (fenêtre max 1 an). */
+export function choreOnTimeStats(chores: Chore[], today: string, days = 365, me = "Moi"): OnTimeCount {
+  let ok = 0, late = 0;
+  const t0 = parseISO(today);
+  for (const c of chores) {
+    const known = [...c.done, ...(c.skipped ?? [])].sort()[0];
+    for (let i = 0; i < days; i++) {
+      const d = addDays(t0, -i), k = iso(d);
+      if (k < (known ?? today)) break; // avant la première trace : date de création inconnue, rien n'est compté
+      if (!choreScheduledOn(c, d)) continue;
+      const mine = (c.doneBy?.[k] ?? choreAssignee(c, d)) === me;
+      if (!mine) continue;
+      if (c.done.includes(k)) ok++;
+      else if (i > 0 && !(c.skipped ?? []).includes(k)) late++;
+    }
+  }
+  return { ok, late };
+}

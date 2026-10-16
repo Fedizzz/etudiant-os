@@ -4,7 +4,7 @@ import { MiniPdf } from "./pdf.ts";
 import { layoutLanes } from "./core.ts";
 import { DAY_WORDS, dayOf, pageGeometry, parseGrid } from "./timetable.ts";
 import { parseIcs, normalizeFeedUrl, isFeedUrl } from "./ical.ts";
-import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, choreStepsDone, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, onTimeGuess, onTimeStats, pad, parseAmount, parseISO, parseReceipt, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
+import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, choreStepsDone, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, onTimeGuess, onTimeStats, taskOnTimeStats, choreOnTimeStats, pad, parseAmount, parseISO, parseReceipt, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
 import type { Action, Aisle, Chore, AppState, Block, Budget, Course, DayPlan, Expense, ExpenseCat, GroceryTemplate, ID, Phase, PomodoroCfg, Priority, ReceiptResult, Recurrence, EventRecurrence, CalFeed, FeedEvent, SettingsState, SleepLog, Step, Task, TaskKind, TaskStatus, TemplateItem, ViewKey } from "./core.ts";
 import type { AppEnv } from "./env.ts";
 
@@ -622,26 +622,28 @@ const ReceiptScanner: React.FC<{ onResult: (r: ReceiptResult) => void; label?: s
 
 // ---------------------------------------------------------------- Module : Tableau de bord
 type OnTime = ReturnType<typeof onTimeStats>;
+type Count = OnTime["bed"];
+/** Ligne de compteur : ✓ à l'heure / ✗ en retard, barre, et détail 30 jours. */
+const CounterRow: React.FC<{ label: string; target?: string; a: Count; m: Count; lateWord?: string }> = ({ label, target, a, m, lateWord = "en retard" }) => {
+  const n = a.ok + a.late, pct = n ? Math.round((a.ok / n) * 100) : 0;
+  return (
+    <div>
+      <div className="mb-1 flex items-baseline justify-between gap-2 text-[13px]"><span className="font-medium">{label}{target && <span className="font-mono text-[11px] text-muted"> · {target}</span>}</span>
+        <span className="font-mono text-[11px] tabular-nums text-muted">{n ? `${pct} %` : "—"}</span></div>
+      <div className="flex items-center gap-3">
+        <span className="flex items-center gap-1 font-mono text-xl font-semibold tabular-nums text-ok" title="À l'heure"><Check size={15} strokeWidth={3} />{a.ok}</span>
+        <span className="flex items-center gap-1 font-mono text-xl font-semibold tabular-nums text-bad" title={lateWord}><X size={15} strokeWidth={3} />{a.late}</span>
+        <div className="flex h-2 flex-1 overflow-hidden rounded-full bg-sunken">{n > 0 && <><div className="h-full bg-ok" style={{ width: `${pct}%` }} /><div className="h-full bg-bad/70" style={{ width: `${100 - pct}%` }} /></>}</div>
+      </div>
+      <p className="mt-0.5 text-[10px] text-muted">30 derniers jours : {m.ok} à l'heure · {m.late} {lateWord}</p>
+    </div>);
+};
 /** Compteur coucher / réveil à l'heure (tableau de bord et page Sommeil). */
 export const OnTimeCounter: React.FC<{ all: OnTime; d30: OnTime; bedTarget: string; wakeTarget: string }> = ({ all, d30, bedTarget, wakeTarget }) => {
-  const row = (label: string, target: string, a: OnTime["bed"], m: OnTime["bed"]) => {
-    const n = a.ok + a.late, pct = n ? Math.round((a.ok / n) * 100) : 0;
-    return (
-      <div>
-        <div className="mb-1 flex items-baseline justify-between gap-2 text-[13px]"><span className="font-medium">{label} <span className="font-mono text-[11px] text-muted">· {target}</span></span>
-          <span className="font-mono text-[11px] tabular-nums text-muted">{n ? `${pct} %` : "—"}</span></div>
-        <div className="flex items-center gap-3">
-          <span className="flex items-center gap-1 font-mono text-xl font-semibold tabular-nums text-ok" title="À l'heure"><Check size={15} strokeWidth={3} />{a.ok}</span>
-          <span className="flex items-center gap-1 font-mono text-xl font-semibold tabular-nums text-bad" title="Pas à l'heure"><X size={15} strokeWidth={3} />{a.late}</span>
-          <div className="flex h-2 flex-1 overflow-hidden rounded-full bg-sunken">{n > 0 && <><div className="h-full bg-ok" style={{ width: `${pct}%` }} /><div className="h-full bg-bad/70" style={{ width: `${100 - pct}%` }} /></>}</div>
-        </div>
-        <p className="mt-0.5 text-[10px] text-muted">30 derniers jours : {m.ok} à l'heure · {m.late} en retard</p>
-      </div>);
-  };
   return (
     <div className="flex flex-col gap-3" data-testid="ontime">
-      {row("Coucher", bedTarget, all.bed, d30.bed)}
-      {row("Réveil", wakeTarget, all.wake, d30.wake)}
+      <CounterRow label="Coucher" target={bedTarget} a={all.bed} m={d30.bed} />
+      <CounterRow label="Réveil" target={wakeTarget} a={all.wake} m={d30.wake} />
       <p className="text-[11px] text-muted">{all.streak > 0 ? <>🔥 Série : <b className="text-fg">{all.streak} nuit{all.streak > 1 ? "s" : ""}</b> d'affilée à l'heure (coucher et réveil).</> : "Cochez chaque nuit si vous vous êtes couché·e et levé·e à l'heure."}</p>
     </div>
   );
@@ -653,6 +655,7 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
   const cur = state.settings.currency;
   const choreStep = useChoreStep();
   const ot = useMemo(() => ({ all: onTimeStats(state.sleep, today), d30: onTimeStats(state.sleep, today, 30) }), [state.sleep, today]);
+  const tt = useMemo(() => ({ all: taskOnTimeStats(state.tasks, today), d30: taskOnTimeStats(state.tasks, today, 30), call: choreOnTimeStats(state.chores, today), c30: choreOnTimeStats(state.chores, today, 30) }), [state.tasks, state.chores, today]);
   // Toutes les valeurs viennent des mêmes fonctions que les modules (une seule source de vérité).
   const days7 = useMemo(() => planRange(state, today, 7, today), [state, today]);
   const plan = days7[0];
@@ -771,6 +774,13 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
         </Card>
         <Card title={<span className="flex items-center gap-2"><BedDouble size={15} />À l'heure ?</span>} action={<Btn size="sm" variant="ghost" onClick={() => go("sleep")}>Cocher</Btn>}>
           <OnTimeCounter all={ot.all} d30={ot.d30} bedTarget={state.settings.bedDefault} wakeTarget={state.settings.wakeDefault} />
+        </Card>
+        <Card title={<span className="flex items-center gap-2"><ListChecks size={15} />Tâches à l'heure ?</span>} action={<Btn size="sm" variant="ghost" onClick={() => go("academic")}>Tâches</Btn>}>
+          <div className="flex flex-col gap-3" data-testid="task-ontime">
+            <CounterRow label="Tâches" target="avant l'échéance" a={tt.all} m={tt.d30} />
+            {state.chores.length > 0 && <CounterRow label="Ménage" target="le jour prévu" a={tt.call} m={tt.c30} lateWord="oubliées" />}
+            <p className="text-[11px] text-muted">✓ terminée au plus tard le jour de l'échéance · ✗ terminée après, ou encore ouverte et en retard. Ménage : vos corvées faites le jour prévu ; les reportées ne comptent pas.</p>
+          </div>
         </Card>
         <Card title="Charge des 7 prochains jours" action={<Btn size="sm" variant="ghost" onClick={() => go("planning")}>Planning</Btn>}>
           <div className="flex flex-col gap-2.5">
