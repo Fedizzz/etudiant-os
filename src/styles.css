@@ -117,3 +117,5 @@ button:hover > .sketch-icon, button:hover .sketch-icon { transform: rotate(-6deg
   .marker path { stroke-dashoffset: 0 } ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important }
 }
 #boot { display: grid; place-items: center; height: 100%; color: rgb(var(--muted)); font: 600 15px var(--font-display); padding-inline: 16px; text-align: center }
+/* Bande opaque sous la barre d'état (iPhone, écran d'accueil) : le contenu ne défile jamais derrière l'heure / la batterie. */
+.status-cover { position: fixed; top: 0; left: 0; right: 0; height: env(safe-area-inset-top, 0px); background: rgb(var(--bg)); z-index: 60; pointer-events: none; }

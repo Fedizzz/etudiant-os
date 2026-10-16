@@ -96,5 +96,5 @@ function NotConfigured({ go }: { go: Go }) {
 }
 
 // Filtre « crayon » des icônes monté une fois pour toutes les pages (landing, connexion, app, admin).
-createRoot(document.getElementById("root")!).render(<><PencilDefs /><App /></>);
+createRoot(document.getElementById("root")!).render(<><PencilDefs /><div className="status-cover" aria-hidden /><App /></>);
 if ("serviceWorker" in navigator && location.protocol === "https:") window.addEventListener("load", () => { navigator.serviceWorker.register(BASE + "sw.js").catch(() => {}); });
