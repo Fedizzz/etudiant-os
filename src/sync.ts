@@ -204,7 +204,8 @@ export function mergeStates(remote: AppState, local: AppState): { state: AppStat
     state: {
       ...remote, tasks: tasks.list, courses: courses.list, classes: classes.list, groceries: groceries.list, chores: chores.list, sleep: sleep.list, focus: focus.list,
       templates: templates.list, products: products.list, events: events.list,
-      budget: { ...remote.budget, expenses: expenses.list, recurring: recurring.list, limits: { ...local.budget.limits, ...remote.budget.limits } },
+      budget: { ...remote.budget, expenses: expenses.list, recurring: recurring.list,
+        incomes: byKey(remote.budget.incomes ?? [], local.budget.incomes ?? [], id).list, savings: byKey(remote.budget.savings ?? [], local.budget.savings ?? [], id).list, limits: { ...local.budget.limits, ...remote.budget.limits } },
     },
     added: { tasks: tasks.added, courses: courses.added, classes: classes.added, expenses: expenses.added, recurring: recurring.added, groceries: groceries.added, chores: chores.added, sleep: sleep.added, focus: focus.added, templates: templates.added, products: products.added, events: events.added },
   };

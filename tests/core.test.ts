@@ -292,3 +292,17 @@ test("cours simultanés : côte à côte (colonnes), sans alerte de chevauchemen
   s.settings.unavailable = [{ id: "u", day: 0, start: "12:00", end: "14:00", label: "Job" }];
   assert.ok(planDay(s, "2026-10-19", undefined, "2026-10-19").conflicts.length > 0);
 });
+
+test("budget : revenus du mois et épargne pris en compte dans le restant", async () => {
+  const { budgetStats, validateState, blank } = await import("../src/core.ts");
+  const b = { monthly: 600, limits: { Courses: 100 }, expenses: [{ id: "e", date: "2026-10-05", amount: 150, category: "Courses", label: "" }], recurring: [],
+    incomes: [{ id: "i", date: "2026-10-01", amount: 450, source: "Job / paye", label: "" }, { id: "j", date: "2026-09-30", amount: 999, source: "Autre", label: "" }],
+    savings: [{ id: "s", date: "2026-10-02", amount: 90, label: "" }, { id: "t", date: "2026-10-20", amount: -20, label: "" }, { id: "u", date: "2026-09-01", amount: 100, label: "" }] };
+  const s = budgetStats(b, "2026-10", "2026-10-16", ["Courses"]);
+  assert.equal(s.income, 450); assert.equal(s.saved, 70); assert.equal(s.savingsTotal, 170);
+  assert.equal(s.remaining, 600 + 450 - 150 - 70);
+  assert.deepEqual(s.overCats, ["Courses"]);
+  const st = blank({ name: "T" }, 600); st.budget = { ...st.budget, ...b, savingsGoal: { name: "Vacances", target: 500 } } as never;
+  const v = validateState(JSON.parse(JSON.stringify({ ...st, budget: { ...st.budget, incomes: [...b.incomes, { id: "x", date: "bad", amount: 5 }] } })));
+  assert.ok(v.ok); if (v.ok) { assert.equal(v.state.budget.incomes!.length, 2); assert.equal(v.state.budget.savings!.length, 3); assert.equal(v.state.budget.savingsGoal!.target, 500); }
+});

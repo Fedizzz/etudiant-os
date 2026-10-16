@@ -30,7 +30,14 @@ export interface GroceryItem { id: ID; name: string; aisle: Aisle; qty: string; 
 export interface Expense { id: ID; date: string; amount: number; category: ExpenseCat; label: string; source?: "manuel" | "courses" | "recurrente" | "ticket"; recurringId?: ID; items?: string[] }
 /** Dépense récurrente mensuelle (loyer, abonnement…) : ajoutée une seule fois par mois, au jour indiqué. */
 export interface RecurringExpense { id: ID; label: string; amount: number; category: ExpenseCat; day: number; active: boolean; since: string; skipMonths?: string[] }
-export interface Budget { monthly: number; limits: Partial<Record<ExpenseCat, number>>; expenses: Expense[]; recurring: RecurringExpense[] }
+/** Argent reçu (paye, bourse, famille, ami…). */
+export interface Income { id: ID; date: string; amount: number; source: string; label: string }
+/** Mouvement d'épargne : montant > 0 = mis de côté, < 0 = retiré de l'épargne. */
+export interface SavingMove { id: ID; date: string; amount: number; label: string }
+export interface Budget {
+  monthly: number; limits: Partial<Record<ExpenseCat, number>>; expenses: Expense[]; recurring: RecurringExpense[];
+  incomes?: Income[]; savings?: SavingMove[]; savingsGoal?: { name: string; target: number } | null;
+}
 /** done : dates faites · doneBy : qui l'a faite ce jour-là · skipped : dates reportées. */
 export interface Chore { id: ID; name: string; recurrence: Recurrence; day: number; minutes: number; assignees: string[]; done: string[]; doneBy?: Record<string, string>; skipped?: string[]; /** Heure fixe « HH:MM » (sinon placée automatiquement dans un créneau libre). */ time?: string }
 /** Calendrier externe abonné (lien .ics Celcat, iCloud, Google…). */
@@ -214,6 +221,7 @@ export type Action =
   | { type: "feed/add"; feed: CalFeed } | { type: "feed/remove"; id: ID } | { type: "feed/update"; id: ID; patch: Partial<CalFeed> }
   | { type: "feed/synced"; id: ID; events: FeedEvent[]; at: string }
   | { type: "event/update"; id: ID; patch: Partial<PlanEvent> }
+  | { type: "income/add"; income: Income } | { type: "income/remove"; id: ID } | { type: "saving/add"; move: SavingMove } | { type: "saving/remove"; id: ID }
   | { type: "event/add"; event: PlanEvent } | { type: "event/remove"; id: ID } | { type: "event/skip"; id: ID; date: string }
   | { type: "timer/start"; now: number } | { type: "timer/pause"; now: number } | { type: "timer/reset" }
   | { type: "timer/phase"; phase: Phase } | { type: "timer/task"; taskId: ID | null } | { type: "timer/course"; courseId: ID | null }
@@ -283,6 +291,10 @@ export function reducer(s: AppState, a: Action): AppState {
       if (!(s.settings.feeds ?? []).some((f) => f.id === a.id)) return s; // flux supprimé entre-temps
       return { ...s, feedEvents: [...(s.feedEvents ?? []).filter((e) => e.feedId !== a.id), ...a.events],
         settings: { ...s.settings, feeds: (s.settings.feeds ?? []).map((f) => (f.id === a.id ? { ...f, lastSync: a.at, lastError: null, count: a.events.length } : f)) } };
+    case "income/add": return { ...s, budget: { ...s.budget, incomes: [...(s.budget.incomes ?? []), a.income] } };
+    case "income/remove": return { ...s, budget: { ...s.budget, incomes: (s.budget.incomes ?? []).filter((x) => x.id !== a.id) } };
+    case "saving/add": return { ...s, budget: { ...s.budget, savings: [...(s.budget.savings ?? []), a.move] } };
+    case "saving/remove": return { ...s, budget: { ...s.budget, savings: (s.budget.savings ?? []).filter((x) => x.id !== a.id) } };
     case "event/update": return { ...s, events: (s.events ?? []).map((e) => (e.id === a.id ? { ...e, ...a.patch } : e)) };
     case "event/add": return { ...s, events: [...(s.events ?? []), a.event] };
     case "event/remove": return { ...s, events: (s.events ?? []).filter((e) => e.id !== a.id) };
@@ -414,6 +426,9 @@ export function validateState(x: unknown): { ok: true; state: AppState; repaired
       monthly: isNum(b.monthly) && b.monthly >= 0 ? b.monthly : 600, limits: b.limits && typeof b.limits === "object" ? b.limits : {},
       expenses: keep<Expense>("dépenses", Array.isArray(b.expenses) ? b.expenses : [], (e) => isStr(e.id) && isDate(e.date) && isNum(e.amount)),
       recurring: keep<RecurringExpense>("dépenses récurrentes", Array.isArray(b.recurring) ? b.recurring : [], (r) => isStr(r.id) && isNum(r.amount) && isNum(r.day)),
+      incomes: keep<Income>("revenus", Array.isArray(b.incomes) ? b.incomes : [], (x) => isStr(x.id) && isDate(x.date) && isNum(x.amount) && x.amount > 0).map((x) => ({ ...x, source: isStr(x.source) ? x.source : "Autre", label: isStr(x.label) ? x.label : "" })),
+      savings: keep<SavingMove>("épargne", Array.isArray(b.savings) ? b.savings : [], (x) => isStr(x.id) && isDate(x.date) && isNum(x.amount) && x.amount !== 0).map((x) => ({ ...x, label: isStr(x.label) ? x.label : "" })),
+      savingsGoal: b.savingsGoal && isStr(b.savingsGoal.name) && isNum(b.savingsGoal.target) && b.savingsGoal.target > 0 ? { name: b.savingsGoal.name.slice(0, 40), target: b.savingsGoal.target } : null,
     },
     settings,
     templates: Array.isArray(p.templates) ? keep<GroceryTemplate>("listes", p.templates, (t) => isStr(t.name) && Array.isArray(t.items)) : [],
@@ -575,7 +590,7 @@ export function applyRecurring(s: AppState, today: string): AppState {
   return add.length ? { ...s, budget: { ...s.budget, expenses: [...s.budget.expenses, ...add] } } : s;
 }
 export interface BudgetStats {
-  spent: number; remaining: number; daily: number[]; byCat: { cat: ExpenseCat; spent: number; limit?: number; over: boolean }[];
+  spent: number; remaining: number; income: number; saved: number; savingsTotal: number; daily: number[]; byCat: { cat: ExpenseCat; spent: number; limit?: number; over: boolean }[];
   recurringPlanned: number; recurringPaid: number; variable: number; projection: number | null; perDayLeft: number | null; elapsed: number; dim: number; overCats: ExpenseCat[];
 }
 /**
@@ -593,8 +608,12 @@ export function budgetStats(b: Budget, month: string, today: string, cats: Expen
   const variable = spent - recurringPaid;
   const projection = !elapsed ? null : isPast ? spent : Math.max(recurringPlanned, recurringPaid) + (variable / elapsed) * dim;
   const byCat = cats.map((cat) => { const v = exp.filter((e) => e.category === cat).reduce((n, e) => n + e.amount, 0); const limit = b.limits[cat]; return { cat, spent: v, limit, over: !!limit && v > limit }; });
-  const remaining = b.monthly - spent;
-  return {
+  // Revenus du mois (paye, bourse…) et épargne : le reste disponible = budget + revenus − dépenses − mis de côté.
+  const income = (b.incomes ?? []).filter((x) => monthKey(x.date) === month).reduce((n, x) => n + x.amount, 0);
+  const saved = (b.savings ?? []).filter((x) => monthKey(x.date) === month).reduce((n, x) => n + x.amount, 0);
+  const savingsTotal = (b.savings ?? []).filter((x) => monthKey(x.date) <= month).reduce((n, x) => n + x.amount, 0);
+  const remaining = b.monthly + income - spent - saved;
+  return { income, saved, savingsTotal,
     spent, remaining, daily: Array.from({ length: dim }, (_, i) => exp.filter((e) => Number(e.date.slice(8, 10)) === i + 1).reduce((n, e) => n + e.amount, 0)),
     byCat, recurringPlanned, recurringPaid, variable, projection, elapsed, dim,
     perDayLeft: isCur ? (remaining - Math.max(0, recurringPlanned - recurringPaid)) / (dim - elapsed + 1) : null,

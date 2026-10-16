@@ -1837,7 +1837,7 @@ const BudgetView: React.FC = () => {
       {isCurrent && remaining >= 0 && projection !== null && projection > state.budget.monthly && <div className="flex items-center gap-2 rounded-2xl border border-warn/40 bg-warn/10 px-4 py-3 text-sm text-warn"><AlertTriangle size={16} />Au rythme actuel, le budget serait dépassé d'environ {money(projection - state.budget.monthly, cur)} en fin de mois.</div>}
       <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2 xl:grid-cols-4">
         <Stat label="Dépensé" value={money(spent, cur)} sub={`${Math.round((spent / Math.max(1, state.budget.monthly)) * 100)} % du budget`} />
-        <Stat label="Restant" value={money(remaining, cur)} sub={perDayLeft !== null ? `${money(Math.max(0, perDayLeft), cur)} / jour d'ici la fin du mois${bs.recurringPlanned > bs.recurringPaid ? " (récurrentes à venir déduites)" : ""}` : undefined} tone={remaining < 0 ? "bad" : "ok"} />
+        <Stat label="Restant" value={money(remaining, cur)} sub={bs.income || bs.saved ? `budget ${money(state.budget.monthly, cur)}${bs.income ? ` + reçu ${money(bs.income, cur)}` : ""}${bs.saved ? ` − épargné ${money(bs.saved, cur)}` : ""}` : perDayLeft !== null ? `${money(Math.max(0, perDayLeft), cur)} / jour d'ici la fin du mois${bs.recurringPlanned > bs.recurringPaid ? " (récurrentes à venir déduites)" : ""}` : undefined} tone={remaining < 0 ? "bad" : "ok"} />
         <Stat label={elapsed && elapsed < dim ? "Projection fin de mois" : "Total du mois"} value={projection === null ? "—" : money(projection, cur)} sub={projection === null ? "mois à venir" : elapsed < dim ? `récurrentes ${money(bs.recurringPlanned, cur)} + variables au rythme actuel` : "mois terminé"} tone={tone === "ok" ? undefined : tone} />
         <Stat label="Dépenses" value={String(exp.length)} sub={exp.length ? `moyenne ${money(spent / exp.length, cur)}` : "aucune ce mois"} />
       </div>
@@ -1863,6 +1863,7 @@ const BudgetView: React.FC = () => {
           </Card>
         </div>
         <div className="flex min-w-0 flex-col gap-4">
+          <MoneyIn mk={mk} cur={cur} />
           <Card title="Nouvelle dépense">
             <ReceiptScanner className="mb-3 w-full" onResult={(r) => setF({ ...f, amount: r.amount ? r.amount.toFixed(2).replace(".", ",") : f.amount, date: r.date && r.date <= today ? r.date : f.date, label: r.store || "Ticket de caisse", category: "Courses", source: "ticket" })} />
             <form onSubmit={add} className="grid grid-cols-2 gap-2">
@@ -1902,7 +1903,8 @@ const BudgetView: React.FC = () => {
             </form>
             <p className="mt-2 text-[11px] text-muted">Une récurrente déjà payée ce mois n'est jamais ajoutée deux fois. Supprimer la ligne générée ne la recrée pas avant le mois suivant.</p>
           </Card>
-          <Card title="Par catégorie" action={<Btn size="sm" variant="ghost" onClick={() => setEditLimits(!editLimits)}>{editLimits ? "Terminé" : "Plafonds"}</Btn>}>
+          <Card title="Par catégorie" action={<Btn size="sm" variant={editLimits ? "primary" : "soft"} onClick={() => setEditLimits(!editLimits)} data-testid="limits-btn">{editLimits ? <><Check size={13} />Terminé</> : "Plafonds par mois"}</Btn>}>
+            {editLimits && <p className="mb-3 text-[11px] text-muted">Plafond mensuel par catégorie (vide = aucun). Une alerte s'affiche quand il est dépassé.</p>}
             <div className="flex flex-col gap-3">
               {(editLimits ? catsOf(state).map((c) => ({ c, v: exp.filter((e) => e.category === c).reduce((n, e) => n + e.amount, 0), lim: state.budget.limits[c] })) : byCat).map(({ c, v, lim }) => (
                 <div key={c}>
@@ -1912,7 +1914,7 @@ const BudgetView: React.FC = () => {
                       : <span className={cx("font-mono tabular-nums", lim && v > lim ? "text-bad" : "text-muted")}>{money(v, cur)}{lim ? ` / ${money(lim, cur)}` : ""}</span>}</div>
                   <div className="h-1.5 rounded-full bg-sunken"><div className="h-full rounded-full" style={{ width: `${Math.min(100, (v / (lim || Math.max(spent, 1))) * 100)}%`, background: lim && v > lim ? "rgb(var(--bad))" : CAT_COLOR[c] }} /></div>
                 </div>))}
-              {!editLimits && !byCat.length && <p className="text-xs text-muted">Les catégories apparaîtront avec vos premières dépenses.</p>}
+              {!editLimits && !byCat.length && <div className="text-xs text-muted"><p>Aucune dépense ni plafond ce mois-ci.</p><button className="mt-1 font-semibold text-accent underline" onClick={() => setEditLimits(true)}>Fixer des plafonds par catégorie</button></div>}
             </div>
           </Card>
         </div>
@@ -1921,6 +1923,85 @@ const BudgetView: React.FC = () => {
     </div>
   );
 };
+// ---------------------------------------------------------------- Revenus & épargne
+const INCOME_SOURCES = ["Job / paye", "Bourse", "Aides (CAF, APL…)", "Famille", "Ami(e)", "Vente", "Remboursement", "Autre"];
+const MoneyIn: React.FC<{ mk: string; cur: string }> = ({ mk, cur }) => {
+  const { state, dispatch, toast, undoable } = useStore();
+  const today = todayISO();
+  const [tab, setTab] = useState<"income" | "saving">("income");
+  const [inc, setInc] = useState({ amount: "", source: INCOME_SOURCES[0], label: "", date: today });
+  const [sav, setSav] = useState({ amount: "", dir: "in" as "in" | "out", label: "" });
+  const [goal, setGoal] = useState<{ name: string; target: string } | null>(null);
+  const incomes = (state.budget.incomes ?? []).filter((x) => monthKey(x.date) === mk).sort((a, b) => b.date.localeCompare(a.date));
+  const moves = (state.budget.savings ?? []).filter((x) => monthKey(x.date) === mk).sort((a, b) => b.date.localeCompare(a.date));
+  const total = (state.budget.savings ?? []).reduce((n, x) => n + x.amount, 0);
+  const g = state.budget.savingsGoal;
+  const lastPay = incomes[0];
+  const addIncome = (e: React.FormEvent) => {
+    e.preventDefault(); const amount = parseAmount(inc.amount);
+    if (!(amount > 0) || amount > 1_000_000) { toast("Saisissez un montant positif, par exemple 450.", "bad"); return; }
+    dispatch({ type: "income/add", income: { id: uid(), date: inc.date || today, amount, source: inc.source, label: inc.label.trim() } });
+    toast(`+${money(amount, cur)} (${inc.source}) ajoutés à votre budget du mois`); setInc({ ...inc, amount: "", label: "" });
+  };
+  const addSaving = (amount: number, label: string) => {
+    if (!(amount > 0)) { toast("Saisissez un montant positif.", "bad"); return; }
+    if (sav.dir === "out" && amount > total) { toast(`Votre épargne n'est que de ${money(total, cur)}.`, "bad"); return; }
+    dispatch({ type: "saving/add", move: { id: uid(), date: today, amount: sav.dir === "out" ? -amount : amount, label } });
+    toast(sav.dir === "out" ? `${money(amount, cur)} retirés de l'épargne (ajoutés au budget du mois)` : `${money(amount, cur)} mis de côté`);
+    setSav({ ...sav, amount: "", label: "" });
+  };
+  return (
+    <Card title={<span className="flex items-center gap-2"><TrendingUp size={15} />Revenus & épargne</span>}>
+      <div role="tablist" className="mb-3 grid grid-cols-2 gap-1 rounded-xl bg-sunken p-1 text-[12.5px] font-semibold">
+        {([["income", "Argent reçu"], ["saving", "Épargne"]] as const).map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)} className={cx("rounded-lg py-1.5", tab === k ? "bg-panel text-fg shadow-sm" : "text-muted")}>{l}</button>)}
+      </div>
+      {tab === "income" ? <>
+        <form onSubmit={addIncome} className="grid grid-cols-2 gap-2" data-testid="income-form">
+          <Field label="Montant" htmlFor="in-amount"><Input id="in-amount" inputMode="decimal" placeholder={`ex. 450 ${cur}`} value={inc.amount} onChange={(e) => setInc({ ...inc, amount: e.target.value })} /></Field>
+          <Field label="Provenance" htmlFor="in-src"><Select id="in-src" value={inc.source} onChange={(e) => setInc({ ...inc, source: e.target.value })}>{INCOME_SOURCES.map((x) => <option key={x}>{x}</option>)}</Select></Field>
+          <Field label="Détail (facultatif)" htmlFor="in-label"><Input id="in-label" placeholder="Paye de septembre" value={inc.label} onChange={(e) => setInc({ ...inc, label: e.target.value })} /></Field>
+          <Field label="Date" htmlFor="in-date"><Input id="in-date" type="date" value={inc.date} onChange={(e) => setInc({ ...inc, date: e.target.value })} /></Field>
+          <Btn type="submit" variant="primary" className="col-span-2"><Plus size={14} />Ajouter l'entrée d'argent</Btn>
+        </form>
+        <p className="mt-2 text-[11px] text-muted">Chaque entrée s'ajoute au budget du mois : le « Restant » augmente d'autant.</p>
+        {incomes.length > 0 && <ul className="mt-3 flex flex-col divide-y divide-line text-[13px]">{incomes.map((x) => (
+          <li key={x.id} className="group flex items-center gap-2 py-1.5"><span className="font-mono text-ok">+{money(x.amount, cur)}</span><span className="min-w-0 flex-1 truncate">{x.source}{x.label ? ` · ${x.label}` : ""}</span><span className="text-[11px] text-muted">{fmtDate(x.date)}</span>
+            <button className="text-muted opacity-60 hover:text-bad group-hover:opacity-100" aria-label="Supprimer l'entrée" onClick={() => undoable({ type: "income/remove", id: x.id }, "Entrée d'argent supprimée")}><Trash2 size={12} /></button></li>))}</ul>}
+      </> : <>
+        <div className="mb-3 rounded-xl border-2 border-line p-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-muted">Épargne totale</p>
+          <p className="font-display text-2xl font-extrabold text-ok" data-testid="savings-total">{money(total, cur)}</p>
+          {g ? <>
+            <div className="mt-2 flex items-center justify-between text-xs"><span>Objectif : <b>{g.name}</b></span><span className="font-mono">{money(total, cur)} / {money(g.target, cur)}</span></div>
+            <div className="mt-1 h-2 rounded-full bg-sunken"><div className="h-full rounded-full bg-ok transition-all" style={{ width: `${Math.min(100, (total / g.target) * 100)}%` }} /></div>
+            <p className="mt-1 text-[11px] text-muted">{total >= g.target ? "Objectif atteint, bravo !" : `Encore ${money(g.target - total, cur)}`} · <button className="underline" onClick={() => setGoal({ name: g.name, target: String(g.target) })}>modifier</button></p>
+          </> : <button className="mt-1 text-xs font-semibold text-accent underline" onClick={() => setGoal({ name: "", target: "" })}>Fixer un objectif d'épargne</button>}
+          {goal && <form className="mt-2 grid grid-cols-2 gap-2" onSubmit={(e) => { e.preventDefault(); const t = parseAmount(goal.target); if (!(t > 0)) { toast("Montant d'objectif invalide.", "bad"); return; }
+            dispatch({ type: "budget/set", patch: { savingsGoal: { name: goal.name.trim() || "Mon objectif", target: t } } }); setGoal(null); toast("Objectif d'épargne enregistré"); }}>
+            <Input aria-label="Nom de l'objectif" placeholder="Vacances, permis…" value={goal.name} onChange={(e) => setGoal({ ...goal, name: e.target.value })} />
+            <Input aria-label="Montant visé" inputMode="decimal" placeholder={`Montant (${cur})`} value={goal.target} onChange={(e) => setGoal({ ...goal, target: e.target.value })} />
+            <div className="col-span-2 flex justify-end gap-2">{g && <Btn type="button" size="sm" variant="ghost" onClick={() => { dispatch({ type: "budget/set", patch: { savingsGoal: null } }); setGoal(null); }}>Retirer l'objectif</Btn>}<Btn type="submit" size="sm">Enregistrer</Btn></div>
+          </form>}
+        </div>
+        <form onSubmit={(e) => { e.preventDefault(); addSaving(parseAmount(sav.amount), sav.label.trim() || (sav.dir === "in" ? "Mis de côté" : "Retrait")); }} className="grid grid-cols-2 gap-2" data-testid="saving-form">
+          <div className="col-span-2 grid grid-cols-2 gap-1 rounded-xl bg-sunken p-1 text-[12px] font-semibold">
+            {([["in", "Mettre de côté"], ["out", "Retirer"]] as const).map(([k, l]) => <button key={k} type="button" aria-pressed={sav.dir === k} onClick={() => setSav({ ...sav, dir: k })} className={cx("rounded-lg py-1", sav.dir === k ? "bg-panel text-fg shadow-sm" : "text-muted")}>{l}</button>)}
+          </div>
+          <Field label="Montant" htmlFor="sv-amount"><Input id="sv-amount" inputMode="decimal" placeholder={`ex. 50 ${cur}`} value={sav.amount} onChange={(e) => setSav({ ...sav, amount: e.target.value })} /></Field>
+          <Field label="Note (facultatif)" htmlFor="sv-label"><Input id="sv-label" placeholder="Sur ma paye" value={sav.label} onChange={(e) => setSav({ ...sav, label: e.target.value })} /></Field>
+          <Btn type="submit" variant="primary" className="col-span-2">{sav.dir === "in" ? "Épargner" : "Retirer de l'épargne"}</Btn>
+        </form>
+        {lastPay && sav.dir === "in" && <div className="mt-2 flex flex-wrap gap-1.5">{[10, 20, 30].map((p) => (
+          <button key={p} className="rounded-full border border-line bg-sunken px-2.5 py-1 text-[12px] hover:border-fg/60" onClick={() => addSaving(Math.round(lastPay.amount * p) / 100, `${p} % de « ${lastPay.label || lastPay.source} »`)}>Épargner {p} % ({money(Math.round(lastPay.amount * p) / 100, cur)})</button>))}</div>}
+        <p className="mt-2 text-[11px] text-muted">L'argent mis de côté est retiré du « Restant » du mois ; un retrait l'y ajoute.</p>
+        {moves.length > 0 && <ul className="mt-3 flex flex-col divide-y divide-line text-[13px]">{moves.map((x) => (
+          <li key={x.id} className="group flex items-center gap-2 py-1.5"><span className={cx("font-mono", x.amount > 0 ? "text-ok" : "text-warn")}>{x.amount > 0 ? "+" : "−"}{money(Math.abs(x.amount), cur)}</span><span className="min-w-0 flex-1 truncate">{x.label}</span><span className="text-[11px] text-muted">{fmtDate(x.date)}</span>
+            <button className="text-muted opacity-60 hover:text-bad group-hover:opacity-100" aria-label="Supprimer le mouvement" onClick={() => undoable({ type: "saving/remove", id: x.id }, "Mouvement d'épargne supprimé")}><Trash2 size={12} /></button></li>))}</ul>}
+      </>}
+    </Card>
+  );
+};
+
 const ExpenseEdit: React.FC<{ e: Expense; onDone: () => void }> = ({ e, onDone }) => {
   const { dispatch, toast, state } = useStore();
   const [f, setF] = useState({ label: e.label, amount: String(e.amount).replace(".", ","), category: e.category, date: e.date });
