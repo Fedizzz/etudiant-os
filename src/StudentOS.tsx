@@ -33,6 +33,20 @@ function sketch(name: string, strokes: Stroke[]): React.FC<IconProps> {
   Icon.displayName = name;
   return Icon;
 }
+/** En-tête fixe (position: fixed, fiable sur Safari iOS) + hauteur mesurée pour réserver la place dans la page. */
+export function useFixedHeader(): [(el: HTMLElement | null) => void, number] {
+  const [h, setH] = useState(64);
+  const ro = useRef<ResizeObserver | null>(null);
+  // Ref « callback » : fonctionne même si l'en-tête apparaît après le premier rendu (onboarding, chargement…).
+  const ref = useCallback((el: HTMLElement | null) => {
+    ro.current?.disconnect(); ro.current = null;
+    if (!el) return;
+    setH(el.offsetHeight);
+    ro.current = new ResizeObserver(() => setH(el.offsetHeight)); ro.current.observe(el);
+  }, []);
+  useEffect(() => () => ro.current?.disconnect(), []);
+  return [ref, h];
+}
 /** Filtre global de tremblé crayon, monté une fois à la racine. */
 export const PencilDefs: React.FC = () => (
   <svg width="0" height="0" style={{ position: "absolute" }} aria-hidden>
@@ -2055,6 +2069,7 @@ export default function StudentOS({ state, dispatch, env, view, onView, notice, 
   const hour = new Date().getHours();
   const greet = hour < 6 ? "Bonne nuit" : hour < 18 ? "Bonjour" : "Bonsoir";
   const current = NAV.find((n) => n.key === view)!;
+  const [headerRef, headerH] = useFixedHeader();
   const navItems = NAV.filter((n) => !state.settings.hiddenViews.includes(n.key));
 
   if (!state.settings.onboarded && !override) return (
@@ -2084,7 +2099,8 @@ export default function StudentOS({ state, dispatch, env, view, onView, notice, 
           </div>
         </aside>
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="relative z-20 border-b-2 border-dashed border-line bg-bg/80 md:sticky md:top-0 md:backdrop-blur-md" style={{ top: "env(safe-area-inset-top, 0px)" }}>
+          <div aria-hidden className="md:hidden" style={{ height: headerH }} />
+          <header ref={headerRef} className="fixed inset-x-0 top-0 z-30 border-b-2 border-dashed border-line bg-bg/85 backdrop-blur-md md:sticky md:inset-x-auto md:z-20" style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
             <div className="mx-auto flex max-w-6xl 2xl:max-w-[1560px] min-[2200px]:max-w-[1880px] items-center gap-3 py-3 px-4 sm:px-6">
               <div className="min-w-0 flex-1"><p className="truncate text-xs text-muted">{greet} {state.settings.name}<span className="hidden min-[400px]:inline"> · {new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}</span></p>
                 <h1 className="truncate pb-0.5 font-display text-[19px] min-[400px]:text-[21px] sm:text-[26px] font-extrabold leading-tight tracking-tight"><span key={override?.key ?? view} className="marker">{override?.title ?? current.label}<svg viewBox="0 0 200 20" preserveAspectRatio="none" aria-hidden><path d="M2 12 C 40 6, 80 16, 120 9 S 180 6, 198 11" /></svg></span></h1></div>

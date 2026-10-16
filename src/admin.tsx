@@ -4,7 +4,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import { cx } from "./core.ts";
-import { Card, Btn, Select, Pill, Empty, Modal, Stat, inputCls, LayoutDashboard, Users, FileText, Database, ChevronLeft, ChevronRight, AlertTriangle, Search, Sun, Moon } from "./StudentOS.tsx";
+import { useFixedHeader, Card, Btn, Select, Pill, Empty, Modal, Stat, inputCls, LayoutDashboard, Users, FileText, Database, ChevronLeft, ChevronRight, AlertTriangle, Search, Sun, Moon } from "./StudentOS.tsx";
 import { Thread, TextArea, AttachPicker, Banner, StatusPill, Labeled, useNotifications } from "./support.tsx";
 import {
   admin, myRole, logAdminDenied, isMine, getMessages, postMessage, uploadAttachment, markTicketRead, watchNotifications, unreadNotifications, supportError,
@@ -49,6 +49,7 @@ export function AdminApp({ sb, session, section, id, nav }: { sb: SupabaseClient
 // ------------------------------------------------------------- Cadre
 function AdminShell({ sb, session, section, id, nav }: { sb: SupabaseClient; session: Session; section: AdminSection; id?: string; nav: Nav }) {
   const notif = useNotifications(sb, session.user.id, watchNotifications, unreadNotifications);
+  const [headerRef, headerH] = useFixedHeader();
   // Thème : celui de l'application (data-theme), basculable ici pour la session seulement.
   const [dark, setDark] = useState(() => { const t = document.documentElement.dataset.theme; return t ? t === "dark" : matchMedia("(prefers-color-scheme: dark)").matches; });
   const toggleTheme = () => { const d = !dark; setDark(d); document.documentElement.dataset.theme = d ? "dark" : "light"; };
@@ -73,7 +74,8 @@ function AdminShell({ sb, session, section, id, nav }: { sb: SupabaseClient; ses
         </div>
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="relative z-20 border-b-2 border-dashed border-line bg-bg/85 md:sticky md:top-0 md:backdrop-blur-md">
+        <div aria-hidden className="md:hidden" style={{ height: headerH }} />
+        <header ref={headerRef} className="fixed inset-x-0 top-0 z-30 border-b-2 border-dashed border-line bg-bg/85 backdrop-blur-md md:sticky md:inset-x-auto md:z-20" style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
           <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3 sm:px-6">
             <div className="min-w-0 flex-1"><p className="text-xs text-muted">Espace administrateur</p><h1 className="truncate font-display text-[21px] font-extrabold tracking-tight sm:text-[26px]">{title}</h1></div>
             <Btn variant="ghost" size="sm" onClick={toggleTheme} aria-label="Changer de thème">{dark ? <Sun size={15} /> : <Moon size={15} />}</Btn>
