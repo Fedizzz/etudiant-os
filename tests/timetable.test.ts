@@ -55,3 +55,13 @@ test("cours limités à certaines périodes : présents seulement ces jours-là 
   assert.equal(planDay(s, "2026-10-12", undefined, "2026-10-01").blocks.some((b) => b.kind === "class"), false);
   assert.equal(planDay(s, "2026-11-16", undefined, "2026-10-01").blocks.some((b) => b.kind === "class"), true);
 });
+
+test("séances alternées : la date précise (labo) l'emporte sur la période large (théorie)", async () => {
+  const { resolveOverlaps } = await import("../src/timetable.ts");
+  const r = resolveOverlaps([
+    { day: 2, start: "10:45", end: "12:15", title: "Bio", room: "2.0.C15", ranges: [["2026-10-21", "2026-11-18"]] },
+    { day: 2, start: "10:45", end: "12:15", title: "Bio (Labo)", room: "LAB", ranges: [["2026-11-11", "2026-11-11"]] },
+  ]);
+  assert.deepEqual(r[0].ranges, [["2026-10-21", "2026-11-10"], ["2026-11-12", "2026-11-18"]]);
+  assert.deepEqual(r[1].ranges, [["2026-11-11", "2026-11-11"]]);
+});

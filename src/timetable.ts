@@ -130,15 +130,44 @@ export function parseGrid(items: TItem[], rects: TRect[], today = new Date().toI
       .replace(/\s+\d+º.*$/, "")
       .replace(/\s+/g, " ").replace(/[\s,;:·-]+$/, "").trim();
     if (!title) title = ls[0] ?? "Cours";
-    // Plusieurs lignes « Aula X: dates » (salles différentes selon les semaines) : salles et périodes réunies.
-    const roomLines = ls.slice(Math.max(0, roomIdx)).filter((l) => /^(aula|salle|room|amphi|sala)\b/i.test(l) || /^\d{1,2}[./ ][a-z]/i.test(l));
-    const rooms = [...new Set(roomLines.filter((l) => /^(aula|salle|room|amphi|sala)\b/i.test(l)).map((l) => l.replace(/^aula\s+/i, "").split(":")[0].replace(/\([^)]*\)/g, "").replace(/\s+/g, " ").trim()).filter(Boolean))];
-    const room = rooms.join(" / ");
-    const ranges = roomIdx >= 0 ? rangesIn(roomLines.map((l) => l.includes(":") ? l.slice(l.indexOf(":") + 1) : l).join(", "), today).sort((x, y) => x[0].localeCompare(y[0])) : [];
-    const lastDate = ranges.length ? ranges.reduce((m, r) => (r[1] > m ? r[1] : m), ranges[0][1]) : undefined;
-    out.push({ day: col.day, start: hhmm(start), end: hhmm(end), title: (kind ? `${title} (${kind})` : title).slice(0, 70), room: room.slice(0, 50), ...(lastDate ? { lastDate, ranges } : {}) });
+    // Chaque ligne « Aula X: dates » (+ lignes de dates qui la suivent) = une série de séances dans CETTE salle.
+    const fullTitle = (kind ? `${title} (${kind})` : title).slice(0, 70);
+    const groups: { room: string; text: string }[] = [];
+    for (const l of roomIdx >= 0 ? ls.slice(roomIdx) : []) {
+      if (/^(aula|salle|room|amphi|sala)\b/i.test(l)) groups.push({ room: l.replace(/^aula\s+/i, "").split(":")[0].replace(/\([^)]*\)/g, "").replace(/\s+/g, " ").trim(), text: l.includes(":") ? l.slice(l.indexOf(":") + 1) : "" });
+      else if (groups.length) groups[groups.length - 1].text += ", " + l;
+    }
+    if (!groups.length) groups.push({ room: "", text: "" });
+    for (const g of groups) {
+      const ranges = rangesIn(g.text, today).sort((x, y) => x[0].localeCompare(y[0]));
+      const lastDate = ranges.length ? ranges.reduce((m, r) => (r[1] > m ? r[1] : m), ranges[0][1]) : undefined;
+      out.push({ day: col.day, start: hhmm(start), end: hhmm(end), title: fullTitle, room: g.room.slice(0, 50), ...(lastDate ? { lastDate, ranges } : {}) });
+    }
   }
-  return out;
+  return resolveOverlaps(out);
+}
+
+const addDaysIso = (d: string, n: number) => { const x = new Date(d + "T12:00:00Z"); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+const spanOf = (r: [string, string]) => (Date.parse(r[1]) - Date.parse(r[0])) / 864e5;
+/**
+ * Même créneau, séances différentes (théorie / labo / TP) : quand une date figure dans une période large
+ * (« 21.oct-18.nov ») ET dans une période plus précise d'une autre case (« 11.nov »), la plus précise l'emporte.
+ */
+export function resolveOverlaps(slots: GridSlot[]): GridSlot[] {
+  for (const a of slots) for (const b of slots) {
+    if (a === b || !a.ranges || !b.ranges || a.day !== b.day || a.start !== b.start || a.end !== b.end) continue;
+    for (const rb of b.ranges) {
+      const next: [string, string][] = [];
+      for (const ra of a.ranges) {
+        if (rb[1] < ra[0] || rb[0] > ra[1] || spanOf(rb) >= spanOf(ra)) { next.push(ra); continue; }
+        if (ra[0] < rb[0]) next.push([ra[0], addDaysIso(rb[0], -1)]);
+        if (rb[1] < ra[1]) next.push([addDaysIso(rb[1], 1), ra[1]]);
+      }
+      a.ranges = next;
+    }
+  }
+  for (const s of slots) if (s.ranges) { if (!s.ranges.length) { delete s.ranges; } else s.lastDate = s.ranges.reduce((m, r) => (r[1] > m ? r[1] : m), s.ranges[0][1]); }
+  return slots;
 }
 
 /* ---- Extraction depuis pdf.js (navigateur ou Node) : texte + rectangles en coordonnées écran. ---- */

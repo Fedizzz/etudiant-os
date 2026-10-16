@@ -664,6 +664,9 @@ const BLOCK_STYLE: Record<Block["kind"], string> = {
   class: "border-l-[3px] bg-sunken", task: "border-l-[3px] bg-accent/8", chore: "border-l-[3px] border-l-warn bg-warn/10", meal: "border-l-[3px] border-l-line bg-transparent text-muted", sleep: "", event: "border-l-[3px] border-l-pink bg-pink/10", busy: "border-l-[3px] border-l-muted bg-sunken/60 text-muted [background-image:repeating-linear-gradient(135deg,transparent_0_6px,rgb(var(--line)/.6)_6px_8px)]",
 };
 // ---------------------------------------------------------------- Import d'emploi du temps PDF
+/** « 9 sept. → 30 sept., 21 oct. → 18 nov., 2 déc. » */
+const shortDate = (d: string) => parseISO(d).toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+const periodsText = (r: [string, string][]) => r.map(([x, y]) => (x === y ? shortDate(x) : `${shortDate(x)} → ${shortDate(y)}`)).join(", ");
 interface Detected { key: string; day: number; start: string; end: string; title: string; room: string; on: boolean; note?: string; dates?: [string, string][] }
 const TIME_RE = /(\d{1,2})\s*[h:]\s*(\d{2})?\s*(?:-|–|—|à|a|>)\s*(\d{1,2})\s*[h:]\s*(\d{2})?/gi;
 const ROOM_RE = /\b((?:salle|amphi(?:théâtre)?|room|labo|bât\.?|bat\.?|td|tp)\s*[\w.-]{1,8}|[a-z]\d{3})\b/i;
@@ -683,8 +686,8 @@ async function extractTimetable(buf: ArrayBuffer): Promise<Detected[]> {
         if (out.some((o) => o.key === key)) continue;
         const over = !!g.lastDate && g.lastDate < today;
         const r = g.ranges ?? [];
-        const span = r.length ? `${fmtDate(r[0][0])} → ${fmtDate(g.lastDate!)}${r.length > 1 ? ` · ${r.length} périodes` : ""}` : "";
-        out.push({ key, day: g.day, start: g.start, end: g.end, title: g.title, room: g.room, on: !over, ...(r.length ? { dates: r, note: over ? `terminé (${span})` : span } : {}) });
+        const span = r.length ? periodsText(r) : "";
+        out.push({ key, day: g.day, start: g.start, end: g.end, title: g.title, room: g.room, on: !over, ...(r.length ? { dates: r, note: over ? `terminé · ${span}` : `semaines : ${span}` } : {}) });
       }
       continue;
     }
@@ -951,7 +954,7 @@ const Planning: React.FC = () => {
           <ul className="mb-3 flex max-h-56 flex-col gap-1 overflow-auto pr-1 text-xs">
             {[...state.classes].sort((a, b) => a.day - b.day || toMin(a.start) - toMin(b.start)).map((c) => { const co = state.courses.find((x) => x.id === c.courseId); return (
               <li key={c.id} className="group flex items-center gap-2 rounded px-1 py-1 hover:bg-sunken"><span className="w-8 text-muted">{DAYS[c.day]}</span><span className="font-mono tabular-nums">{c.start}–{c.end}</span>
-                <span className="h-2 w-2 rounded-full" style={{ background: co?.color }} /><span className="min-w-0 flex-1 truncate">{co?.code}{c.dates?.length ? <span className="text-muted" title={c.dates.map(([x, y]) => x === y ? fmtDate(x) : `${fmtDate(x)} → ${fmtDate(y)}`).join(", ")}> · {c.dates.length} période{c.dates.length > 1 ? "s" : ""}</span> : null}</span>
+                <span className="h-2 w-2 rounded-full" style={{ background: co?.color }} /><span className="min-w-0 flex-1 truncate">{co?.code}{c.dates?.length ? <span className="block whitespace-normal text-[10.5px] text-muted">{c.room ? `${c.room} · ` : ""}{periodsText(c.dates)}</span> : null}</span>
                 <button className="text-muted opacity-0 hover:text-bad group-hover:opacity-100" aria-label="Supprimer le créneau" onClick={() => undoable({ type: "class/remove", id: c.id }, "Créneau supprimé")}><Trash2 size={12} /></button></li>); })}
           </ul>
           <form className="grid grid-cols-2 gap-2" onSubmit={(e) => { e.preventDefault(); if (toMin(newClass.end) <= toMin(newClass.start)) { toast("L'heure de fin doit suivre l'heure de début.", "bad"); return; } const clash = state.classes.find((c) => c.day === newClass.day && toMin(c.start) < toMin(newClass.end) && toMin(newClass.start) < toMin(c.end));
