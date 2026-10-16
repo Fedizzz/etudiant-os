@@ -2473,7 +2473,7 @@ const MobileMenu: React.FC<{ items: typeof NAV; view: ViewKey; plan: DayPlan; on
   return (
     <div ref={ref} role="menu" aria-label="Navigation"
       className="inked fixed z-50 w-[min(18rem,calc(100vw-2rem))] origin-top-right overflow-y-auto rounded-[20px] bg-panel p-2 animate-pop"
-      style={{ top: "calc(env(safe-area-inset-top, 0px) + 72px)", right: "max(16px, env(safe-area-inset-right, 0px))", maxHeight: "calc(100dvh - 90px - env(safe-area-inset-top, 0px))" }}>
+      style={{ top: "calc(var(--safe-top) + 72px)", right: "max(16px, env(safe-area-inset-right, 0px))", maxHeight: "calc(100dvh - 90px - var(--safe-top))" }}>
       {items.map((n) => (
         <button key={n.key} role="menuitem" aria-current={view === n.key ? "page" : undefined} onClick={() => onPick(n.key)}
           className={cx("nav-item flex w-full items-center gap-3 rounded-xl border-2 px-3 py-2.5 text-left text-[14px] transition", view === n.key ? "border-fg bg-hi font-bold text-[rgb(24_22_46)] shadow-[2px_2px_0_0_rgb(var(--ink))]" : "border-transparent text-fg hover:bg-sunken")}>
@@ -2632,7 +2632,7 @@ export default function StudentOS({ state, dispatch, env, view, onView, notice, 
     <StoreCtx.Provider value={ctx}>
       <style>{accentCss(state.settings.accent)}</style>
       <div className="flex min-h-full bg-bg text-fg">
-        <aside className="sticky top-0 hidden h-screen w-[76px] shrink-0 flex-col overflow-y-auto p-3 md:flex lg:w-60 2xl:w-64">
+        <aside className="sticky top-0 hidden h-screen w-[76px] shrink-0 flex-col overflow-y-auto p-3 md:flex lg:w-60 2xl:w-64" style={{ paddingTop: "calc(var(--safe-top) + 12px)" }}>
           <div className="mb-6 flex items-center gap-2.5 px-1 pt-2 lg:px-2"><div className="sticker grid h-9 w-9 place-items-center rounded-xl border-2 border-fg bg-pink text-white shadow-[3px_3px_0_0_rgb(var(--ink))]"><ListChecks size={17} /></div><span className="hidden font-display text-[19px] font-extrabold leading-none tracking-tight lg:inline">Étudiant<span className="text-accent">.</span>OS</span></div>
           <nav className="relative flex flex-col gap-0.5">
             <span aria-hidden className="absolute inset-x-0 top-0 h-10 rounded-xl border-2 border-fg bg-hi shadow-[3px_3px_0_0_rgb(var(--ink))] transition-transform duration-500 [transition-timing-function:var(--spring)]"
@@ -2648,7 +2648,7 @@ export default function StudentOS({ state, dispatch, env, view, onView, notice, 
         </aside>
         <div className="flex min-w-0 flex-1 flex-col">
           <div aria-hidden className="md:hidden" style={{ height: headerH }} />
-          <header ref={headerRef} className={cx("fixed inset-x-0 top-0 z-30 border-b-2 border-dashed border-line bg-bg transition-transform duration-300 [transition-timing-function:var(--ease)] md:sticky md:inset-x-auto md:z-20 md:bg-bg/80 md:backdrop-blur-md md:!translate-y-0", headerHidden && "-translate-y-full")} style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
+          <header ref={headerRef} className={cx("fixed inset-x-0 top-0 z-30 border-b-2 border-dashed border-line bg-bg transition-transform duration-300 [transition-timing-function:var(--ease)] md:sticky md:inset-x-auto md:z-20 md:!translate-y-0", headerHidden && "-translate-y-full")} style={{ paddingTop: "var(--safe-top)", backgroundColor: "rgb(var(--bg))" }}>
             <div className="mx-auto flex max-w-6xl 2xl:max-w-[1560px] min-[2200px]:max-w-[1880px] items-center gap-3 py-3 px-4 sm:px-6">
               <div className="min-w-0 flex-1"><p className="truncate text-xs text-muted">{greet} {state.settings.name}<span className="hidden min-[400px]:inline"> · {new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}</span></p>
                 <h1 className="truncate pb-0.5 font-display text-[19px] min-[400px]:text-[21px] sm:text-[26px] font-extrabold leading-tight tracking-tight"><span key={override?.key ?? view} className="marker">{override?.title ?? current.label}<svg viewBox="0 0 200 20" preserveAspectRatio="none" aria-hidden><path d="M2 12 C 40 6, 80 16, 120 9 S 180 6, 198 11" /></svg></span></h1></div>

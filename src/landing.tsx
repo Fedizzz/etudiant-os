@@ -32,7 +32,7 @@ function Nav({ go, signedIn }: { go: Go; signedIn: boolean }) {
   return (
     <>
     <div aria-hidden style={{ height: headerH }} />
-    <header ref={headerRef} className={cx("fixed inset-x-0 top-0 z-40 border-b-2 border-dashed border-line bg-bg transition-transform duration-300 [transition-timing-function:var(--ease)] md:bg-bg/85 md:backdrop-blur-md md:!translate-y-0", hidden && "-translate-y-full")} style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
+    <header ref={headerRef} className={cx("fixed inset-x-0 top-0 z-40 border-b-2 border-dashed border-line bg-bg transition-transform duration-300 [transition-timing-function:var(--ease)] md:!translate-y-0", hidden && "-translate-y-full")} style={{ paddingTop: "var(--safe-top)", backgroundColor: "rgb(var(--bg))" }}>
       <nav className="mx-auto flex max-w-6xl items-center gap-4 px-4 py-3 sm:px-6" aria-label="Navigation principale">
         <Logo onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} />
         <ul className="ml-6 hidden gap-1 lg:flex">{links.map(([h, l]) => <li key={h}><a href={h} className="rounded-lg px-3 py-2 text-[14px] font-semibold text-muted transition hover:bg-sunken hover:text-fg">{l}</a></li>)}</ul>

@@ -61,7 +61,7 @@ function AdminShell({ sb, session, section, id, nav }: { sb: SupabaseClient; ses
   const title = { dashboard: "Administration", users: id ? "Fiche utilisateur" : "Utilisateurs", tickets: id ? "Ticket" : "Support", audit: "Journal d'audit" }[section];
   return (
     <div className="flex min-h-full bg-bg text-fg" data-testid="admin-shell">
-      <aside className="sticky top-0 hidden h-screen w-56 shrink-0 flex-col gap-1 p-3 md:flex">
+      <aside className="sticky top-0 hidden h-screen w-56 shrink-0 flex-col gap-1 p-3 md:flex" style={{ paddingTop: "calc(var(--safe-top) + 12px)" }}>
         <div className="mb-5 flex items-center gap-2.5 px-2 pt-2"><div className="sticker grid h-9 w-9 place-items-center rounded-xl border-2 border-fg bg-pink text-white shadow-[3px_3px_0_0_rgb(var(--ink))]"><Database size={17} /></div>
           <span className="font-display text-[17px] font-extrabold leading-tight tracking-tight">Étudiant<span className="text-accent">.</span>OS<br /><span className="text-[12px] font-semibold text-muted">Administration</span></span></div>
         {items.map((n) => (
@@ -76,7 +76,7 @@ function AdminShell({ sb, session, section, id, nav }: { sb: SupabaseClient; ses
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
         <div aria-hidden className="md:hidden" style={{ height: headerH }} />
-        <header ref={headerRef} className={cx("fixed inset-x-0 top-0 z-30 border-b-2 border-dashed border-line bg-bg transition-transform duration-300 [transition-timing-function:var(--ease)] md:sticky md:inset-x-auto md:z-20 md:bg-bg/85 md:backdrop-blur-md md:!translate-y-0", hidden && "-translate-y-full")} style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
+        <header ref={headerRef} className={cx("fixed inset-x-0 top-0 z-30 border-b-2 border-dashed border-line bg-bg transition-transform duration-300 [transition-timing-function:var(--ease)] md:sticky md:inset-x-auto md:z-20 md:!translate-y-0", hidden && "-translate-y-full")} style={{ paddingTop: "var(--safe-top)", backgroundColor: "rgb(var(--bg))" }}>
           <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3 sm:px-6">
             <div className="min-w-0 flex-1"><p className="text-xs text-muted">Espace administrateur</p><h1 className="truncate font-display text-[21px] font-extrabold tracking-tight sm:text-[26px]">{title}</h1></div>
             <Btn variant="ghost" size="sm" onClick={toggleTheme} aria-label="Changer de thème">{dark ? <Sun size={15} /> : <Moon size={15} />}</Btn>

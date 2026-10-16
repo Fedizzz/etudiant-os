@@ -14,6 +14,8 @@
   --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
   --spring: cubic-bezier(.34, 1.56, .64, 1); --ease: cubic-bezier(.22, 1, .36, 1);
   --grain-op: .35;
+  /* Hauteur de la barre d'état iOS (heure, batterie) : le contenu commence toujours en dessous. */
+  --safe-top: env(safe-area-inset-top, 0px);
 }
 /* --- Mode sombre « carnet de nuit » : ardoise bleu nuit sous une lampe de bureau, écriture à la craie crème,
    ombres en encre riso rose, surligneur jaune pâle. [data-night] = thème système sombre (posé par index.html). --- */
@@ -25,6 +27,8 @@
   --chalk: 243 236 220; --lamp: 255 196 120;
 }
 html, body, #root { height: 100%; }
+/* En-têtes : fond plein, jamais transparent, au-dessus du contenu qui défile. */
+header.fixed, header.sticky { background-color: rgb(var(--bg)); }
 body { background: rgb(var(--bg)); color: rgb(var(--fg)); font-family: var(--font-ui); -webkit-font-smoothing: antialiased; }
 /* Grain papier + quadrillage pointillé discret */
 body::before { content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
@@ -110,7 +114,7 @@ button:hover > .sketch-icon, button:hover .sketch-icon { transform: rotate(-6deg
 }
 #boot { display: grid; place-items: center; height: 100%; color: rgb(var(--muted)); font: 600 15px var(--font-display); padding-inline: 16px; text-align: center }
 /* Bande opaque sous la barre d'état (iPhone, écran d'accueil) : le contenu ne défile jamais derrière l'heure / la batterie. */
-.status-cover { position: fixed; top: 0; left: 0; right: 0; height: env(safe-area-inset-top, 0px); background: rgb(var(--bg)); z-index: 60; pointer-events: none; }
+.status-cover { position: fixed; top: 0; left: 0; right: 0; height: var(--safe-top); background: rgb(var(--bg)); z-index: 60; pointer-events: none; }
 /* Impression du navigateur : seulement le contenu de la page, sans navigation ni ombres. */
 @media print {
   aside, header, nav, .status-cover, [role=status], button { display: none !important; }
