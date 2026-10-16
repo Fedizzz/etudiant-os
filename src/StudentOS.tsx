@@ -1766,6 +1766,7 @@ const Chores: React.FC = () => {
   // Sans colocataire (et sans corvée partagée), on masque tout ce qui concerne la rotation.
   const solo = isSolo(state);
   const [cmode, setCmode] = useState<"duration" | "slot">("duration");
+  const [presetEnd, setPresetEnd] = useState(false);
   const [f, setF] = useState({ name: "", recurrence: "weekly" as Recurrence, day: 5, minutes: 20, time: "18:00", end: "18:30", assignees: ["Moi", ...state.settings.roommates].join(", ") });
   const people = Array.from(new Set(state.chores.flatMap((c) => c.assignees)));
   const minutesBy = people.map((p) => ({ p, min: state.chores.reduce((n, c) => n + days.filter((d) => choreScheduledOn(c, d) && choreAssignee(c, d) === p).length * c.minutes, 0) }));
@@ -1828,7 +1829,9 @@ const Chores: React.FC = () => {
             dispatch({ type: "chore/add", chore: { id: uid(), name: f.name.trim(), recurrence: f.recurrence, day: f.day, minutes, assignees, done: [], ...(cmode === "slot" ? { time: f.time } : {}) } }); setF({ ...f, name: "" }); toast(state.settings.roommates.length ? "Corvée ajoutée à la rotation" : "Corvée ajoutée"); }}>
             <div className="col-span-2">
               <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">Suggestions</p>
-              <div className="flex max-h-56 flex-col gap-2 overflow-y-auto pr-1" data-testid="chore-presets">
+              <div className="relative">
+              <div className="flex max-h-56 flex-col gap-2 overflow-y-auto pr-1 pb-3" data-testid="chore-presets"
+                onScroll={(e) => { const el = e.currentTarget; setPresetEnd(el.scrollTop + el.clientHeight >= el.scrollHeight - 6); }}>
                 {(["Cuisine & repas", "Nettoyage", "Linge", "Maison"] as const).map((g) => {
                   const list = CHORE_PRESETS.filter((p) => p.group === g && !state.chores.some((c) => norm(c.name) === norm(p.name)));
                   return list.length ? <div key={g}><p className="mb-1 text-[11px] font-semibold text-muted">{g}</p><div className="flex flex-wrap gap-1.5">{list.map((p) => (
@@ -1836,6 +1839,9 @@ const Chores: React.FC = () => {
                       className={cx("rounded-full border px-2.5 py-1 text-[12px] transition", f.name === p.name ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-line bg-sunken hover:border-fg/60")}>{p.name}</button>))}</div></div> : null;
                 })}
               </div>
+              {!presetEnd && <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-panel to-transparent" />}
+              </div>
+              {!presetEnd && <p className="mt-1 text-center text-[11px] font-semibold text-muted">Descendez pour voir plus de suggestions ↓</p>}
             </div>
             <Field label="Corvée" htmlFor="ch-name" className="col-span-2"><Input id="ch-name" placeholder="Ex. Nettoyer la plaque" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
             <Field label="Récurrence" htmlFor="ch-rec"><Select id="ch-rec" value={f.recurrence} onChange={(e) => setF({ ...f, recurrence: e.target.value as Recurrence })}>{(Object.keys(REC_LABEL) as Recurrence[]).map((r) => <option key={r} value={r}>{REC_LABEL[r]}</option>)}</Select></Field>
