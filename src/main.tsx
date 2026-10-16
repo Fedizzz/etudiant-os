@@ -9,6 +9,7 @@ import { LocalHost, CloudHost, Splash } from "./hosts.tsx";
 import { LoginPage, SignupPage, ForgotPage, ResetPage } from "./auth.tsx";
 import { Landing, PrivacyPage, TermsPage, NotFound } from "./landing.tsx";
 import { AdminApp } from "./admin.tsx";
+import { PencilDefs } from "./StudentOS.tsx";
 
 // Fragment d'URL au chargement (jetons ou erreur d'un lien d'e-mail), capturé avant que Supabase ne le nettoie.
 const initialHash = (window as unknown as { __INITIAL_HASH__?: string }).__INITIAL_HASH__ ?? window.location.hash;
@@ -94,5 +95,6 @@ function NotConfigured({ go }: { go: Go }) {
   );
 }
 
-createRoot(document.getElementById("root")!).render(<App />);
+// Filtre « crayon » des icônes monté une fois pour toutes les pages (landing, connexion, app, admin).
+createRoot(document.getElementById("root")!).render(<><PencilDefs /><App /></>);
 if ("serviceWorker" in navigator && location.protocol === "https:") window.addEventListener("load", () => { navigator.serviceWorker.register(BASE + "sw.js").catch(() => {}); });

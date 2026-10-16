@@ -4,7 +4,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import { cx } from "./core.ts";
-import { Card, Btn, Select, Pill, Empty, Modal, Stat, inputCls, PencilDefs, LayoutDashboard, Users, FileText, Database, ChevronLeft, ChevronRight, AlertTriangle, Search, Sun, Moon } from "./StudentOS.tsx";
+import { Card, Btn, Select, Pill, Empty, Modal, Stat, inputCls, LayoutDashboard, Users, FileText, Database, ChevronLeft, ChevronRight, AlertTriangle, Search, Sun, Moon } from "./StudentOS.tsx";
 import { Thread, TextArea, AttachPicker, Banner, StatusPill, Labeled, useNotifications } from "./support.tsx";
 import {
   admin, myRole, logAdminDenied, isMine, getMessages, postMessage, uploadAttachment, markTicketRead, watchNotifications, unreadNotifications, supportError,
@@ -59,7 +59,6 @@ function AdminShell({ sb, session, section, id, nav }: { sb: SupabaseClient; ses
   const title = { dashboard: "Administration", users: id ? "Fiche utilisateur" : "Utilisateurs", tickets: id ? "Ticket" : "Support", audit: "Journal d'audit" }[section];
   return (
     <div className="flex min-h-full bg-bg text-fg" data-testid="admin-shell">
-      <PencilDefs />
       <aside className="sticky top-0 hidden h-screen w-56 shrink-0 flex-col gap-1 p-3 md:flex">
         <div className="mb-5 flex items-center gap-2.5 px-2 pt-2"><div className="sticker grid h-9 w-9 place-items-center rounded-xl border-2 border-fg bg-pink text-white shadow-[3px_3px_0_0_rgb(var(--ink))]"><Database size={17} /></div>
           <span className="font-display text-[17px] font-extrabold leading-tight tracking-tight">Étudiant<span className="text-accent">.</span>OS<br /><span className="text-[12px] font-semibold text-muted">Administration</span></span></div>

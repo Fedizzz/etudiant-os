@@ -36,7 +36,9 @@ function sketch(name: string, strokes: Stroke[]): React.FC<IconProps> {
 /** Filtre global de tremblé crayon, monté une fois à la racine. */
 export const PencilDefs: React.FC = () => (
   <svg width="0" height="0" style={{ position: "absolute" }} aria-hidden>
-    <filter id="pencil" x="-10%" y="-10%" width="120%" height="120%">
+    {/* Région en unités absolues : avec la boîte englobante (par défaut), Safari n'affiche pas les traits
+        parfaitement horizontaux / verticaux ou les points (boîte de hauteur ou largeur nulle). */}
+    <filter id="pencil" filterUnits="userSpaceOnUse" x="-4" y="-4" width="32" height="32">
       <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="3" result="n" />
       <feDisplacementMap in="SourceGraphic" in2="n" scale="1.5" xChannelSelector="R" yChannelSelector="G" />
     </filter>
@@ -179,7 +181,7 @@ export const Database = sketch("Database", [
   { d: "M12 3c4.4 0 8 1.3 8 3s-3.6 3-8 3-8-1.3-8-3 3.6-3 8-3Z", f: true },
   { d: "M4 6.1c-.1 4-.1 7.9.1 11.9.4 1.7 3.8 3 7.9 3s7.5-1.3 7.9-3c.2-4 .2-7.9.1-11.9M4.1 12c.4 1.6 3.8 2.9 7.9 2.9s7.5-1.3 7.9-2.9" },
 ]);
-export const MoreVertical = sketch("MoreVertical", [{ d: "M12 4.6h.2M12 12h.2M12 19.4h.2" }]);
+export const MoreVertical = sketch("MoreVertical", [{ d: "M12 3.4a1.6 1.6 0 1 1 0 3.2 1.6 1.6 0 1 1 0-3.2ZM12 10.4a1.6 1.6 0 1 1 0 3.2 1.6 1.6 0 1 1 0-3.2ZM12 17.4a1.6 1.6 0 1 1 0 3.2 1.6 1.6 0 1 1 0-3.2Z", f: true }]);
 export const Sparkles = sketch("Sparkles", [
   { d: "M10.5 3.2c.6 3.2 2.3 5 5.5 5.8-3.2.7-4.9 2.6-5.5 5.8-.6-3.2-2.4-5.1-5.6-5.8 3.2-.8 5-2.6 5.6-5.8Z", f: true },
   { d: "M18.4 13.6c.3 1.5 1.1 2.3 2.6 2.7-1.5.3-2.3 1.2-2.6 2.7-.3-1.5-1.2-2.4-2.7-2.7 1.5-.4 2.4-1.2 2.7-2.7ZM5.6 16.4c.2 1 .8 1.6 1.8 1.8-1 .2-1.6.8-1.8 1.8-.2-1-.8-1.6-1.8-1.8 1-.2 1.6-.8 1.8-1.8Z" },
@@ -1904,10 +1906,14 @@ const MobileMenu: React.FC<{ items: typeof NAV; view: ViewKey; plan: DayPlan; on
     const prev = document.activeElement as HTMLElement | null;
     ref.current?.querySelector<HTMLElement>("[aria-current=page]")?.focus();
     const key = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    // Le menu est fixe : on le ferme dès que la page défile, pour qu'il ne « suive » pas le défilement.
+    const y0 = window.scrollY;
+    const scroll = () => { if (Math.abs(window.scrollY - y0) > 8) onClose(); };
+    window.addEventListener("scroll", scroll, { passive: true });
     const down = (e: PointerEvent) => { if (ref.current && !ref.current.parentElement!.contains(e.target as Node)) onClose(); };
     window.addEventListener("keydown", key); window.addEventListener("pointerdown", down);
     return () => {
-      window.removeEventListener("keydown", key); window.removeEventListener("pointerdown", down);
+      window.removeEventListener("keydown", key); window.removeEventListener("pointerdown", down); window.removeEventListener("scroll", scroll);
       // Ne reprend pas le focus si une autre fenêtre (recherche) vient de le prendre.
       const act = document.activeElement; if (!act || act === document.body || ref.current?.contains(act)) prev?.focus?.();
     };
@@ -2053,7 +2059,7 @@ export default function StudentOS({ state, dispatch, env, view, onView, notice, 
 
   if (!state.settings.onboarded && !override) return (
     <StoreCtx.Provider value={ctx}>
-      <PencilDefs /><style>{accentCss(state.settings.accent)}</style>
+      <style>{accentCss(state.settings.accent)}</style>
       <Onboarding onDone={(s) => { dispatch({ type: "replace", state: s }); setView("dashboard"); toast(`Bienvenue ${s.settings.name} ! Commencez par ajouter vos cours dans Académique et Planning.`); }} />
       <ToastStack toasts={toasts} />
     </StoreCtx.Provider>
@@ -2061,7 +2067,7 @@ export default function StudentOS({ state, dispatch, env, view, onView, notice, 
 
   return (
     <StoreCtx.Provider value={ctx}>
-      <PencilDefs /><style>{accentCss(state.settings.accent)}</style>
+      <style>{accentCss(state.settings.accent)}</style>
       <div className="flex min-h-full bg-bg text-fg">
         <aside className="sticky top-0 hidden h-screen w-[76px] shrink-0 flex-col overflow-y-auto p-3 md:flex lg:w-60 2xl:w-64">
           <div className="mb-6 flex items-center gap-2.5 px-1 pt-2 lg:px-2"><div className="sticker grid h-9 w-9 place-items-center rounded-xl border-2 border-fg bg-pink text-white shadow-[3px_3px_0_0_rgb(var(--ink))]"><ListChecks size={17} /></div><span className="hidden font-display text-[19px] font-extrabold leading-none tracking-tight lg:inline">Étudiant<span className="text-accent">.</span>OS</span></div>
