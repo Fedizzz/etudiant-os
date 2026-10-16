@@ -1741,15 +1741,19 @@ const ExpenseEdit: React.FC<{ e: Expense; onDone: () => void }> = ({ e, onDone }
 // ---------------------------------------------------------------- Module : Ménage
 const EVENT_REC_LABEL: Record<EventRecurrence, string> = { none: "Une seule fois", daily: "Tous les jours", weekly: "Chaque semaine", biweekly: "Toutes les 2 semaines", monthly: "Chaque mois" };
 /** Corvées courantes : un clic préremplit le formulaire (modifiable avant d'ajouter). */
-const CHORE_PRESETS: { name: string; recurrence: Recurrence; day: number; minutes: number }[] = [
-  { name: "Vaisselle", recurrence: "daily", day: 0, minutes: 15 }, { name: "Sortir les poubelles", recurrence: "weekly", day: 1, minutes: 5 },
-  { name: "Aspirateur", recurrence: "weekly", day: 5, minutes: 25 }, { name: "Serpillière", recurrence: "biweekly", day: 5, minutes: 25 },
-  { name: "Salle de bain", recurrence: "weekly", day: 6, minutes: 30 }, { name: "Toilettes", recurrence: "weekly", day: 2, minutes: 10 },
-  { name: "Cuisine (plans de travail)", recurrence: "weekly", day: 3, minutes: 20 }, { name: "Frigo (vider et nettoyer)", recurrence: "biweekly", day: 6, minutes: 20 },
-  { name: "Lessive", recurrence: "weekly", day: 6, minutes: 20 }, { name: "Étendre / plier le linge", recurrence: "weekly", day: 6, minutes: 15 },
-  { name: "Changer les draps", recurrence: "biweekly", day: 0, minutes: 15 }, { name: "Poussière", recurrence: "biweekly", day: 4, minutes: 15 },
-  { name: "Ranger la chambre", recurrence: "weekly", day: 0, minutes: 15 }, { name: "Recyclage / verre", recurrence: "biweekly", day: 4, minutes: 10 },
-  { name: "Arroser les plantes", recurrence: "weekly", day: 2, minutes: 5 }, { name: "Vitres", recurrence: "biweekly", day: 6, minutes: 30 },
+const CHORE_PRESETS: { name: string; recurrence: Recurrence; day: number; minutes: number; group: "Nettoyage" | "Cuisine & repas" | "Linge" | "Maison" }[] = [
+  { name: "Vaisselle", recurrence: "daily", day: 0, minutes: 15, group: "Cuisine & repas" }, { name: "Cuisiner le dîner", recurrence: "daily", day: 0, minutes: 40, group: "Cuisine & repas" },
+  { name: "Préparer les repas de la semaine", recurrence: "weekly", day: 6, minutes: 90, group: "Cuisine & repas" }, { name: "Préparer le déjeuner du lendemain", recurrence: "daily", day: 0, minutes: 15, group: "Cuisine & repas" },
+  { name: "Remplir / vider le lave-vaisselle", recurrence: "daily", day: 0, minutes: 10, group: "Cuisine & repas" }, { name: "Cuisine (plans de travail)", recurrence: "weekly", day: 3, minutes: 20, group: "Cuisine & repas" },
+  { name: "Frigo (vider et nettoyer)", recurrence: "biweekly", day: 6, minutes: 20, group: "Cuisine & repas" }, { name: "Micro-ondes et four", recurrence: "biweekly", day: 3, minutes: 15, group: "Cuisine & repas" },
+  { name: "Aspirateur", recurrence: "weekly", day: 5, minutes: 25, group: "Nettoyage" }, { name: "Serpillière", recurrence: "biweekly", day: 5, minutes: 25, group: "Nettoyage" },
+  { name: "Salle de bain", recurrence: "weekly", day: 6, minutes: 30, group: "Nettoyage" }, { name: "Toilettes", recurrence: "weekly", day: 2, minutes: 10, group: "Nettoyage" },
+  { name: "Poussière", recurrence: "biweekly", day: 4, minutes: 15, group: "Nettoyage" }, { name: "Vitres", recurrence: "biweekly", day: 6, minutes: 30, group: "Nettoyage" },
+  { name: "Lessive", recurrence: "weekly", day: 6, minutes: 20, group: "Linge" }, { name: "Étendre / plier le linge", recurrence: "weekly", day: 6, minutes: 15, group: "Linge" },
+  { name: "Repassage", recurrence: "weekly", day: 0, minutes: 30, group: "Linge" }, { name: "Changer les draps", recurrence: "biweekly", day: 0, minutes: 15, group: "Linge" },
+  { name: "Sortir les poubelles", recurrence: "weekly", day: 1, minutes: 5, group: "Maison" }, { name: "Recyclage / verre", recurrence: "biweekly", day: 4, minutes: 10, group: "Maison" },
+  { name: "Ranger la chambre", recurrence: "weekly", day: 0, minutes: 15, group: "Maison" }, { name: "Ranger le salon", recurrence: "weekly", day: 4, minutes: 15, group: "Maison" },
+  { name: "Faire les courses", recurrence: "weekly", day: 5, minutes: 45, group: "Maison" }, { name: "Arroser les plantes", recurrence: "weekly", day: 2, minutes: 5, group: "Maison" },
 ];
 /** Personne d'autre que « Moi » : pas de colocataire et aucune corvée partagée. */
 const isSolo = (s: AppState) => !s.settings.roommates.length && s.chores.every((c) => c.assignees.every((a) => a === "Moi"));
@@ -1824,10 +1828,13 @@ const Chores: React.FC = () => {
             dispatch({ type: "chore/add", chore: { id: uid(), name: f.name.trim(), recurrence: f.recurrence, day: f.day, minutes, assignees, done: [], ...(cmode === "slot" ? { time: f.time } : {}) } }); setF({ ...f, name: "" }); toast(state.settings.roommates.length ? "Corvée ajoutée à la rotation" : "Corvée ajoutée"); }}>
             <div className="col-span-2">
               <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">Suggestions</p>
-              <div className="flex flex-wrap gap-1.5" data-testid="chore-presets">
-                {CHORE_PRESETS.filter((p) => !state.chores.some((c) => norm(c.name) === norm(p.name))).map((p) => (
-                  <button key={p.name} type="button" onClick={() => { setF({ ...f, name: p.name, recurrence: p.recurrence, day: p.day, minutes: p.minutes }); setCmode("duration"); }}
-                    className={cx("rounded-full border px-2.5 py-1 text-[12px] transition", f.name === p.name ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-line bg-sunken hover:border-fg/60")}>{p.name}</button>))}
+              <div className="flex max-h-56 flex-col gap-2 overflow-y-auto pr-1" data-testid="chore-presets">
+                {(["Cuisine & repas", "Nettoyage", "Linge", "Maison"] as const).map((g) => {
+                  const list = CHORE_PRESETS.filter((p) => p.group === g && !state.chores.some((c) => norm(c.name) === norm(p.name)));
+                  return list.length ? <div key={g}><p className="mb-1 text-[11px] font-semibold text-muted">{g}</p><div className="flex flex-wrap gap-1.5">{list.map((p) => (
+                    <button key={p.name} type="button" onClick={() => { setF({ ...f, name: p.name, recurrence: p.recurrence, day: p.day, minutes: p.minutes }); setCmode("duration"); }}
+                      className={cx("rounded-full border px-2.5 py-1 text-[12px] transition", f.name === p.name ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-line bg-sunken hover:border-fg/60")}>{p.name}</button>))}</div></div> : null;
+                })}
               </div>
             </div>
             <Field label="Corvée" htmlFor="ch-name" className="col-span-2"><Input id="ch-name" placeholder="Ex. Nettoyer la plaque" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
