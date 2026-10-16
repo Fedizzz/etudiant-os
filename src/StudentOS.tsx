@@ -752,6 +752,7 @@ const TimetableImport: React.FC = () => {
   const { files } = env;
   const ref = useRef<HTMLInputElement>(null);
   const [rows, setRows] = useState<Detected[] | null>(null);
+  const [replaceOld, setReplaceOld] = useState(true);
   const [busy, setBusy] = useState(false);
   const [hasPdf, setHasPdf] = useState(false);
   const [viewing, setViewing] = useState(false);
@@ -774,24 +775,31 @@ const TimetableImport: React.FC = () => {
   const upd = (k: string, patch: Partial<Detected>) => setRows((r) => r && r.map((x) => (x.key === k ? { ...x, ...patch } : x)));
   const importRows = () => {
     const sel = (rows ?? []).filter((r) => r.on); if (!sel.length) return;
+    // Remplacement : l'ancien emploi du temps est retiré ; ses modules sans tâche ni note aussi (sinon conservés).
+    const base = replaceOld ? (() => {
+      const used = new Set([...state.tasks.map((t) => t.courseId), ...state.courses.filter((c) => c.grades?.length).map((c) => c.id)]);
+      const oldIds = new Set(state.classes.map((c) => c.courseId));
+      return { ...state, classes: [], courses: state.courses.filter((c) => !oldIds.has(c.id) || used.has(c.id)) };
+    })() : state;
     const palette = ["#2f6fed", "#0f9d76", "#d9822b", "#c2417a", "#7a5af5", "#1d9bb5", "#b5651d"];
     const newCourses: Course[] = [];
     const courseFor = (title: string) => {
       const k = norm(title);
       // Même module seulement si le nom correspond (pas le code : « Introducción al Álgebra » ≠ « Introducción al Cálculo »).
-      const all = [...state.courses, ...newCourses];
+      const all = [...base.courses, ...newCourses];
       const hit = all.find((c) => norm(c.name) === k) ?? all.find((c) => norm(c.name).length > 6 && (k.startsWith(norm(c.name)) || norm(c.name).startsWith(k)) && Math.abs(norm(c.name).length - k.length) < 4);
       if (hit) return hit.id;
       const words = title.normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/[^A-Za-z0-9]+/).filter((w) => w.length > 2);
       let code = (words.length > 1 ? words.map((w) => w[0]).join("") : (words[0] ?? title).slice(0, 5)).toUpperCase().slice(0, 6);
       for (let n = 2; all.some((c) => c.code === code); n++) code = code.replace(/\d+$/, "") + n;
-      const c: Course = { id: uid(), name: title, code, coef: 1, color: palette[(state.courses.length + newCourses.length) % palette.length], grades: [] };
+      const c: Course = { id: uid(), name: title, code, coef: 1, color: palette[(base.courses.length + newCourses.length) % palette.length], grades: [] };
       newCourses.push(c); return c.id;
     };
     // Le module est le même pour la théorie, les TP et les labos (« Cours (TP) » → « Cours »).
     const sessions = sel.map((r) => ({ id: uid(), courseId: courseFor(r.title.replace(/\s*\((?:TP|TD|Labo|Séminaire|Tutorat|Examen)\)$/, "")), day: r.day, start: r.start, end: r.end, room: r.room, ...(r.dates?.length ? { dates: r.dates } : {}) }));
-    dispatch({ type: "class/addMany", sessions, courses: newCourses });
-    toast(`${sessions.length} cours ajoutés${newCourses.length ? ` · ${newCourses.length} nouveaux modules` : ""}. Retrouvez-les dans Académique.`);
+    if (replaceOld) undoable({ type: "replace", state: { ...base, classes: sessions, courses: [...base.courses, ...newCourses] } }, `Emploi du temps remplacé : ${sessions.length} cours`);
+    else dispatch({ type: "class/addMany", sessions, courses: newCourses });
+    if (!replaceOld) toast(`${sessions.length} cours ajoutés${newCourses.length ? ` · ${newCourses.length} nouveaux modules` : ""}. Retrouvez-les dans Académique.`);
     setRows(null);
   };
   return (
@@ -820,7 +828,10 @@ const TimetableImport: React.FC = () => {
                 </div>
               </li>))}
           </ul>
-          <div className="mt-2 flex justify-end gap-2"><Btn variant="ghost" onClick={() => setRows(null)}>Annuler</Btn><Btn variant="primary" onClick={importRows}><Check size={14} />Ajouter {rows.filter((r) => r.on).length} cours</Btn></div>
+          {state.classes.length > 0 && <label className="mt-2 flex items-start gap-2 text-xs">
+            <input type="checkbox" className="mt-0.5 h-4 w-4 accent-[rgb(var(--accent))]" checked={replaceOld} onChange={(e) => setReplaceOld(e.target.checked)} data-testid="replace-old" />
+            <span>Remplacer mon emploi du temps actuel ({state.classes.length} créneau{state.classes.length > 1 ? "x" : ""}). Les modules qui ont des tâches ou des notes sont conservés. Annulable juste après.</span></label>}
+          <div className="mt-2 flex justify-end gap-2"><Btn variant="ghost" onClick={() => setRows(null)}>Annuler</Btn><Btn variant="primary" onClick={importRows}><Check size={14} />{replaceOld && state.classes.length ? "Remplacer par" : "Ajouter"} {rows.filter((r) => r.on).length} cours</Btn></div>
         </div>)}
       {viewing && <Modal title="Mon emploi du temps" onClose={() => setViewing(false)}><div ref={viewer} className="text-sm text-muted">Chargement du PDF…</div></Modal>}
     </Card>
