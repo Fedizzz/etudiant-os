@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { flushSync } from "react-dom";
+import { MiniPdf } from "./pdf.ts";
 import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, pad, parseAmount, parseISO, parseReceipt, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
 import type { Action, Aisle, AppState, Block, Budget, Course, DayPlan, Expense, ExpenseCat, GroceryTemplate, ID, Phase, PomodoroCfg, Priority, ReceiptResult, Recurrence, EventRecurrence, SettingsState, SleepLog, Task, TaskKind, TaskStatus, TemplateItem, ViewKey } from "./core.ts";
 import type { AppEnv } from "./env.ts";
@@ -391,6 +392,52 @@ function loadScript(src: string): Promise<void> {
   return scriptCache.get(src)!;
 }
 const PDFJS = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/";
+const hexRgb = (h?: string): [number, number, number] | null => { const m = /^#?([0-9a-f]{6})$/i.exec(h ?? ""); if (!m) return null; const n = parseInt(m[1], 16); return [n >> 16, (n >> 8) & 255, n & 255]; };
+const KIND_RGB: Record<Block["kind"], [number, number, number]> = { class: [52, 72, 240], task: [52, 72, 240], chore: [217, 140, 20], meal: [160, 156, 180], sleep: [120, 120, 140], busy: [130, 126, 150], event: [233, 60, 130] };
+
+/** Planning de la semaine en PDF (A4 paysage, grille horaire), généré dans le navigateur, sans connexion. */
+async function exportWeekPdf(week: DayPlan[], name: string): Promise<"shared" | "downloaded"> {
+  const W = 297, H = 210, M = 10, top = 27, left = M + 11;
+  const doc = new MiniPdf(W, H);
+  const ink: [number, number, number] = [24, 22, 46], muted: [number, number, number] = [110, 106, 140], grid: [number, number, number] = [215, 212, 228];
+  const blocks = week.flatMap((d) => d.blocks.filter((b) => b.kind !== "sleep"));
+  const minH = Math.max(0, Math.floor(Math.min(8 * 60, ...blocks.map((b) => b.start)) / 60));
+  const maxH = Math.min(26, Math.ceil(Math.max(20 * 60, ...blocks.map((b) => b.end)) / 60));
+  const colW = (W - left - M) / 7, rowH = (H - top - M) / (maxH - minH);
+  const first = parseISO(week[0].date), last = parseISO(week[6].date);
+  doc.text(M, 15, `Planning - semaine ${isoWeek(first)}`, 16, ink, { bold: true });
+  doc.text(M, 21, `${first.toLocaleDateString("fr-FR", { day: "numeric", month: "long" })} au ${last.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}${name ? ` - ${name}` : ""}`, 9, muted);
+  doc.text(W - M, 15, "Etudiant.OS", 10, muted, { bold: true, align: "right" });
+  for (let h = minH; h <= maxH; h++) { const y = top + (h - minH) * rowH; doc.line(left, y, W - M, y, grid); if (h < maxH) doc.text(M, y + 3, `${pad(h % 24)}:00`, 7, muted); }
+  week.forEach((d, i) => {
+    const x = left + i * colW, date = parseISO(d.date);
+    doc.line(x, top - 6, x, H - M, grid);
+    doc.text(x + colW / 2, top - 2, `${DAYS[weekday(date)]} ${date.getDate()}`, 9, ink, { bold: true, align: "center" });
+    for (const b of d.blocks) {
+      if (b.kind === "sleep") continue;
+      const y = top + ((b.start - minH * 60) / 60) * rowH; if (y + 1 > H - M) continue;
+      const h = Math.min(Math.max(3.4, ((b.end - b.start) / 60) * rowH - 0.4), H - M - y);
+      const rgb = (b.kind === "class" || b.kind === "task" ? hexRgb(b.color) : null) ?? KIND_RGB[b.kind];
+      doc.rect(x + 0.6, y + 0.2, colW - 1.2, h, rgb.map((c) => Math.round(c + (255 - c) * 0.82)) as [number, number, number], rgb, 0.2);
+      doc.rect(x + 0.6, y + 0.2, 1, h, rgb);
+      const label = doc.wrap(b.label, colW - 4.5, 6.5);
+      const lines = h >= 7 ? [`${toHHMM(b.start)}-${toHHMM(b.end)}`, ...label] : [`${toHHMM(b.start)} ${label[0] ?? ""}`];
+      lines.slice(0, Math.max(1, Math.floor((h - 0.6) / 2.6))).forEach((l, k) => doc.text(x + 2.4, y + 2.9 + k * 2.6, l, 6.5, k === 0 && h >= 7 ? muted : ink, { bold: k === 1 }));
+    }
+  });
+  doc.line(W - M, top - 6, W - M, H - M, grid);
+  const blob = new Blob([doc.bytes()], { type: "application/pdf" });
+  const file = `planning-semaine-${isoWeek(first)}.pdf`;
+  const f = new File([blob], file, { type: "application/pdf" });
+  const nav = navigator as Navigator & { canShare?: (d: { files: File[] }) => boolean };
+  // iPhone / iPad : la feuille de partage permet « Enregistrer dans Fichiers » ou d'imprimer (le téléchargement direct y est peu fiable).
+  if (/iPad|iPhone|iPod|Macintosh/.test(navigator.userAgent) && "ontouchend" in document && nav.canShare?.({ files: [f] })) {
+    try { await navigator.share({ files: [f], title: file }); return "shared"; } catch (e) { if ((e as Error).name === "AbortError") return "shared"; }
+  }
+  const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = file; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  return "downloaded";
+}
 type PdfJs = { GlobalWorkerOptions: { workerSrc: string }; getDocument: (o: { data: ArrayBuffer }) => { promise: Promise<PdfDoc> } };
 type PdfDoc = { numPages: number; getPage: (n: number) => Promise<PdfPage> };
 type PdfPage = {
@@ -773,6 +820,13 @@ const Planning: React.FC = () => {
   const startH = Math.floor(plan.wake / 60), endH = Math.ceil(Math.min(plan.bed, 1440 + 120) / 60);
   const PX = 52; // pixels par heure
   const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+  const [exporting, setExporting] = useState(false);
+  const exportPdf = async () => {
+    setExporting(true);
+    try { const r = await exportWeekPdf(week, state.settings.name); if (r === "downloaded") toast("PDF du planning téléchargé"); }
+    catch { toast("Export PDF impossible : vérifiez votre connexion internet (le générateur PDF se charge à la première utilisation).", "bad"); }
+    finally { setExporting(false); }
+  };
   const [newClass, setNewClass] = useState({ courseId: state.courses[0]?.id ?? "", day: 0, start: "10:00", end: "12:00", room: "" });
 
   return (
@@ -826,7 +880,7 @@ const Planning: React.FC = () => {
             </ul>
           </Card>
         )}
-        <Card title="Semaine">
+        <Card title="Semaine" action={<Btn size="sm" onClick={() => void exportPdf()} disabled={exporting} data-testid="export-pdf"><Download size={13} />{exporting ? "Export…" : "PDF"}</Btn>}>
           <div className="grid grid-cols-7 gap-1.5">
             {week.map((p) => { const h = Math.min(1.2, p.load); const tone = p.level === "surcharge" ? "bg-bad" : p.level === "chargé" ? "bg-warn" : "bg-ok";
               return (<button key={p.date} onClick={() => setOffset(daysBetween(today, p.date))} className={cx("flex flex-col items-center gap-1 rounded-md p-1 hover:bg-sunken", p.date === date && "bg-sunken ring-1 ring-accent")}>
