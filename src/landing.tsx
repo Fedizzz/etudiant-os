@@ -1,7 +1,7 @@
 /* Étudiant.OS — page d'accueil publique, pages légales, 404. */
 import React, { useEffect, useState } from "react";
 import { cx } from "./core.ts";
-import { useFixedHeader, Btn, CalendarClock, GraduationCap, Timer, Wallet, ShoppingCart, Home, Moon, LayoutDashboard, Check, MoreVertical, X, Sparkles, Users, Zap, Database, Repeat, FileText } from "./StudentOS.tsx";
+import { useFixedHeader, Btn, CalendarClock, GraduationCap, Timer, Wallet, ShoppingCart, Home, Moon, Sun, LayoutDashboard, Check, MoreVertical, X, Sparkles, Users, Zap, Database, Repeat, FileText } from "./StudentOS.tsx";
 import { Logo } from "./auth.tsx";
 import { BASE, supabase } from "./supabase.ts";
 import type { Route } from "./router.ts";
@@ -9,6 +9,19 @@ import type { Route } from "./router.ts";
 type Go = (r: Route, opts?: { replace?: boolean; next?: string }) => void;
 const img = (name: string) => `${BASE}screens/${name}`;
 const REPO = "https://github.com/Fedizzz/etudiant-os";
+
+/** Bascule clair / sombre (mémorisée ; l'application reprend ensuite son propre réglage). */
+export function ThemeToggle() {
+  const isDark = () => { const t = document.documentElement.getAttribute("data-theme"); return t ? t === "dark" : matchMedia("(prefers-color-scheme: dark)").matches; };
+  const [dark, setDark] = useState(isDark);
+  const flip = () => {
+    const next = dark ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+    try { localStorage.setItem("etudiant-os/theme", JSON.stringify(next)); } catch { /* facultatif */ }
+    setDark(!dark);
+  };
+  return <Btn variant="ghost" size="sm" onClick={flip} aria-label={dark ? "Passer en mode clair" : "Passer en mode sombre"} title={dark ? "Mode clair" : "Mode sombre"}>{dark ? <Sun size={17} /> : <Moon size={17} />}</Btn>;
+}
 
 function Nav({ go, signedIn }: { go: Go; signedIn: boolean }) {
   const [open, setOpen] = useState(false);
@@ -23,6 +36,7 @@ function Nav({ go, signedIn }: { go: Go; signedIn: boolean }) {
         <Logo onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} />
         <ul className="ml-6 hidden gap-1 lg:flex">{links.map(([h, l]) => <li key={h}><a href={h} className="rounded-lg px-3 py-2 text-[14px] font-semibold text-muted transition hover:bg-sunken hover:text-fg">{l}</a></li>)}</ul>
         <div className="ml-auto flex items-center gap-2">
+          <ThemeToggle />
           {signedIn || !supabase ? <Btn variant="primary" onClick={() => go({ name: "app", view: "dashboard" })}>{signedIn ? "Ouvrir mon espace" : "Ouvrir l'application"}</Btn> : <>
             <Btn variant="ghost" className="hidden sm:inline-flex" onClick={() => go({ name: "login" })}>Se connecter</Btn>
             <Btn variant="primary" onClick={() => go({ name: "signup" })}><span className="hidden min-[400px]:inline">Commencer gratuitement</span><span className="min-[400px]:hidden">S'inscrire</span></Btn>
