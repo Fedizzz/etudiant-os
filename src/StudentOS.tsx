@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { MiniPdf } from "./pdf.ts";
+import { layoutLanes } from "./core.ts";
 import { DAY_WORDS, dayOf, pageGeometry, parseGrid } from "./timetable.ts";
 import { parseIcs, normalizeFeedUrl, isFeedUrl } from "./ical.ts";
 import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, pad, parseAmount, parseISO, parseReceipt, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
@@ -415,17 +416,18 @@ async function exportWeekPdf(week: DayPlan[], name: string): Promise<"shared" | 
     const x = left + i * colW, date = parseISO(d.date);
     doc.line(x, top - 6, x, H - M, grid);
     doc.text(x + colW / 2, top - 2, `${DAYS[weekday(date)]} ${date.getDate()}`, 9, ink, { bold: true, align: "center" });
-    for (const b of d.blocks) {
-      if (b.kind === "sleep") continue;
-      const y = top + ((b.start - minH * 60) / 60) * rowH; if (y + 1 > H - M) continue;
+    const shown = d.blocks.filter((b) => b.kind !== "sleep"), ln = layoutLanes(shown);
+    shown.forEach((b, bi) => {
+      const lw = (colW - 1.2) / ln[bi].lanes, lx = x + 0.6 + ln[bi].lane * lw;
+      const y = top + ((b.start - minH * 60) / 60) * rowH; if (y + 1 > H - M) return;
       const h = Math.min(Math.max(3.4, ((b.end - b.start) / 60) * rowH - 0.4), H - M - y);
       const rgb = (b.kind === "class" || b.kind === "task" ? hexRgb(b.color) : null) ?? KIND_RGB[b.kind];
-      doc.rect(x + 0.6, y + 0.2, colW - 1.2, h, rgb.map((c) => Math.round(c + (255 - c) * 0.82)) as [number, number, number], rgb, 0.2);
-      doc.rect(x + 0.6, y + 0.2, 1, h, rgb);
-      const label = doc.wrap(b.label, colW - 4.5, 6.5);
+      doc.rect(lx, y + 0.2, lw - 0.3, h, rgb.map((c) => Math.round(c + (255 - c) * 0.82)) as [number, number, number], rgb, 0.2);
+      doc.rect(lx, y + 0.2, 1, h, rgb);
+      const label = doc.wrap(b.label, lw - 3.5, 6.5);
       const lines = h >= 7 ? [`${toHHMM(b.start)}-${toHHMM(b.end)}`, ...label] : [`${toHHMM(b.start)} ${label[0] ?? ""}`];
-      lines.slice(0, Math.max(1, Math.floor((h - 0.6) / 2.6))).forEach((l, k) => doc.text(x + 2.4, y + 2.9 + k * 2.6, l, 6.5, k === 0 && h >= 7 ? muted : ink, { bold: k === 1 }));
-    }
+      lines.slice(0, Math.max(1, Math.floor((h - 0.6) / 2.6))).forEach((l, k) => doc.text(lx + 1.8, y + 2.9 + k * 2.6, l, 6.5, k === 0 && h >= 7 ? muted : ink, { bold: k === 1 }));
+    });
   });
   doc.line(W - M, top - 6, W - M, H - M, grid);
   const blob = new Blob([doc.bytes()], { type: "application/pdf" });
@@ -960,6 +962,8 @@ const Planning: React.FC = () => {
   const today = todayISO();
   const date = iso(addDays(parseISO(today), offset));
   const plan = useMemo(() => planFor(state, date, today), [state, date, today]);
+  // Blocs simultanés (plusieurs matières au même moment) : la case est partagée verticalement en colonnes.
+  const lanes = useMemo(() => layoutLanes(plan.blocks), [plan.blocks]);
   // Semaine affichée : jours passés tels quels, jours à venir simulés depuis aujourd'hui (charge cohérente avec le tableau de bord).
   const week = useMemo(() => { const mon = iso(addDays(parseISO(date), -weekday(parseISO(date)))); return Array.from({ length: 7 }, (_, i) => planFor(state, iso(addDays(parseISO(mon), i)), today)); }, [state, date, today]);
   const [unav, setUnav] = useState({ day: 0, start: "18:00", end: "21:00", label: "" });
@@ -992,7 +996,7 @@ const Planning: React.FC = () => {
           <div className="mt-3 rounded-xl border border-warn/40 bg-warn/10 p-3 text-xs">
             <p className="mb-1 flex items-center gap-1.5 font-semibold text-warn"><AlertTriangle size={13} />Chevauchement{plan.conflicts.length > 1 ? "s" : ""} détecté{plan.conflicts.length > 1 ? "s" : ""}</p>
             {plan.conflicts.map((c, i) => <p key={i} className="text-muted"><span className="font-mono">{toHHMM(c.start)}–{toHHMM(c.end)}</span> · {c.a} / {c.b}</p>)}
-            <p className="mt-1 text-muted">Rien n'est déplacé automatiquement : modifiez l'emploi du temps ou vos indisponibilités ci-contre.</p>
+            <p className="mt-1 text-muted">Un cours tombe sur une indisponibilité ou un événement personnel. Rien n'est déplacé automatiquement.</p>
           </div>)}
         {plan.past && <p className="mt-3 text-xs text-muted">Journée passée : seuls les cours et indisponibilités sont affichés.</p>}
         <div className="relative mt-4 overflow-hidden rounded-lg border border-line" style={{ height: (endH - startH) * PX }}>
@@ -1002,10 +1006,11 @@ const Planning: React.FC = () => {
           {offset === 0 && nowMin > startH * 60 && nowMin < endH * 60 && (
             <div className="absolute inset-x-0 z-10 h-px bg-bad" style={{ top: ((nowMin - startH * 60) / 60) * PX }}><span className="absolute -left-0.5 -top-[3px] h-[7px] w-[7px] rounded-full bg-bad" /></div>
           )}
-          {plan.blocks.map((b, i) => (
-            <div key={i} onClick={b.kind === "task" && b.refId ? () => openTask(b.refId!) : undefined} title={b.kind === "task" ? "Bloc suggéré · cliquer pour modifier la tâche" : undefined}
-              className={cx("absolute left-14 right-2 overflow-hidden rounded-md px-2 py-1 text-xs transition hover:brightness-95", BLOCK_STYLE[b.kind], b.kind === "task" && "cursor-pointer")}
-              style={{ top: ((b.start - startH * 60) / 60) * PX + 1, height: Math.max(18, ((b.end - b.start) / 60) * PX - 2), borderLeftColor: b.color }}>
+          {plan.blocks.map((b, i) => { const ln = lanes[i]; return (
+            <div key={i} onClick={b.kind === "task" && b.refId ? () => openTask(b.refId!) : undefined} title={ln.lanes > 1 ? `${toHHMM(b.start)}–${toHHMM(b.end)} · ${b.label}` : b.kind === "task" ? "Bloc suggéré · cliquer pour modifier la tâche" : undefined}
+              className={cx("absolute overflow-hidden rounded-md px-2 py-1 text-xs transition hover:brightness-95", BLOCK_STYLE[b.kind], b.kind === "task" && "cursor-pointer", ln.lanes > 1 && "ring-1 ring-bg")}
+              style={{ top: ((b.start - startH * 60) / 60) * PX + 1, height: Math.max(18, ((b.end - b.start) / 60) * PX - 2), borderLeftColor: b.color,
+                left: `calc(3.5rem + (100% - 4rem) * ${ln.lane} / ${ln.lanes})`, width: `calc((100% - 4rem) / ${ln.lanes} - 3px)` }}>
               <div className="flex items-center gap-1.5">
                 <span className="font-mono text-[10px] tabular-nums text-muted">{toHHMM(b.start)}–{toHHMM(b.end)}</span>
                 {b.kind === "task" && <Zap size={10} className="text-accent" />}{b.kind === "chore" && <Home size={10} className="text-warn" />}{b.kind === "meal" && <Coffee size={10} />}{b.kind === "event" && <CalendarClock size={10} className="text-pink" />}
@@ -1013,9 +1018,9 @@ const Planning: React.FC = () => {
                   onClick={(e) => { e.stopPropagation(); const evt = state.events.find((x) => x.id === b.refId); if (!evt) return;
                     if (evt.recurrence === "none") undoable({ type: "event/remove", id: evt.id }, `« ${evt.title} » supprimé`); else undoable({ type: "event/skip", id: evt.id, date }, `« ${evt.title} » retiré ce jour-là`); }}>✕</button>}
               </div>
-              <p className="truncate font-medium text-fg">{b.label}</p>
+              <p className={cx("font-medium text-fg", ln.lanes > 1 ? "break-words leading-tight [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:4] overflow-hidden" : "truncate")}>{b.label}</p>
             </div>
-          ))}
+          ); })}
         </div>
         <p className="mt-2 text-xs text-muted">Les blocs <Zap size={10} className="inline text-accent" /> sont générés automatiquement : reste à faire ÷ jours avant l'échéance, ajusté par la priorité, placé dans les créneaux libres (blocs de {state.settings.maxBlock} min max, 10 min de pause entre deux).</p>
       </Card>

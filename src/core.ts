@@ -626,6 +626,23 @@ export interface DayPlan {
 /** Jours de rattrapage pour une tâche en retard : son reste est réparti sur cette fenêtre au lieu d'être tout mis aujourd'hui. */
 export const OVERDUE_SPREAD = 3;
 
+/** Colonnes pour afficher côte à côte les blocs qui se chevauchent : lane (0…) et nombre de colonnes du groupe. */
+export function layoutLanes<T extends { start: number; end: number }>(blocks: T[]): { lane: number; lanes: number }[] {
+  const order = blocks.map((b, i) => i).sort((a, b) => blocks[a].start - blocks[b].start || blocks[b].end - blocks[a].end);
+  const out = blocks.map(() => ({ lane: 0, lanes: 1 }));
+  let group: number[] = [], laneEnds: number[] = [], groupEnd = -1;
+  const close = () => { for (const i of group) out[i].lanes = laneEnds.length; group = []; laneEnds = []; };
+  for (const i of order) {
+    const b = blocks[i];
+    if (b.start >= groupEnd) close();
+    let lane = laneEnds.findIndex((e) => e <= b.start);
+    if (lane < 0) { lane = laneEnds.length; laneEnds.push(b.end); } else laneEnds[lane] = b.end;
+    out[i].lane = lane; group.push(i); groupEnd = Math.max(b.start >= groupEnd ? b.end : groupEnd, b.end);
+  }
+  close();
+  return out;
+}
+
 /**
  * Minutes à placer pour une tâche un jour donné : reste ÷ jours restants avant l'échéance
  * (on vise la veille), ajusté par la priorité, arrondi à 5 min.
@@ -707,6 +724,9 @@ export function planDay(state: AppState, date: string, remaining?: Map<ID, numbe
   const hard = fixed.filter((b) => isHard(b.kind)).sort((x, y) => x.start - y.start);
   const conflicts: Conflict[] = [];
   for (let i = 0; i < hard.length; i++) for (let j = i + 1; j < hard.length; j++) {
+    // Deux cours au même moment = choix possible (groupes, options) : pas un conflit. Seuls comptent les chevauchements
+    // avec une indisponibilité ou un événement personnel.
+    if (hard[i].kind === "class" && hard[j].kind === "class") continue;
     if (hard[j].start < hard[i].end) conflicts.push({ a: hard[i].label, b: hard[j].label, start: hard[j].start, end: Math.min(hard[i].end, hard[j].end) });
   }
   const past = date < today;
@@ -749,7 +769,9 @@ export function planDay(state: AppState, date: string, remaining?: Map<ID, numbe
     if (rest > 0) overflow.push({ task: t, minutes: rest });
   }
   blocks.sort((a, b) => a.start - b.start);
-  const classMin = fixed.filter((b) => b.kind === "class").reduce((n, b) => n + b.end - b.start, 0);
+  // Cours simultanés (au choix) : on compte le temps réellement occupé (union des créneaux), pas leur somme.
+  const classMin = fixed.filter((b) => b.kind === "class").sort((x, y) => x.start - y.start)
+    .reduce((acc, b) => { const s0 = Math.max(b.start, acc.end); return { end: Math.max(acc.end, b.end), n: acc.n + Math.max(0, b.end - s0) }; }, { end: -1, n: 0 }).n;
   const busyMin = fixed.filter((b) => b.kind === "busy" || b.kind === "event").reduce((n, b) => n + b.end - b.start, 0);
   const awakeMin = Math.max(1, bed - wake);
   const overflowMin = overflow.reduce((n, o) => n + o.minutes, 0);

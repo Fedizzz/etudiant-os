@@ -195,7 +195,7 @@ test("planning : retard réparti, jours passés sans bloc auto, indisponibilité
     classes: [{ id: "a", courseId: "x", day: 3, start: "09:00", end: "11:00", room: "" }, { id: "b", courseId: "y", day: 3, start: "10:30", end: "12:00", room: "" }],
     settings: { ...base().settings, unavailable: [{ id: "u", day: 3, start: "14:00", end: "18:00", label: "Job" }] } };
   const q = C.planFor(s, TODAY, TODAY);
-  assert.equal(q.conflicts.length, 1); assert.equal(q.busyMin, 240);
+  assert.equal(q.conflicts.length, 0, "deux cours simultanés ne sont pas un conflit"); assert.equal(q.busyMin, 240);
   assert.ok(q.blocks.some((b) => b.kind === "busy"));
 });
 
@@ -278,4 +278,17 @@ test("tâche à créneau précis : bloc fixe le jour choisi, pas de répartition
   assert.deepEqual([b.start, b.end], [14 * 60, 15 * 60 + 30]); assert.equal(d2.taskMin, 90);
   const v = validateState(JSON.parse(JSON.stringify({ ...s, tasks: [{ ...s.tasks[0], slot: { date: "x", start: "14:00", end: "13:00" } }] })));
   assert.ok(v.ok); if (v.ok) assert.equal("slot" in v.state.tasks[0], false);
+});
+
+test("cours simultanés : côte à côte (colonnes), sans alerte de chevauchement ; alerte seulement avec une indisponibilité", async () => {
+  const { layoutLanes, planDay, blank } = await import("../src/core.ts");
+  const L = layoutLanes([{ start: 510, end: 600 }, { start: 645, end: 750 }, { start: 645, end: 765 }, { start: 645, end: 765 }, { start: 800, end: 860 }]);
+  assert.deepEqual([L[0], L[4]], [{ lane: 0, lanes: 1 }, { lane: 0, lanes: 1 }]);
+  assert.deepEqual(L.slice(1, 4).map((x) => x.lanes), [3, 3, 3]); assert.deepEqual(L.slice(1, 4).map((x) => x.lane).sort(), [0, 1, 2]);
+  const s = blank({ name: "T" }, 600);
+  s.courses = [{ id: "c", name: "Maths", code: "M", coef: 1, color: "#000", grades: [] } as never];
+  s.classes = [{ id: "a", courseId: "c", day: 0, start: "10:45", end: "12:30", room: "B6d" }, { id: "b", courseId: "c", day: 0, start: "10:45", end: "12:45", room: "B5b" }];
+  assert.equal(planDay(s, "2026-10-19", undefined, "2026-10-19").conflicts.length, 0);
+  s.settings.unavailable = [{ id: "u", day: 0, start: "12:00", end: "14:00", label: "Job" }];
+  assert.ok(planDay(s, "2026-10-19", undefined, "2026-10-19").conflicts.length > 0);
 });
