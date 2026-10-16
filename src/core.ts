@@ -19,6 +19,8 @@ export interface ClassSession { id: ID; courseId: ID; day: number; start: string
 export interface Task {
   id: ID; title: string; courseId: ID | null; kind: TaskKind; status: TaskStatus;
   deadline: string; estimate: number; spent: number; priority: Priority; createdAt: string; doneAt?: string;
+  /** Créneau précis choisi par l'utilisateur (sinon : réparti automatiquement selon l'estimation). */
+  slot?: { date: string; start: string; end: string };
 }
 export interface GroceryItem { id: ID; name: string; aisle: Aisle; qty: string; checked: boolean; price: number }
 /** source et recurringId permettent de savoir d'où vient une dépense et d'éviter les doublons. */
@@ -365,7 +367,7 @@ export function validateState(x: unknown): { ok: true; state: AppState; repaired
   const state: AppState = {
     version: 1, courses,
     classes: keep<ClassSession>("créneaux", p.classes, (c) => isStr(c.id) && isNum(c.day) && isTime(c.start) && isTime(c.end)),
-    tasks: keep<Task>("tâches", p.tasks, (t) => isStr(t.id) && isStr(t.title) && isDate(t.deadline)).map((t) => ({ ...t, estimate: isNum(t.estimate) && t.estimate > 0 ? t.estimate : 60, spent: isNum(t.spent) && t.spent >= 0 ? t.spent : 0, priority: ([1, 2, 3].includes(t.priority) ? t.priority : 2) as Priority, status: (["todo", "doing", "review", "done"].includes(t.status) ? t.status : "todo") as TaskStatus })),
+    tasks: keep<Task>("tâches", p.tasks, (t) => isStr(t.id) && isStr(t.title) && isDate(t.deadline)).map((t) => ({ ...t, estimate: isNum(t.estimate) && t.estimate > 0 ? t.estimate : 60, spent: isNum(t.spent) && t.spent >= 0 ? t.spent : 0, priority: ([1, 2, 3].includes(t.priority) ? t.priority : 2) as Priority, status: (["todo", "doing", "review", "done"].includes(t.status) ? t.status : "todo") as TaskStatus, slot: t.slot && isDate(t.slot.date) && isTime(t.slot.start) && isTime(t.slot.end) && toMin(t.slot.end) > toMin(t.slot.start) ? t.slot : undefined })).map(({ slot, ...t }) => (slot ? { ...t, slot } : t)),
     groceries: keep<GroceryItem>("articles", p.groceries, (g) => isStr(g.id) && isStr(g.name)).map((g) => ({ ...g, price: isNum(g.price) && g.price >= 0 ? g.price : 0, checked: !!g.checked, qty: isStr(g.qty) ? g.qty : "" })),
     chores: keep<Chore>("corvées", p.chores, (c) => isStr(c.id) && isStr(c.name) && Array.isArray(c.assignees)).map((c) => {
       const { time, ...rest } = c;
@@ -664,6 +666,9 @@ export function planDay(state: AppState, date: string, remaining?: Map<ID, numbe
   for (let i = fixed.length - 1; i >= 0; i--) if (fixed[i].kind === "meal" && hardSpans.some(([s0, e0]) => s0 < fixed[i].end && e0 > fixed[i].start)) fixed.splice(i, 1);
   // Corvées à heure fixe (les miennes, non faites) : bloc fixe à l'heure choisie.
   const timedChores = date < today ? [] : chores.filter((c) => c.time && choreScheduledOn(c, d) && choreAssignee(c, d) === "Moi" && !c.done.includes(date) && !(c.skipped ?? []).includes(date));
+  // Tâches à créneau précis : bloc fixe le jour choisi.
+  for (const t of tasks) if (t.slot && t.status !== "done" && t.slot.date === date && toMin(t.slot.end) > toMin(t.slot.start))
+    fixed.push({ start: toMin(t.slot.start), end: toMin(t.slot.end), kind: "task", label: t.kind === "examen" ? `Révision · ${t.title}` : t.title, color: courses.find((c) => c.id === t.courseId)?.color, refId: t.id });
   for (const c of timedChores) fixed.push({ start: toMin(c.time!), end: toMin(c.time!) + c.minutes, kind: "chore", label: c.name, refId: c.id });
   // Chevauchements entre cours et indisponibilités (jamais déplacés automatiquement : seulement signalés).
   const hard = fixed.filter((b) => isHard(b.kind)).sort((x, y) => x.start - y.start);
@@ -681,7 +686,7 @@ export function planDay(state: AppState, date: string, remaining?: Map<ID, numbe
   if (cursor < bed - 30) free.push([cursor, bed - 30]);
 
   const due = past ? [] : chores.filter((c) => !c.time && choreScheduledOn(c, d) && choreAssignee(c, d) === "Moi" && !c.done.includes(date) && !(c.skipped ?? []).includes(date));
-  const open = tasks.filter((t) => t.status !== "done");
+  const open = tasks.filter((t) => t.status !== "done" && !t.slot);
   const overdue = open.filter((t) => t.deadline < today && (remaining?.get(t.id) ?? t.estimate - t.spent) > 0);
   const queue = (past ? [] : open)
     .map((t) => ({ t, q: dailyQuota(t, date, remaining ? remaining.get(t.id) ?? 0 : Math.max(0, t.estimate - t.spent), today) }))
@@ -704,7 +709,7 @@ export function planDay(state: AppState, date: string, remaining?: Map<ID, numbe
   let choreMin = timedChores.reduce((n, c) => n + c.minutes, 0);
   for (const c of due) { const rest = place(c.minutes, (s, e) => ({ start: s, end: e, kind: "chore", label: c.name, refId: c.id })); choreMin += c.minutes - rest; }
   const overflow: DayPlan["overflow"] = [];
-  let taskMin = 0;
+  let taskMin = fixed.filter((b) => b.kind === "task").reduce((n, b) => n + b.end - b.start, 0);
   for (const { t, q } of queue) {
     const rest = place(q, (s, e) => ({ start: s, end: e, kind: "task", label: t.kind === "examen" ? `Révision · ${t.title}` : t.title, color: color(t.courseId), refId: t.id }));
     taskMin += q - rest;

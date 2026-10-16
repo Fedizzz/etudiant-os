@@ -267,3 +267,15 @@ test("planning : événement bloquant et corvée à heure fixe", async () => {
   const bad = validateState(JSON.parse(JSON.stringify({ ...s, chores: [{ ...s.chores[0], time: "25:99" }], events: [{ id: "x", title: "y" }] })));
   assert.ok(bad.ok); if (bad.ok) { assert.equal(bad.state.chores[0].time, undefined); assert.equal(bad.state.events.length, 0); }
 });
+
+test("tâche à créneau précis : bloc fixe le jour choisi, pas de répartition automatique", async () => {
+  const { planDay, blank, validateState } = await import("../src/core.ts");
+  const s = blank({ name: "T" }, 600);
+  s.tasks = [{ id: "t", title: "Exposé", courseId: null, kind: "projet", deadline: "2026-10-20", estimate: 90, spent: 0, priority: 2, status: "todo", createdAt: "2026-10-14", slot: { date: "2026-10-15", start: "14:00", end: "15:30" } }];
+  const d1 = planDay(s, "2026-10-14", undefined, "2026-10-14"), d2 = planDay(s, "2026-10-15", undefined, "2026-10-14");
+  assert.equal(d1.blocks.filter((b) => b.kind === "task").length, 0, "répartie automatiquement");
+  const b = d2.blocks.find((x) => x.kind === "task")!;
+  assert.deepEqual([b.start, b.end], [14 * 60, 15 * 60 + 30]); assert.equal(d2.taskMin, 90);
+  const v = validateState(JSON.parse(JSON.stringify({ ...s, tasks: [{ ...s.tasks[0], slot: { date: "x", start: "14:00", end: "13:00" } }] })));
+  assert.ok(v.ok); if (v.ok) assert.equal("slot" in v.state.tasks[0], false);
+});

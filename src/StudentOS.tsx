@@ -307,35 +307,63 @@ export const BarChart: React.FC<{ data: { label: string; value: number; missing?
   };
 
 // ---------------------------------------------------------------- Formulaire tâche (partagé)
+/** Choix entre « durée » (placement automatique) et « horaire précis » (début / fin). */
+const TimeMode: React.FC<{ value: "duration" | "slot"; onChange: (v: "duration" | "slot") => void; id: string; className?: string }> = ({ value, onChange, id, className }) => (
+  <div className={cx("flex min-w-0 flex-col gap-1", className)}>
+    <span id={id} className="text-[11px] font-medium uppercase tracking-wider text-muted">Temps</span>
+    <div role="radiogroup" aria-labelledby={id} className="grid h-9 grid-cols-2 gap-1 rounded-xl border-2 border-line bg-sunken p-0.5 text-[12px] font-semibold">
+      {([["duration", "Durée"], ["slot", "Horaire précis"]] as const).map(([k, l]) => (
+        <button key={k} type="button" role="radio" aria-checked={value === k} onClick={() => onChange(k)}
+          className={cx("truncate rounded-lg px-2 transition", value === k ? "bg-panel text-fg shadow-[2px_2px_0_0_rgb(var(--ink))] ring-1 ring-fg/70" : "text-muted hover:text-fg")}>{l}</button>))}
+    </div>
+  </div>
+);
+
 const TaskForm: React.FC<{ onDone: () => void; task?: Task }> = ({ onDone, task }) => {
-  const { state, dispatch, toast, undoable } = useStore();
+  const { state, dispatch, toast } = useStore();
   const [f, setF] = useState(task
     ? { title: task.title, courseId: task.courseId ?? "", kind: task.kind, deadline: task.deadline, estimate: task.estimate, priority: task.priority, spent: task.spent }
     : { title: "", courseId: state.courses[0]?.id ?? "", kind: "devoir" as TaskKind, deadline: iso(addDays(new Date(), 3)), estimate: 120, priority: 2 as Priority, spent: 0 });
+  const [mode, setMode] = useState<"duration" | "slot">(task?.slot ? "slot" : "duration");
+  const [slot, setSlot] = useState(task?.slot ?? { date: todayISO(), start: "14:00", end: "16:00" });
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!f.title.trim()) { toast("Donnez un titre à la tâche.", "bad"); return; }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(f.deadline) || isNaN(parseISO(f.deadline).getTime())) { toast("Choisissez une date d'échéance valide.", "bad"); return; }
-    if (!(f.estimate >= 5)) { toast("L'estimation doit être d'au moins 5 minutes.", "bad"); return; }
+    let estimate = f.estimate, chosen: Task["slot"] | undefined;
+    if (mode === "slot") {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(slot.date)) { toast("Choisissez le jour du créneau.", "bad"); return; }
+      if (toMin(slot.end) <= toMin(slot.start)) { toast("L'heure de fin doit suivre l'heure de début.", "bad"); return; }
+      chosen = slot; estimate = toMin(slot.end) - toMin(slot.start);
+    } else if (!(f.estimate >= 5)) { toast("L'estimation doit être d'au moins 5 minutes.", "bad"); return; }
     if (!(f.spent >= 0)) { toast("Le temps passé ne peut pas être négatif.", "bad"); return; }
     if (!task && f.deadline < todayISO()) toast("Échéance déjà passée : la tâche apparaîtra en retard.", "info");
-    if (task) { dispatch({ type: "task/update", id: task.id, patch: { ...f, title: f.title.trim(), courseId: f.courseId || null } }); toast("Tâche mise à jour"); }
-    else { dispatch({ type: "task/add", task: { id: uid(), ...f, title: f.title.trim(), courseId: f.courseId || null, status: "todo", createdAt: todayISO() } }); toast("Tâche ajoutée et planifiée"); }
+    const data = { ...f, estimate, title: f.title.trim(), courseId: f.courseId || null, slot: chosen };
+    if (task) { dispatch({ type: "task/update", id: task.id, patch: data }); toast("Tâche mise à jour"); }
+    else { const { slot: sl, ...rest } = data; dispatch({ type: "task/add", task: { id: uid(), ...rest, ...(sl ? { slot: sl } : {}), status: "todo", createdAt: todayISO() } }); toast(sl ? `Tâche ajoutée : ${fmtDate(sl.date)}, ${sl.start}–${sl.end}` : "Tâche ajoutée et planifiée"); }
     onDone();
   };
   return (
-    <form onSubmit={submit} className="grid grid-cols-2 gap-3 sm:grid-cols-6">
-      <Field label="Titre" htmlFor="tf-title" className="col-span-2 sm:col-span-6"><Input id="tf-title" autoFocus value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder="Ex. Fiche de révision chapitre 4" /></Field>
+    <form onSubmit={submit} className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <Field label="Titre" htmlFor="tf-title" className="col-span-2 sm:col-span-4"><Input id="tf-title" autoFocus value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder="Ex. Fiche de révision chapitre 4" /></Field>
       <Field label="Module" htmlFor="tf-course" className="col-span-2"><Select id="tf-course" value={f.courseId} onChange={(e) => setF({ ...f, courseId: e.target.value })}>
         <option value="">Sans module</option>{state.courses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select></Field>
       <Field label="Type" htmlFor="tf-kind"><Select id="tf-kind" value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value as TaskKind })}>
         <option value="devoir">Devoir</option><option value="examen">Examen</option><option value="projet">Projet</option></Select></Field>
-      <Field label="Échéance" htmlFor="tf-dl"><Input id="tf-dl" type="date" value={f.deadline} onChange={(e) => setF({ ...f, deadline: e.target.value })} /></Field>
-      <Field label="Estimation (min)" htmlFor="tf-est"><Input id="tf-est" type="number" min={15} step={15} value={f.estimate} onChange={(e) => setF({ ...f, estimate: Math.max(15, Number(e.target.value)) })} /></Field>
       <Field label="Priorité" htmlFor="tf-prio"><Select id="tf-prio" value={f.priority} onChange={(e) => setF({ ...f, priority: Number(e.target.value) as Priority })}>
         <option value={1}>Basse</option><option value={2}>Normale</option><option value={3}>Haute</option></Select></Field>
+      <Field label="Échéance" htmlFor="tf-dl" className="col-span-2"><Input id="tf-dl" type="date" value={f.deadline} onChange={(e) => setF({ ...f, deadline: e.target.value })} /></Field>
+      <TimeMode id="tf-mode" value={mode} onChange={setMode} className="col-span-2" />
+      {mode === "duration" ? <>
+        <Field label="Durée estimée (min)" htmlFor="tf-est" className="col-span-2"><Input id="tf-est" type="number" min={15} step={15} value={f.estimate} onChange={(e) => setF({ ...f, estimate: Math.max(15, Number(e.target.value)) })} /></Field>
+        <p className="col-span-2 self-end pb-2 text-[11px] text-muted">Répartie automatiquement dans vos créneaux libres avant l'échéance.</p>
+      </> : <>
+        <Field label="Jour" htmlFor="tf-sday" className="col-span-2"><Input id="tf-sday" type="date" value={slot.date} onChange={(e) => setSlot({ ...slot, date: e.target.value })} /></Field>
+        <Field label="Début" htmlFor="tf-sstart"><Input id="tf-sstart" type="time" value={slot.start} onChange={(e) => setSlot({ ...slot, start: e.target.value })} /></Field>
+        <Field label="Fin" htmlFor="tf-send"><Input id="tf-send" type="time" value={slot.end} onChange={(e) => setSlot({ ...slot, end: e.target.value })} /></Field>
+      </>}
       {task && <Field label="Temps déjà passé (min)" htmlFor="tf-spent" className="col-span-2"><Input id="tf-spent" type="number" min={0} step={5} value={f.spent} onChange={(e) => setF({ ...f, spent: Math.max(0, Number(e.target.value)) })} /></Field>}
-      <div className="col-span-2 flex justify-end gap-2 sm:col-span-6"><Btn type="button" variant="ghost" onClick={onDone}>Annuler</Btn><Btn type="submit" variant="primary">{task ? <><Check size={14} />Enregistrer</> : <><Plus size={14} />Ajouter</>}</Btn></div>
+      <div className="col-span-2 flex justify-end gap-2 sm:col-span-4"><Btn type="button" variant="ghost" onClick={onDone}>Annuler</Btn><Btn type="submit" variant="primary">{task ? <><Check size={14} />Enregistrer</> : <><Plus size={14} />Ajouter</>}</Btn></div>
     </form>
   );
 };
@@ -1490,7 +1518,8 @@ const Chores: React.FC = () => {
   const days = Array.from({ length: 7 }, (_, i) => addDays(monday, i));
   // Sans colocataire (et sans corvée partagée), on masque tout ce qui concerne la rotation.
   const solo = isSolo(state);
-  const [f, setF] = useState({ name: "", recurrence: "weekly" as Recurrence, day: 5, minutes: 20, time: "", assignees: ["Moi", ...state.settings.roommates].join(", ") });
+  const [cmode, setCmode] = useState<"duration" | "slot">("duration");
+  const [f, setF] = useState({ name: "", recurrence: "weekly" as Recurrence, day: 5, minutes: 20, time: "18:00", end: "18:30", assignees: ["Moi", ...state.settings.roommates].join(", ") });
   const people = Array.from(new Set(state.chores.flatMap((c) => c.assignees)));
   const minutesBy = people.map((p) => ({ p, min: state.chores.reduce((n, c) => n + days.filter((d) => choreScheduledOn(c, d) && choreAssignee(c, d) === p).length * c.minutes, 0) }));
   const maxMin = Math.max(1, ...minutesBy.map((x) => x.min));
@@ -1508,7 +1537,7 @@ const Chores: React.FC = () => {
               <tbody>
                 {state.chores.map((c) => (
                   <tr key={c.id} className="group">
-                    <td className="pr-2"><p className="font-medium text-fg">{c.name}</p><p className="text-[11px] text-muted">{REC_LABEL[c.recurrence]}{c.time ? ` · ${c.time}` : ""} · {c.minutes} min</p></td>
+                    <td className="pr-2"><p className="font-medium text-fg">{c.name}</p><p className="text-[11px] text-muted">{REC_LABEL[c.recurrence]}{c.time ? ` · ${c.time}–${toHHMM(toMin(c.time) + c.minutes)}` : ` · ${c.minutes} min`}</p></td>
                     {days.map((d) => { const on = choreScheduledOn(c, d); const k = iso(d); const done = c.done.includes(k); const skipped = (c.skipped ?? []).includes(k); const who = choreAssignee(c, d); const by = c.doneBy?.[k] ?? who; return (
                       <td key={k} className="relative text-center">{on ? (<>
                         {skipped ? (
@@ -1547,14 +1576,19 @@ const Chores: React.FC = () => {
         <Card title="Nouvelle corvée">
           <form className="grid grid-cols-2 gap-2" onSubmit={(e) => { e.preventDefault(); const assignees = state.settings.roommates.length ? f.assignees.split(",").map((s) => s.trim()).filter(Boolean) : ["Moi"];
             if (!f.name.trim() || !assignees.length) { toast("Nom et au moins une personne requis.", "bad"); return; }
-            dispatch({ type: "chore/add", chore: { id: uid(), name: f.name.trim(), recurrence: f.recurrence, day: f.day, minutes: f.minutes, assignees, done: [], ...(f.time ? { time: f.time } : {}) } }); setF({ ...f, name: "" }); toast(state.settings.roommates.length ? "Corvée ajoutée à la rotation" : "Corvée ajoutée"); }}>
-            <Input id="ch-name" aria-label="Corvée" placeholder="Ex. Nettoyer la plaque" className="col-span-2" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
-            <Select id="ch-rec" aria-label="Récurrence" value={f.recurrence} onChange={(e) => setF({ ...f, recurrence: e.target.value as Recurrence })}>{(Object.keys(REC_LABEL) as Recurrence[]).map((r) => <option key={r} value={r}>{REC_LABEL[r]}</option>)}</Select>
-            <Select id="ch-day" aria-label="Jour" value={f.day} disabled={f.recurrence === "daily"} onChange={(e) => setF({ ...f, day: Number(e.target.value) })}>{DAYS_LONG.map((d, i) => <option key={d} value={i}>{d}</option>)}</Select>
-            <Input id="ch-min" aria-label="Durée (min)" type="number" min={5} step={5} value={f.minutes} onChange={(e) => setF({ ...f, minutes: Number(e.target.value) })} />
-            <Input id="ch-time" aria-label="Heure (facultatif)" title="Heure précise (facultatif) : sinon placée dans un créneau libre" type="time" value={f.time} onChange={(e) => setF({ ...f, time: e.target.value })} />
-            {state.settings.roommates.length > 0 && <Input id="ch-who" aria-label="Rotation (virgules)" placeholder="Moi, Inès" className="col-span-2" value={f.assignees} onChange={(e) => setF({ ...f, assignees: e.target.value })} />}
-            <p className="col-span-2 text-[11px] text-muted">Heure facultative : sans heure, la corvée est placée dans un créneau libre de votre planning.{!state.settings.roommates.length && " Ajoutez des colocataires dans Réglages pour activer la rotation."}</p>
+            if (cmode === "slot" && toMin(f.end) <= toMin(f.time)) { toast("L'heure de fin doit suivre l'heure de début.", "bad"); return; }
+            const minutes = cmode === "slot" ? toMin(f.end) - toMin(f.time) : f.minutes;
+            dispatch({ type: "chore/add", chore: { id: uid(), name: f.name.trim(), recurrence: f.recurrence, day: f.day, minutes, assignees, done: [], ...(cmode === "slot" ? { time: f.time } : {}) } }); setF({ ...f, name: "" }); toast(state.settings.roommates.length ? "Corvée ajoutée à la rotation" : "Corvée ajoutée"); }}>
+            <Field label="Corvée" htmlFor="ch-name" className="col-span-2"><Input id="ch-name" placeholder="Ex. Nettoyer la plaque" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
+            <Field label="Récurrence" htmlFor="ch-rec"><Select id="ch-rec" value={f.recurrence} onChange={(e) => setF({ ...f, recurrence: e.target.value as Recurrence })}>{(Object.keys(REC_LABEL) as Recurrence[]).map((r) => <option key={r} value={r}>{REC_LABEL[r]}</option>)}</Select></Field>
+            <Field label="Jour" htmlFor="ch-day"><Select id="ch-day" value={f.day} disabled={f.recurrence === "daily"} onChange={(e) => setF({ ...f, day: Number(e.target.value) })}>{DAYS_LONG.map((d, i) => <option key={d} value={i}>{d}</option>)}</Select></Field>
+            <TimeMode id="ch-mode" value={cmode} onChange={setCmode} className="col-span-2" />
+            {cmode === "duration"
+              ? <Field label="Durée (min)" htmlFor="ch-min" className="col-span-2"><Input id="ch-min" type="number" min={5} step={5} value={f.minutes} onChange={(e) => setF({ ...f, minutes: Number(e.target.value) })} /></Field>
+              : <><Field label="Début" htmlFor="ch-time"><Input id="ch-time" type="time" value={f.time} onChange={(e) => setF({ ...f, time: e.target.value })} /></Field>
+                <Field label="Fin" htmlFor="ch-end"><Input id="ch-end" type="time" value={f.end} onChange={(e) => setF({ ...f, end: e.target.value })} /></Field></>}
+            {state.settings.roommates.length > 0 && <Field label="Rotation (séparée par des virgules)" htmlFor="ch-who" className="col-span-2"><Input id="ch-who" placeholder="Moi, Inès" value={f.assignees} onChange={(e) => setF({ ...f, assignees: e.target.value })} /></Field>}
+            <p className="col-span-2 text-[11px] text-muted">{cmode === "duration" ? "La corvée est placée dans un créneau libre de votre planning." : "La corvée apparaît à cet horaire dans votre planning."}{!state.settings.roommates.length && " Ajoutez des colocataires dans Réglages pour activer la rotation."}</p>
             <Btn type="submit" variant="primary" className="col-span-2"><Plus size={14} />Ajouter</Btn>
           </form>
         </Card>
