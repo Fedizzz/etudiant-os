@@ -2,8 +2,9 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { flushSync } from "react-dom";
 import { MiniPdf } from "./pdf.ts";
 import { DAY_WORDS, dayOf, pageGeometry, parseGrid } from "./timetable.ts";
+import { parseIcs, normalizeFeedUrl, isFeedUrl } from "./ical.ts";
 import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, pad, parseAmount, parseISO, parseReceipt, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
-import type { Action, Aisle, AppState, Block, Budget, Course, DayPlan, Expense, ExpenseCat, GroceryTemplate, ID, Phase, PomodoroCfg, Priority, ReceiptResult, Recurrence, EventRecurrence, SettingsState, SleepLog, Task, TaskKind, TaskStatus, TemplateItem, ViewKey } from "./core.ts";
+import type { Action, Aisle, AppState, Block, Budget, Course, DayPlan, Expense, ExpenseCat, GroceryTemplate, ID, Phase, PomodoroCfg, Priority, ReceiptResult, Recurrence, EventRecurrence, CalFeed, FeedEvent, SettingsState, SleepLog, Task, TaskKind, TaskStatus, TemplateItem, ViewKey } from "./core.ts";
 import type { AppEnv } from "./env.ts";
 
 /* ============================================================================
@@ -838,6 +839,121 @@ const TimetableImport: React.FC = () => {
   );
 };
 
+// ---------------------------------------------------------------- Calendriers abonnés (.ics : Celcat, iPhone/iCloud, Google…)
+export const FEED_REFRESH_MS = 3 * 3600_000; // actualisation automatique toutes les 3 h
+const FEED_COLORS = ["#2f6fed", "#0f9d76", "#c2417a", "#d9822b", "#7a5af5", "#1d9bb5"];
+/** Télécharge et lit un flux, puis remplace ses événements (fenêtre : 2 semaines passées → 5 mois à venir). */
+async function syncFeed(f: CalFeed, fetchCalendar: (u: string) => Promise<string>, dispatch: (a: Action) => void): Promise<number> {
+  try {
+    const text = await fetchCalendar(f.url);
+    const today = todayISO();
+    const occ = parseIcs(text, iso(addDays(parseISO(today), -14)), iso(addDays(parseISO(today), 150)));
+    const events: FeedEvent[] = occ.slice(0, 3000).map((o) => ({ feedId: f.id, uid: o.uid, title: o.title.slice(0, 120), room: o.room.slice(0, 80), date: o.date, start: o.start, end: o.end, allDay: o.allDay }));
+    dispatch({ type: "feed/synced", id: f.id, events, at: new Date().toISOString() });
+    return events.length;
+  } catch (e) {
+    const msg = String((e as Error)?.message ?? e).replace(/^\w+Error:\s*/, "");
+    dispatch({ type: "feed/update", id: f.id, patch: { lastError: /fetch|network|Load failed/i.test(msg) ? "connexion impossible" : msg.slice(0, 160) } });
+    throw new Error(msg);
+  }
+}
+/** Actualisation automatique : au démarrage, au retour sur l'onglet, puis régulièrement (si le dernier essai a plus de 3 h). */
+function useFeedAutoSync(state: AppState, dispatch: (a: Action) => void, fetchCalendar?: (u: string) => Promise<string>) {
+  const ref = useRef(state); ref.current = state;
+  const busy = useRef(false);
+  useEffect(() => {
+    if (!fetchCalendar) return;
+    const run = async () => {
+      if (busy.current || document.visibilityState !== "visible" || !navigator.onLine) return;
+      busy.current = true;
+      try {
+        for (const f of ref.current.settings.feeds ?? []) {
+          const last = f.lastSync ? Date.parse(f.lastSync) : 0;
+          if (Date.now() - last < FEED_REFRESH_MS) continue;
+          await syncFeed(f, fetchCalendar, dispatch).catch(() => {});
+        }
+      } finally { busy.current = false; }
+    };
+    const t0 = window.setTimeout(run, 2500);
+    const iv = window.setInterval(run, 10 * 60_000);
+    document.addEventListener("visibilitychange", run);
+    return () => { window.clearTimeout(t0); window.clearInterval(iv); document.removeEventListener("visibilitychange", run); };
+  }, [fetchCalendar, dispatch]);
+}
+const sinceText = (iso?: string | null) => { if (!iso) return "jamais"; const m = Math.round((Date.now() - Date.parse(iso)) / 60000); return m < 1 ? "à l'instant" : m < 60 ? `il y a ${m} min` : m < 1440 ? `il y a ${Math.round(m / 60)} h` : new Date(iso).toLocaleDateString("fr-FR", { day: "numeric", month: "short" }); };
+
+const CalendarFeeds: React.FC = () => {
+  const { state, dispatch, toast, undoable, env } = useStore();
+  const feeds = state.settings.feeds ?? [];
+  const [f, setF] = useState({ name: "Emploi du temps", url: "" });
+  const [busy, setBusy] = useState<string | null>(null);
+  const [help, setHelp] = useState(false);
+  const fetchCal = env.fetchCalendar;
+  const refresh = async (feed: CalFeed) => {
+    if (!fetchCal) return;
+    setBusy(feed.id);
+    try { const n = await syncFeed(feed, fetchCal, dispatch); toast(`${feed.name} : ${n} événement${n > 1 ? "s" : ""} synchronisé${n > 1 ? "s" : ""}`); }
+    catch (e) { toast(`${feed.name} : ${(e as Error).message}`, "bad"); }
+    finally { setBusy(null); }
+  };
+  const add = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const url = normalizeFeedUrl(f.url);
+    if (!isFeedUrl(url)) { toast("Collez un lien de calendrier complet (https://… ou webcal://…).", "bad"); return; }
+    if (feeds.some((x) => x.url === url)) { toast("Ce calendrier est déjà abonné.", "info"); return; }
+    const feed: CalFeed = { id: uid(), name: f.name.trim().slice(0, 40) || "Calendrier", url, color: FEED_COLORS[feeds.length % FEED_COLORS.length], lastSync: null, lastError: null };
+    dispatch({ type: "feed/add", feed });
+    setF({ name: "Emploi du temps", url: "" });
+    await refresh(feed);
+  };
+  return (
+    <Card title={<span className="flex items-center gap-2"><Repeat size={15} />Calendriers synchronisés</span>} action={<Btn size="sm" variant="ghost" onClick={() => setHelp(true)}>Où trouver le lien ?</Btn>}>
+      {feeds.length > 0 && (
+        <ul className="mb-3 flex flex-col gap-2" data-testid="feeds-list">{feeds.map((x) => (
+          <li key={x.id} className="rounded-xl border-2 border-line p-2.5 text-xs">
+            <div className="flex items-center gap-2">
+              <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: x.color }} />
+              <span className="min-w-0 flex-1 truncate font-semibold">{x.name}</span>
+              <Btn size="sm" variant="ghost" disabled={busy === x.id || !fetchCal} onClick={() => void refresh(x)} aria-label={`Actualiser ${x.name}`}><RotateCcw size={12} />{busy === x.id ? "…" : ""}</Btn>
+              <button className="text-muted hover:text-bad" aria-label={`Retirer ${x.name}`} onClick={() => undoable({ type: "feed/remove", id: x.id }, `Calendrier « ${x.name} » retiré`)}><Trash2 size={12} /></button>
+            </div>
+            <p className={cx("mt-1", x.lastError ? "text-bad" : "text-muted")} data-testid="feed-status">
+              {x.lastError ? `Échec : ${x.lastError}` : `${x.count ?? 0} événement${(x.count ?? 0) > 1 ? "s" : ""} · actualisé ${sinceText(x.lastSync)}`}
+            </p>
+          </li>))}</ul>)}
+      <form onSubmit={(e) => void add(e)} className="grid grid-cols-2 gap-2">
+        <Field label="Nom" htmlFor="fd-name" className="col-span-2"><Input id="fd-name" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="Celcat, iPhone…" /></Field>
+        <Field label="Lien du calendrier (.ics / webcal)" htmlFor="fd-url" className="col-span-2"><Input id="fd-url" inputMode="url" autoCapitalize="off" autoCorrect="off" value={f.url} onChange={(e) => setF({ ...f, url: e.target.value })} placeholder="https://…/ical… ou webcal://…" /></Field>
+        <Btn type="submit" variant="primary" className="col-span-2" disabled={!!busy}><Plus size={14} />S'abonner</Btn>
+      </form>
+      <p className="mt-2 text-[11px] text-muted">Les cours apparaissent dans le planning et sont mis à jour automatiquement toutes les 3 h quand l'application est ouverte (bouton ↻ pour forcer). Le lien est personnel : il est enregistré seulement dans votre compte.</p>
+      {help && (
+        <Modal title="Trouver le lien de son calendrier" onClose={() => setHelp(false)}>
+          <div className="flex flex-col gap-4 text-[13px] leading-relaxed">
+            <section><h3 className="font-display text-[15px] font-bold">Celcat (emploi du temps de l'université)</h3>
+              <ol className="ml-4 mt-1 list-decimal space-y-1">
+                <li>Connectez-vous à Celcat (« Celcat Calendar » ou « Timetable ») depuis un navigateur, sur ordinateur de préférence.</li>
+                <li>Affichez votre emploi du temps (votre groupe ou « Mon emploi du temps »).</li>
+                <li>Cherchez le bouton <b>« Abonnement »</b>, <b>« S'abonner »</b>, <b>« Exporter »</b>, <b>« iCal »</b> ou une icône de calendrier / partage (souvent en haut à droite ou dans le menu ⋮).</li>
+                <li>Copiez le lien proposé (il finit souvent par <code>.ics</code> ou contient <code>ical</code> / <code>ics</code> ; il peut commencer par <code>webcal://</code>).</li>
+                <li>Collez-le ici. Pas de bouton ? Le lien est parfois dans le mail de rentrée ou sur l'ENT ; la scolarité ou le service informatique peut aussi le fournir.</li>
+              </ol></section>
+            <section><h3 className="font-display text-[15px] font-bold">Calendrier de l'iPhone (iCloud)</h3>
+              <ol className="ml-4 mt-1 list-decimal space-y-1">
+                <li>App <b>Calendrier</b> → <b>Calendriers</b> (en bas) → touchez <b>ⓘ</b> à côté du calendrier.</li>
+                <li>Activez <b>« Calendrier public »</b>, puis <b>« Partager le lien »</b> → Copier.</li>
+                <li>Collez-le ici (<code>webcal://…icloud.com/…</code> est accepté).</li>
+              </ol>
+              <p className="mt-1 text-muted">Si votre emploi du temps est déjà un « calendrier abonné » sur l'iPhone : Réglages → Calendrier → Comptes → Calendriers abonnés → touchez-le pour voir et copier son adresse.</p></section>
+            <section><h3 className="font-display text-[15px] font-bold">Google Agenda</h3>
+              <p>Paramètres de l'agenda → « Intégrer l'agenda » → <b>Adresse secrète au format iCal</b>.</p></section>
+            <p className="rounded-xl bg-sunken p-3 text-[12px] text-muted">Pourquoi pas un accès direct au calendrier de l'iPhone ? Étudiant.OS est une application web : iOS réserve l'accès au calendrier (EventKit) aux applications installées depuis l'App Store. Le lien d'abonnement donne le même résultat et se met à jour tout seul.</p>
+          </div>
+        </Modal>)}
+    </Card>
+  );
+};
+
 const Planning: React.FC = () => {
   const { state, dispatch, toast, openTask, undoable } = useStore();
   const [offset, setOffset] = useState(0);
@@ -920,6 +1036,7 @@ const Planning: React.FC = () => {
                 <span className="text-[10px] text-muted">{DAYS[weekday(parseISO(p.date))]}</span><span className="font-mono text-[10px] tabular-nums">{Math.round(p.load * 100)}%</span></button>); })}
           </div>
         </Card>
+        <CalendarFeeds />
         <Card title={<span className="flex items-center gap-2"><CalendarClock size={15} />Événements</span>} action={<span className="text-[11px] text-muted">rendez-vous, sport, sorties…</span>}>
           {upcomingEvents.length ? (
             <ul className="mb-3 flex flex-col gap-1 text-xs" data-testid="events-list">{upcomingEvents.map((e) => (
@@ -2180,6 +2297,7 @@ export interface StudentOSProps {
 }
 export default function StudentOS({ state, dispatch, env, view, onView, notice, headerExtra, menuExtra, override }: StudentOSProps) {
   const stateRef = useRef(state); stateRef.current = state;
+  useFeedAutoSync(state, dispatch, env.fetchCalendar);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [editTask, setEditTask] = useState<ID | null>(null);
   const setViewRaw = onView;

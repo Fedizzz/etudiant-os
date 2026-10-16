@@ -8,8 +8,8 @@
     "build": "node scripts/build.mjs",
     "dev": "node scripts/build.mjs --dev && node scripts/serve.mjs",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "node --test --experimental-strip-types tests/core.test.ts tests/sync.test.ts tests/router.test.ts tests/support-model.test.ts tests/timetable.test.ts",
-    "test:db": "node --test --test-concurrency=1 --experimental-strip-types tests/db.test.ts tests/support.test.ts",
+    "test": "TZ=Europe/Paris node --test --experimental-strip-types tests/ical.test.ts tests/core.test.ts tests/sync.test.ts tests/router.test.ts tests/support-model.test.ts tests/timetable.test.ts",
+    "test:db": "node --test --test-concurrency=1 --experimental-strip-types tests/db.test.ts tests/support.test.ts tests/calendar.test.ts",
     "test:e2e": "node tests/e2e.mjs",
     "test:e2e:support": "node --experimental-strip-types tests/e2e-support.ts"
   },

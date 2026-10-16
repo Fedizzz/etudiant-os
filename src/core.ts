@@ -33,6 +33,10 @@ export interface RecurringExpense { id: ID; label: string; amount: number; categ
 export interface Budget { monthly: number; limits: Partial<Record<ExpenseCat, number>>; expenses: Expense[]; recurring: RecurringExpense[] }
 /** done : dates faites · doneBy : qui l'a faite ce jour-là · skipped : dates reportées. */
 export interface Chore { id: ID; name: string; recurrence: Recurrence; day: number; minutes: number; assignees: string[]; done: string[]; doneBy?: Record<string, string>; skipped?: string[]; /** Heure fixe « HH:MM » (sinon placée automatiquement dans un créneau libre). */ time?: string }
+/** Calendrier externe abonné (lien .ics Celcat, iCloud, Google…). */
+export interface CalFeed { id: ID; name: string; url: string; color: string; lastSync: string | null; lastError: string | null; count?: number }
+/** Occurrence importée d'un calendrier abonné (remplacée à chaque actualisation). */
+export interface FeedEvent { feedId: ID; uid: string; title: string; room: string; date: string; start: string; end: string; allDay: boolean }
 export type EventRecurrence = "none" | "daily" | "weekly" | "biweekly" | "monthly";
 /** Événement personnel du planning (rendez-vous, sport, job…) à heure précise, ponctuel ou récurrent. */
 export interface PlanEvent { id: ID; title: string; date: string; start: string; end: string; recurrence: EventRecurrence; until: string | null; color?: string; skipped?: string[] }
@@ -53,6 +57,8 @@ export interface SettingsState {
   gradeTarget: number | null; focusGoal: number; unavailable: Unavailability[];
   /** Catégories de dépenses ajoutées par l'utilisateur. */
   customCats?: string[];
+  /** Calendriers abonnés (.ics). */
+  feeds?: CalFeed[];
 }
 export interface QuickExpense { label: string; amount: number; category: ExpenseCat }
 export interface TemplateItem { name: string; aisle: Aisle; qty: string; price: number }
@@ -63,6 +69,8 @@ export interface AppState {
   version: 1; courses: Course[]; classes: ClassSession[]; tasks: Task[]; groceries: GroceryItem[];
   chores: Chore[]; sleep: SleepLog[]; focus: FocusEntry[]; budget: Budget; settings: SettingsState;
   events: PlanEvent[];
+  /** Événements des calendriers abonnés (cache synchronisé, fenêtre de quelques mois). */
+  feedEvents?: FeedEvent[];
   templates: GroceryTemplate[]; products: Product[]; timer: TimerState;
 }
 
@@ -201,6 +209,8 @@ export type Action =
   | { type: "expense/update"; id: ID; patch: Partial<Expense> }
   | { type: "recurring/save"; item: RecurringExpense } | { type: "recurring/remove"; id: ID } | { type: "recurring/sync"; today: string }
   | { type: "chore/skip"; id: ID; date: string }
+  | { type: "feed/add"; feed: CalFeed } | { type: "feed/remove"; id: ID } | { type: "feed/update"; id: ID; patch: Partial<CalFeed> }
+  | { type: "feed/synced"; id: ID; events: FeedEvent[]; at: string }
   | { type: "event/add"; event: PlanEvent } | { type: "event/remove"; id: ID } | { type: "event/skip"; id: ID; date: string }
   | { type: "timer/start"; now: number } | { type: "timer/pause"; now: number } | { type: "timer/reset" }
   | { type: "timer/phase"; phase: Phase } | { type: "timer/task"; taskId: ID | null } | { type: "timer/course"; courseId: ID | null }
@@ -263,6 +273,13 @@ export function reducer(s: AppState, a: Action): AppState {
     case "budget/set": return { ...s, budget: { ...s.budget, ...a.patch } };
     case "grocery/clearChecked": return { ...s, groceries: s.groceries.filter((g) => !g.checked) };
     case "chore/add": return { ...s, chores: [...s.chores, a.chore] };
+    case "feed/add": return { ...s, settings: { ...s.settings, feeds: [...(s.settings.feeds ?? []), a.feed] } };
+    case "feed/remove": return { ...s, settings: { ...s.settings, feeds: (s.settings.feeds ?? []).filter((f) => f.id !== a.id) }, feedEvents: (s.feedEvents ?? []).filter((e) => e.feedId !== a.id) };
+    case "feed/update": return { ...s, settings: { ...s.settings, feeds: (s.settings.feeds ?? []).map((f) => (f.id === a.id ? { ...f, ...a.patch } : f)) } };
+    case "feed/synced":
+      if (!(s.settings.feeds ?? []).some((f) => f.id === a.id)) return s; // flux supprimé entre-temps
+      return { ...s, feedEvents: [...(s.feedEvents ?? []).filter((e) => e.feedId !== a.id), ...a.events],
+        settings: { ...s.settings, feeds: (s.settings.feeds ?? []).map((f) => (f.id === a.id ? { ...f, lastSync: a.at, lastError: null, count: a.events.length } : f)) } };
     case "event/add": return { ...s, events: [...(s.events ?? []), a.event] };
     case "event/remove": return { ...s, events: (s.events ?? []).filter((e) => e.id !== a.id) };
     case "event/skip": return { ...s, events: (s.events ?? []).map((e) => e.id === a.id ? { ...e, skipped: [...(e.skipped ?? []).filter((d) => d !== a.date), a.date] } : e) };
@@ -360,6 +377,7 @@ export function validateState(x: unknown): { ok: true; state: AppState; repaired
   settings.roommates = Array.isArray(settings.roommates) ? settings.roommates.filter(isStr) : [];
   settings.hiddenViews = Array.isArray(settings.hiddenViews) ? settings.hiddenViews : [];
   settings.quickExpenses = Array.isArray(settings.quickExpenses) ? settings.quickExpenses.filter((q) => q && isStr(q.label) && isNum(q.amount)) : DEFAULT_SETTINGS.quickExpenses;
+  settings.feeds = Array.isArray(settings.feeds) ? settings.feeds.filter((f) => f && isStr(f.id) && isStr(f.url)).map((f) => ({ id: f.id, name: isStr(f.name) ? f.name.slice(0, 40) : "Calendrier", url: f.url.slice(0, 2000), color: isStr(f.color) ? f.color : "#2f6fed", lastSync: isStr(f.lastSync) ? f.lastSync : null, lastError: isStr(f.lastError) ? f.lastError : null, ...(isNum(f.count) ? { count: f.count } : {}) })) : [];
   settings.customCats = Array.isArray(settings.customCats) ? [...new Set(settings.customCats.filter((c) => isStr(c) && c.trim()).map((c) => c.trim().slice(0, 24)))].slice(0, 30) : [];
   settings.unavailable = Array.isArray(settings.unavailable) ? settings.unavailable.filter((u) => u && isTime(u.start) && isTime(u.end) && isNum(u.day)) : [];
   if (!isNum(settings.focusGoal) || settings.focusGoal < 0) settings.focusGoal = DEFAULT_SETTINGS.focusGoal;
@@ -382,6 +400,7 @@ export function validateState(x: unknown): { ok: true; state: AppState; repaired
       const { time, ...rest } = c;
       return { ...rest, done: Array.isArray(c.done) ? c.done.filter(isDate) : [], skipped: Array.isArray(c.skipped) ? c.skipped.filter(isDate) : [], doneBy: c.doneBy && typeof c.doneBy === "object" ? c.doneBy : {}, ...(isTime(time) ? { time } : {}) };
     }),
+    feedEvents: Array.isArray(p.feedEvents) ? (p.feedEvents as FeedEvent[]).filter((e) => e && isStr(e.feedId) && isDate(e.date) && isTime(e.start) && isTime(e.end)).slice(0, 5000) : [],
     events: keep<PlanEvent>("événements", Array.isArray(p.events) ? p.events : [], (e) => isStr(e.id) && isStr(e.title) && isDate(e.date) && isTime(e.start) && isTime(e.end))
       .map((e) => ({ ...e, recurrence: (["none", "daily", "weekly", "biweekly", "monthly"].includes(e.recurrence) ? e.recurrence : "none") as EventRecurrence, until: isDate(e.until) ? e.until : null, skipped: Array.isArray(e.skipped) ? e.skipped.filter(isDate) : [] })),
     sleep: keep<SleepLog>("nuits", p.sleep, (l) => isDate(l.date) && isTime(l.bed) && isTime(l.wake)),
@@ -652,11 +671,15 @@ export function planDay(state: AppState, date: string, remaining?: Map<ID, numbe
   const { settings, classes, courses, tasks, chores } = state;
   const isHard = (k: Block["kind"]) => k === "class" || k === "busy" || k === "event";
   const dayEvents = (state.events ?? []).filter((e) => eventOn(e, date) && toMin(e.end) > toMin(e.start));
+  const feedColor = new Map((settings.feeds ?? []).map((f) => [f.id, f.color]));
+  const dayFeed = (state.feedEvents ?? []).filter((e) => e.date === date && !e.allDay && feedColor.has(e.feedId) && toMin(e.end) > toMin(e.start));
   const wd = weekday(d);
   const dayClasses = classes.filter((c) => classOn(c, date)).sort((a, b) => toMin(a.start) - toMin(b.start));
   const nextDay = addDays(d, 1);
-  const tomorrowFirst = classes.filter((c) => classOn(c, iso(nextDay))).map((c) => toMin(c.start)).sort((a, b) => a - b)[0];
-  const wake = dayClasses.length ? Math.min(toMin(settings.wakeDefault), toMin(dayClasses[0].start) - settings.prepMinutes) : toMin(settings.wakeDefault) + 60;
+  const tomorrowFirst = [...classes.filter((c) => classOn(c, iso(nextDay))).map((c) => toMin(c.start)),
+    ...(state.feedEvents ?? []).filter((e) => e.date === iso(nextDay) && !e.allDay && feedColor.has(e.feedId)).map((e) => toMin(e.start))].sort((a, b) => a - b)[0];
+  const firstToday = [...dayClasses.map((c) => toMin(c.start)), ...dayFeed.map((e) => toMin(e.start))].sort((a, b) => a - b)[0];
+  const wake = firstToday !== undefined ? Math.min(toMin(settings.wakeDefault), firstToday - settings.prepMinutes) : toMin(settings.wakeDefault) + 60;
   let bed = toMin(settings.bedDefault);
   if (tomorrowFirst !== undefined) {
     const idealBed = tomorrowFirst - settings.prepMinutes - 5 * 90 - settings.fallAsleep + 1440;
@@ -669,6 +692,7 @@ export function planDay(state: AppState, date: string, remaining?: Map<ID, numbe
     { start: 12 * 60 + 15, end: 13 * 60, kind: "meal" as const, label: "Déjeuner" },
     { start: 19 * 60 + 45, end: 20 * 60 + 30, kind: "meal" as const, label: "Dîner" },
     ...(settings.unavailable ?? []).filter((u) => u.day === wd && toMin(u.end) > toMin(u.start)).map((u): Block => ({ start: toMin(u.start), end: toMin(u.end), kind: "busy", label: u.label || "Indisponible", refId: u.id })),
+    ...dayFeed.map((e): Block => ({ start: toMin(e.start), end: toMin(e.end), kind: "class", label: e.room ? `${e.title} · ${e.room}` : e.title, color: feedColor.get(e.feedId), refId: e.uid })),
     ...dayEvents.map((e): Block => ({ start: toMin(e.start), end: toMin(e.end), kind: "event", label: e.title, color: e.color, refId: e.id })),
   ];
   const hardSpans = fixed.filter((b) => isHard(b.kind)).map((b) => [b.start, b.end]);
@@ -725,7 +749,7 @@ export function planDay(state: AppState, date: string, remaining?: Map<ID, numbe
     if (rest > 0) overflow.push({ task: t, minutes: rest });
   }
   blocks.sort((a, b) => a.start - b.start);
-  const classMin = dayClasses.reduce((n, c) => n + toMin(c.end) - toMin(c.start), 0);
+  const classMin = fixed.filter((b) => b.kind === "class").reduce((n, b) => n + b.end - b.start, 0);
   const busyMin = fixed.filter((b) => b.kind === "busy" || b.kind === "event").reduce((n, b) => n + b.end - b.start, 0);
   const awakeMin = Math.max(1, bed - wake);
   const overflowMin = overflow.reduce((n, o) => n + o.minutes, 0);

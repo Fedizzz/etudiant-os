@@ -64,7 +64,14 @@ Un administrateur dont l'adresse quitte la liste, change ou n'est plus confirmé
 
 **Suppression d'un compte par un administrateur** : en deux étapes (lancement = suspension immédiate ; puis suppression définitive avec saisie de l'adresse). Les fichiers sont supprimés par l'API Storage, puis le compte ; le journal d'audit conserve la trace.
 
-## 7. Avant d'ouvrir au public
+## 7. Calendriers synchronisés (Celcat, iPhone, Google)
+
+La migration `20261018000001_calendar_feeds.sql` active l'extension `http` de Postgres et ajoute `fetch_calendar(url)` : la base télécharge le flux .ics pour l'utilisateur connecté (les navigateurs bloquent la lecture directe de ces liens). Garde-fous : https uniquement, pas d'adresse interne/privée, 12 s max, 4 Mo max, contenu iCalendar obligatoire, 40 appels/heure/compte.
+- Rien d'autre à configurer : appliquez la migration comme les autres. Si l'extension `http` est refusée, activez-la dans Database → Extensions → `http` (schéma `extensions`).
+- Limite connue : une adresse publique qui redirige vers une adresse interne n'est pas filtrée par nom ; seul un contenu iCalendar est renvoyé au client.
+- L'actualisation automatique (toutes les 3 h) se fait quand l'application est ouverte ; il n'y a pas de tâche planifiée côté serveur.
+
+## 8. Avant d'ouvrir au public
 
 - [ ] Compléter les mentions entre crochets des pages Confidentialité et Conditions (éditeur, contact, hébergeur, région) et les faire relire.
 - [ ] SMTP de production configuré, e-mails de test reçus (inscription, mot de passe oublié, changement d'adresse).

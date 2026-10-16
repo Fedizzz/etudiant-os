@@ -12,6 +12,14 @@ import { myRole, watchNotifications, unreadNotifications, isMine } from "./suppo
 import { BASE } from "./supabase.ts";
 
 const localFiles = { save: fileSave, load: fileLoad, remove: fileDelete };
+/** Sans compte : lecture directe (fonctionne seulement si le serveur du calendrier l'autorise — CORS). */
+async function directCalendarFetch(url: string): Promise<string> {
+  let r: Response;
+  try { r = await fetch(url.replace(/^webcals?:\/\//i, "https://")); }
+  catch { throw new Error("Ce calendrier ne peut pas être lu directement par le navigateur. Connectez-vous à un compte : la synchronisation passe alors par le serveur."); }
+  if (!r.ok) throw new Error(`le serveur du calendrier a répondu ${r.status}`);
+  return r.text();
+}
 
 // ------------------------------------------------------------- Mode local (sans compte)
 export function LocalHost({ view, onView }: { view: ViewKey; onView: (v: ViewKey) => void }) {
@@ -22,7 +30,7 @@ export function LocalHost({ view, onView }: { view: ViewKey; onView: (v: ViewKey
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
     catch { setNotice("Enregistrement impossible dans ce navigateur (stockage plein ou bloqué). Exportez vos données depuis Réglages."); }
   }, [state]);
-  const env = useMemo<AppEnv>(() => ({ mode: "local", ns: STORAGE_KEY, files: localFiles }), []);
+  const env = useMemo<AppEnv>(() => ({ mode: "local", ns: STORAGE_KEY, files: localFiles, fetchCalendar: directCalendarFetch }), []);
   return <StudentOS state={state} dispatch={dispatch} env={env} view={view} onView={onView} notice={notice} />;
 }
 
@@ -123,6 +131,7 @@ export function CloudHost({ sb, session, view, onView, onSignedOut, support, nav
   const env = useMemo<AppEnv>(() => ({
     mode: "cloud", ns: `etudiant-os/u/${uid}`, files: cloudFiles(sb, uid), account,
     sync: { status: snap.status, pending: snap.pending, lastSyncedAt: snap.lastSyncedAt, error: snap.error, conflicts: snap.conflicts, online: snap.status !== "offline", retry: () => void engine.reconnect() },
+    fetchCalendar: async (url: string) => { const { data, error } = await sb.rpc("fetch_calendar", { p_url: url }); if (error) throw new Error(error.message); return data as string; },
     support: { isAdmin, unread, open: (page) => nav({ name: "support", page }), openAdmin: () => nav({ name: "admin", section: "dashboard" }) },
   }), [sb, uid, account, snap, engine, isAdmin, unread, nav]);
 
