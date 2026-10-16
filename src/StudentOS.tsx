@@ -2084,7 +2084,7 @@ export default function StudentOS({ state, dispatch, env, view, onView, notice, 
           </div>
         </aside>
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="sticky top-0 z-20 border-b-2 border-dashed border-line bg-bg/80 backdrop-blur-md" style={{ top: "env(safe-area-inset-top, 0px)" }}>
+          <header className="relative z-20 border-b-2 border-dashed border-line bg-bg/80 md:sticky md:top-0 md:backdrop-blur-md" style={{ top: "env(safe-area-inset-top, 0px)" }}>
             <div className="mx-auto flex max-w-6xl 2xl:max-w-[1560px] min-[2200px]:max-w-[1880px] items-center gap-3 py-3 px-4 sm:px-6">
               <div className="min-w-0 flex-1"><p className="truncate text-xs text-muted">{greet} {state.settings.name}<span className="hidden min-[400px]:inline"> · {new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}</span></p>
                 <h1 className="truncate pb-0.5 font-display text-[19px] min-[400px]:text-[21px] sm:text-[26px] font-extrabold leading-tight tracking-tight"><span key={override?.key ?? view} className="marker">{override?.title ?? current.label}<svg viewBox="0 0 200 20" preserveAspectRatio="none" aria-hidden><path d="M2 12 C 40 6, 80 16, 120 9 S 180 6, 198 11" /></svg></span></h1></div>

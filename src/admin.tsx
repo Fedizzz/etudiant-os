@@ -73,7 +73,7 @@ function AdminShell({ sb, session, section, id, nav }: { sb: SupabaseClient; ses
         </div>
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-20 border-b-2 border-dashed border-line bg-bg/85 backdrop-blur-md">
+        <header className="relative z-20 border-b-2 border-dashed border-line bg-bg/85 md:sticky md:top-0 md:backdrop-blur-md">
           <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3 sm:px-6">
             <div className="min-w-0 flex-1"><p className="text-xs text-muted">Espace administrateur</p><h1 className="truncate font-display text-[21px] font-extrabold tracking-tight sm:text-[26px]">{title}</h1></div>
             <Btn variant="ghost" size="sm" onClick={toggleTheme} aria-label="Changer de thème">{dark ? <Sun size={15} /> : <Moon size={15} />}</Btn>
