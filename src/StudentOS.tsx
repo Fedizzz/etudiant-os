@@ -1038,6 +1038,108 @@ const CalendarFeeds: React.FC = () => {
   );
 };
 
+// ---------------------------------------------------------------- Détail d'un créneau + couleurs + vue semaine
+const BLOCK_COLORS: { k: string; label: string; hex: string }[] = [
+  { k: "rouge", label: "Rouge", hex: "#e5484d" }, { k: "orange", label: "Orange", hex: "#f08c2e" }, { k: "jaune", label: "Jaune", hex: "#d4a017" },
+  { k: "vert", label: "Vert", hex: "#2f9e44" }, { k: "bleu", label: "Bleu", hex: "#2f6fed" }, { k: "violet", label: "Violet", hex: "#7a5af5" },
+  { k: "rose", label: "Rose", hex: "#d6457a" }, { k: "turquoise", label: "Turquoise", hex: "#1d9bb5" }, { k: "gris", label: "Gris", hex: "#6b7280" },
+];
+const KIND_NAME: Record<Block["kind"], string> = { class: "Cours", task: "Travail planifié", chore: "Ménage", meal: "Repas", sleep: "Sommeil", busy: "Indisponibilité", event: "Événement" };
+const durText = (min: number) => fmtDur(min);
+/** Fiche détaillée d'un créneau (toucher un bloc du planning) : tout le texte, la salle, les dates, et sa couleur. */
+const BlockDetail: React.FC<{ b: Block; date: string; onClose: () => void }> = ({ b, date, onClose }) => {
+  const { state, dispatch, toast, openTask, undoable } = useStore();
+  const cls = b.kind === "class" && !b.feedId ? state.classes.find((c) => c.id === b.refId) : undefined;
+  const course = cls ? state.courses.find((c) => c.id === cls.courseId) : undefined;
+  const fe = b.feedId ? (state.feedEvents ?? []).find((e) => e.uid === b.refId && e.date === date) : undefined;
+  const feed = b.feedId ? (state.settings.feeds ?? []).find((f) => f.id === b.feedId) : undefined;
+  const ev = b.kind === "event" ? state.events.find((e) => e.id === b.refId) : undefined;
+  const task = b.kind === "task" ? state.tasks.find((t) => t.id === b.refId) : undefined;
+  const chore = b.kind === "chore" ? state.chores.find((c) => c.id === b.refId) : undefined;
+  const title = course?.name ?? fe?.title ?? ev?.title ?? task?.title ?? chore?.name ?? b.label;
+  const room = cls?.room ?? fe?.room ?? "";
+  const color = b.color ?? (b.kind === "chore" ? "#d4a017" : b.kind === "event" ? "#d6457a" : "#6b7280");
+  const canColor = !!course || !!fe || !!ev;
+  const setColor = (hex: string) => {
+    if (course) dispatch({ type: "course/update", id: course.id, patch: { color: hex } });
+    else if (fe) dispatch({ type: "settings", patch: { feedColors: { ...(state.settings.feedColors ?? {}), [norm(fe.title)]: hex } } });
+    else if (ev) dispatch({ type: "event/update", id: ev.id, patch: { color: hex } });
+    toast(course ? `Couleur de « ${course.name} » mise à jour (tous ses créneaux)` : fe ? `Couleur de « ${fe.title} » mise à jour` : "Couleur mise à jour");
+  };
+  const rows: [string, React.ReactNode][] = [
+    ["Quand", <>{fmtDate(date)} · <b className="font-mono">{toHHMM(b.start)} – {toHHMM(b.end)}</b> <span className="text-muted">({durText(b.end - b.start)})</span></>],
+    ["Type", KIND_NAME[b.kind] + (/\((TP|TD|Labo)\)/.exec(b.label)?.[0] ? ` ${/\((TP|TD|Labo)\)/.exec(b.label)![0]}` : "")],
+  ];
+  if (room) rows.push(["Salle", room]);
+  if (course) rows.push(["Matière", <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: course.color }} />{course.name}{course.code ? <span className="text-muted">({course.code})</span> : null}</span>]);
+  if (cls?.dates?.length) rows.push(["Semaines", periodsText(cls.dates)]);
+  if (feed) rows.push(["Source", `Calendrier « ${feed.name} » · actualisé ${sinceText(feed.lastSync)}`]);
+  if (ev) rows.push(["Répétition", EVENT_REC_LABEL[ev.recurrence] + (ev.until ? ` jusqu'au ${fmtDate(ev.until)}` : "")]);
+  if (task) rows.push(["Échéance", `${fmtDate(task.deadline)} · reste ${durText(Math.max(0, task.estimate - task.spent))}`]);
+  if (chore) rows.push(["Récurrence", REC_LABEL[chore.recurrence]]);
+  return (
+    <Modal title={KIND_NAME[b.kind]} onClose={onClose}>
+      <div className="flex flex-col gap-4" data-testid="block-detail">
+        <div className="flex items-start gap-3">
+          <span className="mt-1 h-10 w-2 shrink-0 rounded-full" style={{ background: color }} />
+          <h3 className="break-words font-display text-xl font-extrabold leading-snug">{title}</h3>
+        </div>
+        {b.label !== title && b.label.length > title.length && <p className="break-words rounded-xl bg-sunken p-3 text-[13px]">{b.label}</p>}
+        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-[13.5px]">
+          {rows.map(([k, v]) => <React.Fragment key={k}><dt className="text-muted">{k}</dt><dd className="min-w-0 break-words">{v}</dd></React.Fragment>)}
+        </dl>
+        {canColor && (
+          <div>
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">Couleur{course ? " de la matière" : ""}</p>
+            <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Couleur">
+              {BLOCK_COLORS.map((c) => (
+                <button key={c.k} role="radio" aria-checked={color.toLowerCase() === c.hex} aria-label={c.label} title={c.label} onClick={() => setColor(c.hex)}
+                  className={cx("h-9 w-9 rounded-full border-2 transition", color.toLowerCase() === c.hex ? "scale-110 border-fg shadow-[2px_2px_0_0_rgb(var(--ink))]" : "border-transparent hover:scale-105")} style={{ background: c.hex }} />))}
+            </div>
+          </div>)}
+        <div className="flex flex-wrap justify-end gap-2">
+          {task && <Btn onClick={() => { onClose(); openTask(task.id); }}><Pencil size={13} />Modifier la tâche</Btn>}
+          {ev && <Btn variant="danger" onClick={() => { onClose(); if (ev.recurrence === "none") undoable({ type: "event/remove", id: ev.id }, `« ${ev.title} » supprimé`); else undoable({ type: "event/skip", id: ev.id, date }, `« ${ev.title} » retiré ce jour-là`); }}>{ev.recurrence === "none" ? "Supprimer" : "Retirer ce jour-là"}</Btn>}
+          <Btn variant="primary" onClick={onClose}>Fermer</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
+/** Emploi du temps de toute la semaine : 7 colonnes, créneaux simultanés côte à côte, toucher = fiche détaillée. */
+const WeekGrid: React.FC<{ week: DayPlan[]; today: string; onPick: (b: Block, date: string) => void; onDay: (date: string) => void }> = ({ week, today, onPick, onDay }) => {
+  const shown = week.map((d) => d.blocks.filter((b) => b.kind !== "sleep" && b.kind !== "meal"));
+  const all = shown.flat();
+  const startH = Math.min(8, ...all.map((b) => Math.floor(b.start / 60))), endH = Math.max(19, ...all.map((b) => Math.ceil(b.end / 60)));
+  const PX = 44;
+  const box = useRef<HTMLDivElement>(null);
+  // Sur téléphone, la grille défile horizontalement : on centre le jour actuel.
+  useEffect(() => { const i = week.findIndex((d) => d.date === today); const el = box.current; if (el && i > 0) el.scrollLeft = Math.max(0, (el.scrollWidth / 7.4) * i - 40); }, [week[0]?.date]);
+  return (
+    <div ref={box} className="-mx-1 overflow-x-auto px-1" data-testid="week-grid">
+      <div className="grid min-w-[760px] grid-cols-[40px_repeat(7,minmax(0,1fr))] gap-x-1">
+        <div />
+        {week.map((d) => { const dt = parseISO(d.date); return (
+          <button key={d.date} onClick={() => onDay(d.date)} className={cx("rounded-lg py-1 text-center text-[11px] font-semibold", d.date === today ? "bg-accent/12 text-accent" : "text-muted hover:bg-sunken")}>{DAYS[weekday(dt)]} {dt.getDate()}</button>); })}
+        <div className="relative" style={{ height: (endH - startH) * PX }}>
+          {Array.from({ length: endH - startH }, (_, i) => <span key={i} className="absolute left-0 font-mono text-[9.5px] text-muted" style={{ top: i * PX }}>{pad(startH + i)}:00</span>)}
+        </div>
+        {week.map((d, di) => { const ln = layoutLanes(shown[di]); return (
+          <div key={d.date} className="relative rounded-md border border-line/70" style={{ height: (endH - startH) * PX, backgroundImage: `repeating-linear-gradient(to bottom, transparent 0 ${PX - 1}px, rgb(var(--line) / .5) ${PX - 1}px ${PX}px)` }}>
+            {shown[di].map((b, i) => (
+              <button key={i} onClick={() => onPick(b, d.date)} title={`${toHHMM(b.start)}–${toHHMM(b.end)} · ${b.label}`}
+                className={cx("absolute overflow-hidden rounded px-1 py-0.5 text-left text-[10px] leading-tight transition hover:brightness-95", BLOCK_STYLE[b.kind])}
+                style={{ top: ((b.start - startH * 60) / 60) * PX + 1, height: Math.max(14, ((b.end - b.start) / 60) * PX - 2), borderLeftColor: b.color, left: `${(ln[i].lane / ln[i].lanes) * 100}%`, width: `calc(${100 / ln[i].lanes}% - 2px)` }}>
+                <span className="block font-mono text-[9px] text-muted">{toHHMM(b.start)}</span>
+                <span className="block break-words font-medium text-fg [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:3] overflow-hidden">{b.label}</span>
+              </button>))}
+          </div>); })}
+      </div>
+    </div>
+  );
+};
+
 const Planning: React.FC = () => {
   const { state, dispatch, toast, openTask, undoable } = useStore();
   const [offset, setOffset] = useState(0);
@@ -1055,6 +1157,9 @@ const Planning: React.FC = () => {
   const PX = 52; // pixels par heure
   const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
   const [exporting, setExporting] = useState(false);
+  const [sel, setSel] = useState<{ b: Block; date: string } | null>(null);
+  const [mode, setMode] = useState<"day" | "week">(() => { try { return localStorage.getItem("etudiant-os/planning-view") === "week" ? "week" : "day"; } catch { return "day"; } });
+  useEffect(() => { try { localStorage.setItem("etudiant-os/planning-view", mode); } catch { /* préférence facultative */ } }, [mode]);
   const exportPdf = async () => {
     setExporting(true);
     try { const r = await exportWeekPdf(week, state.settings.name); if (r === "downloaded") toast("PDF du planning téléchargé"); }
@@ -1065,8 +1170,14 @@ const Planning: React.FC = () => {
 
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
-      <Card title={<span className="flex items-center gap-2"><CalendarClock size={15} />{DAYS_LONG[weekday(parseISO(date))]} {parseISO(date).toLocaleDateString("fr-FR", { day: "numeric", month: "long" })}</span>}
-        action={<><Btn size="sm" variant="ghost" onClick={() => setOffset(offset - 1)} aria-label="Jour précédent"><ChevronLeft size={14} /></Btn><Btn size="sm" onClick={() => setOffset(0)}>Aujourd'hui</Btn><Btn size="sm" variant="ghost" onClick={() => setOffset(offset + 1)} aria-label="Jour suivant"><ChevronRight size={14} /></Btn></>}>
+      {sel && <BlockDetail b={sel.b} date={sel.date} onClose={() => setSel(null)} />}
+      <Card title={<span className="flex items-center gap-2"><CalendarClock size={15} />{mode === "week" ? `Semaine du ${parseISO(week[0].date).toLocaleDateString("fr-FR", { day: "numeric", month: "long" })}` : `${DAYS_LONG[weekday(parseISO(date))]} ${parseISO(date).toLocaleDateString("fr-FR", { day: "numeric", month: "long" })}`}</span>}
+        action={<>
+          <div role="tablist" aria-label="Affichage" className="mr-1 flex gap-0.5 rounded-xl bg-sunken p-0.5 text-[12px] font-semibold">
+            {([["day", "Jour"], ["week", "Semaine"]] as const).map(([k, l]) => <button key={k} role="tab" aria-selected={mode === k} onClick={() => setMode(k)} className={cx("rounded-lg px-2.5 py-1", mode === k ? "bg-panel text-fg shadow-sm" : "text-muted")}>{l}</button>)}
+          </div>
+          <Btn size="sm" variant="ghost" onClick={() => setOffset(offset - (mode === "week" ? 7 : 1))} aria-label={mode === "week" ? "Semaine précédente" : "Jour précédent"}><ChevronLeft size={14} /></Btn><Btn size="sm" onClick={() => setOffset(0)}>Aujourd'hui</Btn><Btn size="sm" variant="ghost" onClick={() => setOffset(offset + (mode === "week" ? 7 : 1))} aria-label={mode === "week" ? "Semaine suivante" : "Jour suivant"}><ChevronRight size={14} /></Btn></>}>
+        {mode === "day" && <>
         <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <div><p className="text-[11px] uppercase tracking-wider text-muted">Saturation</p><div className="mt-1 flex items-center gap-2"><Pill tone={levelTone(plan.level)}>{plan.level}</Pill></div></div>
           <div><p className="text-[11px] uppercase tracking-wider text-muted">Cours{plan.busyMin ? " + indispo." : ""}</p><p className="font-mono text-sm tabular-nums">{fmtDur(plan.classMin + plan.busyMin)}</p></div>
@@ -1080,7 +1191,9 @@ const Planning: React.FC = () => {
             {plan.conflicts.map((c, i) => <p key={i} className="text-muted"><span className="font-mono">{toHHMM(c.start)}–{toHHMM(c.end)}</span> · {c.a} / {c.b}</p>)}
             <p className="mt-1 text-muted">Un cours tombe sur une indisponibilité ou un événement personnel. Rien n'est déplacé automatiquement.</p>
           </div>)}
+        </>}
         {plan.past && <p className="mt-3 text-xs text-muted">Journée passée : seuls les cours et indisponibilités sont affichés.</p>}
+        {mode === "week" ? <div><p className="mb-2 text-[11px] text-muted md:hidden">Glissez horizontalement pour voir toute la semaine · touchez un créneau pour le détail.</p><WeekGrid week={week} today={today} onPick={(bb, d) => setSel({ b: bb, date: d })} onDay={(d) => { setOffset(daysBetween(today, d)); setMode("day"); }} /></div> : <>
         <div className="relative mt-4 overflow-hidden rounded-lg border border-line" style={{ height: (endH - startH) * PX }}>
           {Array.from({ length: endH - startH }, (_, i) => (
             <div key={i} className="absolute inset-x-0 border-t border-line/70" style={{ top: i * PX }}><span className="absolute left-2 top-0.5 font-mono text-[10px] text-muted">{pad((startH + i) % 24)}:00</span></div>
@@ -1089,8 +1202,8 @@ const Planning: React.FC = () => {
             <div className="absolute inset-x-0 z-10 h-px bg-bad" style={{ top: ((nowMin - startH * 60) / 60) * PX }}><span className="absolute -left-0.5 -top-[3px] h-[7px] w-[7px] rounded-full bg-bad" /></div>
           )}
           {plan.blocks.map((b, i) => { const ln = lanes[i]; return (
-            <div key={i} onClick={b.kind === "task" && b.refId ? () => openTask(b.refId!) : undefined} title={ln.lanes > 1 ? `${toHHMM(b.start)}–${toHHMM(b.end)} · ${b.label}` : b.kind === "task" ? "Bloc suggéré · cliquer pour modifier la tâche" : undefined}
-              className={cx("absolute overflow-hidden rounded-md px-2 py-1 text-xs transition hover:brightness-95", BLOCK_STYLE[b.kind], b.kind === "task" && "cursor-pointer", ln.lanes > 1 && "ring-1 ring-bg")}
+            <div key={i} role="button" tabIndex={0} onClick={() => setSel({ b, date })} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSel({ b, date }); } }} title={`${toHHMM(b.start)}–${toHHMM(b.end)} · ${b.label}`}
+              className={cx("absolute cursor-pointer overflow-hidden rounded-md px-2 py-1 text-xs transition hover:brightness-95", BLOCK_STYLE[b.kind], ln.lanes > 1 && "ring-1 ring-bg")}
               style={{ top: ((b.start - startH * 60) / 60) * PX + 1, height: Math.max(18, ((b.end - b.start) / 60) * PX - 2), borderLeftColor: b.color,
                 left: `calc(3.5rem + (100% - 4rem) * ${ln.lane} / ${ln.lanes})`, width: `calc((100% - 4rem) / ${ln.lanes} - 3px)` }}>
               <div className="flex items-center gap-1.5">
@@ -1104,6 +1217,7 @@ const Planning: React.FC = () => {
             </div>
           ); })}
         </div>
+        </>}
         <p className="mt-2 text-xs text-muted">Les blocs <Zap size={10} className="inline text-accent" /> sont générés automatiquement : reste à faire ÷ jours avant l'échéance, ajusté par la priorité, placé dans les créneaux libres (blocs de {state.settings.maxBlock} min max, 10 min de pause entre deux).</p>
       </Card>
       <div className="flex min-w-0 flex-col gap-4">

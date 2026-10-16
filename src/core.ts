@@ -59,6 +59,8 @@ export interface SettingsState {
   customCats?: string[];
   /** Calendriers abonnés (.ics). */
   feeds?: CalFeed[];
+  /** Couleurs choisies pour les cours d'un calendrier abonné (clé : intitulé normalisé). */
+  feedColors?: Record<string, string>;
 }
 export interface QuickExpense { label: string; amount: number; category: ExpenseCat }
 export interface TemplateItem { name: string; aisle: Aisle; qty: string; price: number }
@@ -211,6 +213,7 @@ export type Action =
   | { type: "chore/skip"; id: ID; date: string }
   | { type: "feed/add"; feed: CalFeed } | { type: "feed/remove"; id: ID } | { type: "feed/update"; id: ID; patch: Partial<CalFeed> }
   | { type: "feed/synced"; id: ID; events: FeedEvent[]; at: string }
+  | { type: "event/update"; id: ID; patch: Partial<PlanEvent> }
   | { type: "event/add"; event: PlanEvent } | { type: "event/remove"; id: ID } | { type: "event/skip"; id: ID; date: string }
   | { type: "timer/start"; now: number } | { type: "timer/pause"; now: number } | { type: "timer/reset" }
   | { type: "timer/phase"; phase: Phase } | { type: "timer/task"; taskId: ID | null } | { type: "timer/course"; courseId: ID | null }
@@ -280,6 +283,7 @@ export function reducer(s: AppState, a: Action): AppState {
       if (!(s.settings.feeds ?? []).some((f) => f.id === a.id)) return s; // flux supprimé entre-temps
       return { ...s, feedEvents: [...(s.feedEvents ?? []).filter((e) => e.feedId !== a.id), ...a.events],
         settings: { ...s.settings, feeds: (s.settings.feeds ?? []).map((f) => (f.id === a.id ? { ...f, lastSync: a.at, lastError: null, count: a.events.length } : f)) } };
+    case "event/update": return { ...s, events: (s.events ?? []).map((e) => (e.id === a.id ? { ...e, ...a.patch } : e)) };
     case "event/add": return { ...s, events: [...(s.events ?? []), a.event] };
     case "event/remove": return { ...s, events: (s.events ?? []).filter((e) => e.id !== a.id) };
     case "event/skip": return { ...s, events: (s.events ?? []).map((e) => e.id === a.id ? { ...e, skipped: [...(e.skipped ?? []).filter((d) => d !== a.date), a.date] } : e) };
@@ -378,6 +382,7 @@ export function validateState(x: unknown): { ok: true; state: AppState; repaired
   settings.hiddenViews = Array.isArray(settings.hiddenViews) ? settings.hiddenViews : [];
   settings.quickExpenses = Array.isArray(settings.quickExpenses) ? settings.quickExpenses.filter((q) => q && isStr(q.label) && isNum(q.amount)) : DEFAULT_SETTINGS.quickExpenses;
   settings.feeds = Array.isArray(settings.feeds) ? settings.feeds.filter((f) => f && isStr(f.id) && isStr(f.url)).map((f) => ({ id: f.id, name: isStr(f.name) ? f.name.slice(0, 40) : "Calendrier", url: f.url.slice(0, 2000), color: isStr(f.color) ? f.color : "#2f6fed", lastSync: isStr(f.lastSync) ? f.lastSync : null, lastError: isStr(f.lastError) ? f.lastError : null, ...(isNum(f.count) ? { count: f.count } : {}) })) : [];
+  settings.feedColors = settings.feedColors && typeof settings.feedColors === "object" ? Object.fromEntries(Object.entries(settings.feedColors).filter(([k, v]) => isStr(k) && isStr(v) && /^#[0-9a-f]{6}$/i.test(v)).slice(0, 300)) : {};
   settings.customCats = Array.isArray(settings.customCats) ? [...new Set(settings.customCats.filter((c) => isStr(c) && c.trim()).map((c) => c.trim().slice(0, 24)))].slice(0, 30) : [];
   settings.unavailable = Array.isArray(settings.unavailable) ? settings.unavailable.filter((u) => u && isTime(u.start) && isTime(u.end) && isNum(u.day)) : [];
   if (!isNum(settings.focusGoal) || settings.focusGoal < 0) settings.focusGoal = DEFAULT_SETTINGS.focusGoal;
@@ -616,7 +621,7 @@ export function choreHistory(chores: Chore[], people: string[], today: string, w
 }
 
 // ---------------------------------------------------------------- Moteur de planification
-export interface Block { start: number; end: number; kind: "class" | "task" | "chore" | "meal" | "sleep" | "busy" | "event"; label: string; color?: string; refId?: ID }
+export interface Block { start: number; end: number; kind: "class" | "task" | "chore" | "meal" | "sleep" | "busy" | "event"; label: string; color?: string; refId?: ID; /** Bloc venant d'un calendrier abonné. */ feedId?: ID }
 export interface Conflict { a: string; b: string; start: number; end: number }
 export interface DayPlan {
   date: string; wake: number; bed: number; blocks: Block[]; classMin: number; taskMin: number; choreMin: number;
@@ -709,7 +714,7 @@ export function planDay(state: AppState, date: string, remaining?: Map<ID, numbe
     { start: 12 * 60 + 15, end: 13 * 60, kind: "meal" as const, label: "Déjeuner" },
     { start: 19 * 60 + 45, end: 20 * 60 + 30, kind: "meal" as const, label: "Dîner" },
     ...(settings.unavailable ?? []).filter((u) => u.day === wd && toMin(u.end) > toMin(u.start)).map((u): Block => ({ start: toMin(u.start), end: toMin(u.end), kind: "busy", label: u.label || "Indisponible", refId: u.id })),
-    ...dayFeed.map((e): Block => ({ start: toMin(e.start), end: toMin(e.end), kind: "class", label: e.room ? `${e.title} · ${e.room}` : e.title, color: feedColor.get(e.feedId), refId: e.uid })),
+    ...dayFeed.map((e): Block => ({ start: toMin(e.start), end: toMin(e.end), kind: "class", label: e.room ? `${e.title} · ${e.room}` : e.title, color: settings.feedColors?.[norm(e.title)] ?? feedColor.get(e.feedId), refId: e.uid, feedId: e.feedId })),
     ...dayEvents.map((e): Block => ({ start: toMin(e.start), end: toMin(e.end), kind: "event", label: e.title, color: e.color, refId: e.id })),
   ];
   const hardSpans = fixed.filter((b) => isHard(b.kind)).map((b) => [b.start, b.end]);
