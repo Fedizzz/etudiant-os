@@ -97,4 +97,22 @@ function NotConfigured({ go }: { go: Go }) {
 
 // Filtre « crayon » des icônes monté une fois pour toutes les pages (landing, connexion, app, admin).
 createRoot(document.getElementById("root")!).render(<><PencilDefs /><div className="status-cover" aria-hidden /><App /></>);
-if ("serviceWorker" in navigator && location.protocol === "https:") window.addEventListener("load", () => { navigator.serviceWorker.register(BASE + "sw.js").catch(() => {}); });
+// Mode hors ligne + mises à jour : on vérifie s'il existe une nouvelle version au démarrage et au retour sur l'app ;
+// quand elle est prête, un bandeau propose de recharger (rien n'est rechargé sans l'accord de l'utilisateur).
+if ("serviceWorker" in navigator && location.protocol === "https:") window.addEventListener("load", () => {
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register(BASE + "sw.js", { updateViaCache: "none" }).then((reg) => {
+    const check = () => { if (document.visibilityState === "visible") void reg.update().catch(() => {}); };
+    document.addEventListener("visibilitychange", check); window.setInterval(check, 30 * 60_000);
+  }).catch(() => {});
+  navigator.serviceWorker.addEventListener("controllerchange", () => { if (hadController) showUpdateBanner(); });
+});
+function showUpdateBanner() {
+  if (document.getElementById("update-banner")) return;
+  const b = document.createElement("button");
+  b.id = "update-banner"; b.type = "button";
+  b.textContent = "Nouvelle version disponible · Toucher pour mettre à jour";
+  b.setAttribute("style", "position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:80;padding:10px 16px;border-radius:14px;border:2px solid rgb(var(--fg));background:rgb(var(--hi));color:rgb(24 22 46);font:600 14px var(--font-ui);box-shadow:3px 3px 0 0 rgb(var(--ink))");
+  b.onclick = () => location.reload();
+  document.body.appendChild(b);
+}
