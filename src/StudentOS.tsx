@@ -4,7 +4,7 @@ import { MiniPdf } from "./pdf.ts";
 import { layoutLanes } from "./core.ts";
 import { DAY_WORDS, dayOf, pageGeometry, parseGrid } from "./timetable.ts";
 import { parseIcs, normalizeFeedUrl, isFeedUrl } from "./ical.ts";
-import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, choreStepsDone, choreDoneLate, NO_DEADLINE, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, onTimeGuess, onTimeStats, taskOnTimeStats, choreOnTimeStats, HABIT_CATS, habitOn, habitStats, habitStepsDone, habitStreak, todoOnTimeStats, TODO_KINDS, pad, parseAmount, parseISO, parseReceipt, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
+import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, choreStepsDone, choreDoneLate, choreSlotEnd, nowMinutes, NO_DEADLINE, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, onTimeGuess, onTimeStats, taskOnTimeStats, choreOnTimeStats, HABIT_CATS, habitOn, habitStats, habitStepsDone, habitStreak, todoOnTimeStats, TODO_KINDS, pad, parseAmount, parseISO, parseReceipt, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
 import type { Action, Aisle, PlanEvent, Chore, Habit, HabitCat, Todo, TodoKind, AppState, Block, Budget, Course, DayPlan, Expense, ExpenseCat, GroceryTemplate, ID, Phase, PomodoroCfg, Priority, ReceiptResult, Recurrence, EventRecurrence, CalFeed, FeedEvent, SettingsState, SleepLog, Step, Task, TaskKind, TaskStatus, TemplateItem, ViewKey } from "./core.ts";
 import type { AppEnv } from "./env.ts";
 import { LangSwitch } from "./i18n.tsx";
@@ -2518,7 +2518,7 @@ const Chores: React.FC = () => {
                           <button onClick={() => { dispatch({ type: "chore/skip", id: c.id, date: k }); toast("Report annulé", "info"); }} title="Reportée · cliquer pour annuler le report"
                             className="flex h-10 w-full flex-col items-center justify-center rounded-md border border-dashed border-line text-[10px] text-muted">reportée</button>
                         ) : <button onClick={() => { dispatch({ type: "chore/toggle", id: c.id, date: k, who }); if (!done) toast(solo ? `${c.name} : faite` : `${c.name} : fait par ${who}`); }} title={done ? `Faite par ${by} · cliquer pour annuler` : `À faire par ${who} · cliquer quand c'est fait`}
-                          className={cx("flex h-10 w-full flex-col items-center justify-center rounded-md border text-[11px] transition", done && choreDoneLate(c, k) ? "border-warn/50 bg-warn/12 text-warn" : done ? "border-ok/40 bg-ok/12 text-ok" : k < today ? "border-bad/30 bg-bad/6 text-bad" : who === "Moi" ? "border-accent/40 bg-accent/8 text-fg" : "border-line bg-sunken text-fg hover:border-accent/50")}>
+                          className={cx("flex h-10 w-full flex-col items-center justify-center rounded-md border text-[11px] transition", done && choreDoneLate(c, k) ? "border-warn/50 bg-warn/12 text-warn" : done ? "border-ok/40 bg-ok/12 text-ok" : k < today || (k === today && (choreSlotEnd(c, k) ?? 1e9) < nowMinutes()) ? "border-bad/30 bg-bad/6 text-bad" : who === "Moi" ? "border-accent/40 bg-accent/8 text-fg" : "border-line bg-sunken text-fg hover:border-accent/50")}>
                           {done ? <><Check size={14} />{choreDoneLate(c, k) ? <span className="text-[9px]">en retard</span> : !solo && by !== who && <span className="text-[9px]">{by}</span>}</> : <span className="font-medium">{solo ? "à faire" : who}</span>}
                         </button>}
                         {!done && !skipped && k >= iso(addDays(parseISO(today), -7)) && <button aria-label={`Reporter ${c.name}`} title="Reporter (non faite, sans pénalité)" onClick={() => { dispatch({ type: "chore/skip", id: c.id, date: k }); toast(`${c.name} reportée`, "info"); }}
@@ -2546,7 +2546,7 @@ const Chores: React.FC = () => {
               <li><span className="mr-1 inline-block h-2.5 w-2.5 rounded-sm border border-warn/50 bg-warn/12 align-middle" />Faite, mais cochée après le jour prévu</li>
               <li><span className="mr-1 inline-block h-2.5 w-2.5 rounded-sm border border-bad/30 bg-bad/6 align-middle" />Jour passé, pas faite</li>
             </ul>
-            <p className="text-[11px] text-muted">Comptées à partir de la première corvée cochée ou reportée ; les corvées reportées (↷) ne comptent pas.</p>
+            <p className="text-[11px] text-muted">Une corvée avec un créneau compte « en retard » dès que son heure de fin est passée sans être cochée. Comptées à partir de la première corvée cochée ou reportée ; les reportées (↷) ne comptent pas.</p>
           </div>
         </Card>
         <Card title="Historique · 4 semaines">

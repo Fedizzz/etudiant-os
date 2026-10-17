@@ -447,3 +447,15 @@ test("corvée figée (pinned) : reste à son créneau même si l'heure est pass�
   const s = C.reducer({ ...base(), chores: [{ ...c, pinned: {} }] }, { type: "chore/pin", id: "p", date: today, time: "18:00" });
   assert.equal(s.chores[0].pinned![today], "18:00");
 });
+
+test("créneau dépassé aujourd'hui = pas fait à temps (corvées et tâches perso)", () => {
+  const today = C.todayISO();
+  if (C.nowMinutes() < 10) return; // juste après minuit : rien n'est encore dépassé
+  const c: C.Chore = { id: "c", name: "Poubelles", recurrence: "daily", day: 0, minutes: 5, assignees: ["Moi"], done: [], skipped: [C.iso(C.addDays(new Date(), -1))], pinned: { [today]: "00:01" } };
+  assert.deepEqual(C.choreOnTimeStats([c], today), { ok: 0, late: 1 });
+  const s = C.reducer({ ...base(), chores: [c] }, { type: "chore/toggle", id: "c", date: today });
+  assert.equal(C.choreDoneLate(s.chores[0], today), true); // cochée après la fin du créneau
+  const t: C.Todo = { id: "t", text: "Appeler", done: false, due: today, start: "00:01", end: "00:05", createdAt: today };
+  assert.deepEqual(C.todoOnTimeStats([t], today), { ok: 0, late: 1 });
+  assert.deepEqual(C.todoOnTimeStats([{ ...t, start: undefined, end: undefined }], today), { ok: 0, late: 0 }); // sans heure : jugé en fin de journée
+});
