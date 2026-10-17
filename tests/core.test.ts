@@ -346,3 +346,14 @@ test("tâches et ménage à l'heure : compteurs", () => {
   assert.deepEqual(C.choreOnTimeStats([c], TODAY), { ok: 2, late: 1 });
   assert.deepEqual(C.choreOnTimeStats([{ ...c, done: [] }], TODAY), { ok: 0, late: 0 }); // aucune trace : rien compté
 });
+
+test("traduction : textes exacts et modèles {0}", async () => {
+  const { compile, translate } = await import("../src/i18nCore.ts");
+  const d = compile({ "Tâches à l'heure ?": "Tasks on time?", "{0} nuits d'affilée": "{0} nights in a row", "Échéance reportée au {0}": "Due date moved to {0}", "Ignoré": "" });
+  assert.equal(translate(d, "  Tâches   à l'heure ? "), "Tasks on time?");
+  assert.equal(translate(d, "3 nuits d'affilée"), "3 nights in a row");
+  assert.equal(translate(d, "Échéance reportée au lun. 19 oct."), "Due date moved to lun. 19 oct.");
+  assert.equal(translate(d, "Rapport TP"), null);
+  assert.equal(translate(d, "Ignoré"), null);
+  assert.equal(translate(d, "42"), null);
+});

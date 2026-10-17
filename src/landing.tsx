@@ -1,4 +1,5 @@
 /* Étudiant.OS — page d'accueil publique, pages légales, 404. */
+import { LangSwitch } from "./i18n.tsx";
 import React, { useEffect, useState } from "react";
 import { cx } from "./core.ts";
 import { useFixedHeader, useHideOnScroll, Btn, CalendarClock, GraduationCap, Timer, Wallet, ShoppingCart, Home, Moon, Sun, LayoutDashboard, Check, MoreVertical, X, Sparkles, Users, Zap, Database, Repeat, FileText } from "./StudentOS.tsx";
@@ -37,6 +38,7 @@ function Nav({ go, signedIn }: { go: Go; signedIn: boolean }) {
         <Logo onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} />
         <ul className="ml-6 hidden gap-1 lg:flex">{links.map(([h, l]) => <li key={h}><a href={h} className="rounded-lg px-3 py-2 text-[14px] font-semibold text-muted transition hover:bg-sunken hover:text-fg">{l}</a></li>)}</ul>
         <div className="ml-auto flex items-center gap-2">
+          <LangSwitch />
           <ThemeToggle />
           {signedIn || !supabase ? <Btn variant="primary" onClick={() => go({ name: "app", view: "dashboard" })}>{signedIn ? "Ouvrir mon espace" : "Ouvrir l'application"}</Btn> : <>
             <Btn variant="ghost" className="hidden sm:inline-flex" onClick={() => go({ name: "login" })}>Se connecter</Btn>

@@ -7,6 +7,7 @@ import { parseIcs, normalizeFeedUrl, isFeedUrl } from "./ical.ts";
 import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, choreStepsDone, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, onTimeGuess, onTimeStats, taskOnTimeStats, choreOnTimeStats, pad, parseAmount, parseISO, parseReceipt, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
 import type { Action, Aisle, Chore, AppState, Block, Budget, Course, DayPlan, Expense, ExpenseCat, GroceryTemplate, ID, Phase, PomodoroCfg, Priority, ReceiptResult, Recurrence, EventRecurrence, CalFeed, FeedEvent, SettingsState, SleepLog, Step, Task, TaskKind, TaskStatus, TemplateItem, ViewKey } from "./core.ts";
 import type { AppEnv } from "./env.ts";
+import { LangSwitch } from "./i18n.tsx";
 
 /* ============================================================================
  * Étudiant.OS — interface de l'application. La logique métier est dans core.ts ;
@@ -2881,6 +2882,7 @@ export default function StudentOS({ state, dispatch, env, view, onView, notice, 
               {headerExtra}
               <span className="hidden lg:inline-flex"><Pill tone={levelTone(plan.level)}>Journée {plan.level}</Pill></span>
               <Btn variant="ghost" size="sm" className="hidden lg:inline-flex" onClick={() => setHelp(true)} aria-label="Raccourcis"><Keyboard size={15} /></Btn>
+              <LangSwitch />
               <Btn variant="ghost" size="sm" onClick={toggleTheme} aria-label="Changer de thème" className="hidden min-[400px]:inline-flex">{isDark ? <Sun size={15} /> : <Moon size={15} />}</Btn>
               <Btn variant="primary" size="sm" onClick={() => setNewTask(true)} aria-label="Nouvelle tâche"><Plus size={14} /><span className="hidden sm:inline">Tâche</span></Btn>
               <div className="relative md:hidden">
