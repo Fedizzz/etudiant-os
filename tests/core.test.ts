@@ -411,3 +411,13 @@ test("planning d'aujourd'hui : rien placé automatiquement avant l'heure actuell
   const p = C.planFor(s, today, today);
   for (const b of p.blocks.filter((b) => b.kind === "task" || b.kind === "chore")) assert.ok(b.start >= now, `bloc à ${b.start} avant ${now}`);
 });
+
+test("corvée cochée après son jour = en retard", () => {
+  const c: C.Chore = { id: "c", name: "Poubelles", recurrence: "daily", day: 0, minutes: 5, assignees: ["Moi"], done: [] };
+  let s = C.reducer({ ...base(), chores: [c] }, { type: "chore/toggle", id: "c", date: C.todayISO() });
+  assert.equal(C.choreDoneLate(s.chores[0], C.todayISO()), false);
+  const y = C.iso(C.addDays(new Date(), -1));
+  s = C.reducer(s, { type: "chore/toggle", id: "c", date: y });
+  assert.equal(C.choreDoneLate(s.chores[0], y), true);
+  assert.deepEqual(C.choreOnTimeStats(s.chores, C.todayISO()), { ok: 1, late: 1 });
+});

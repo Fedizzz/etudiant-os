@@ -4,7 +4,7 @@ import { MiniPdf } from "./pdf.ts";
 import { layoutLanes } from "./core.ts";
 import { DAY_WORDS, dayOf, pageGeometry, parseGrid } from "./timetable.ts";
 import { parseIcs, normalizeFeedUrl, isFeedUrl } from "./ical.ts";
-import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, choreStepsDone, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, onTimeGuess, onTimeStats, taskOnTimeStats, choreOnTimeStats, HABIT_CATS, habitOn, habitStats, habitStepsDone, habitStreak, todoOnTimeStats, TODO_KINDS, pad, parseAmount, parseISO, parseReceipt, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
+import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, choreStepsDone, choreDoneLate, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, onTimeGuess, onTimeStats, taskOnTimeStats, choreOnTimeStats, HABIT_CATS, habitOn, habitStats, habitStepsDone, habitStreak, todoOnTimeStats, TODO_KINDS, pad, parseAmount, parseISO, parseReceipt, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
 import type { Action, Aisle, Chore, Habit, HabitCat, Todo, TodoKind, AppState, Block, Budget, Course, DayPlan, Expense, ExpenseCat, GroceryTemplate, ID, Phase, PomodoroCfg, Priority, ReceiptResult, Recurrence, EventRecurrence, CalFeed, FeedEvent, SettingsState, SleepLog, Step, Task, TaskKind, TaskStatus, TemplateItem, ViewKey } from "./core.ts";
 import type { AppEnv } from "./env.ts";
 import { LangSwitch } from "./i18n.tsx";
@@ -2149,6 +2149,7 @@ const Chores: React.FC = () => {
   const maxMin = Math.max(1, ...minutesBy.map((x) => x.min));
   const today = todayISO();
   const history = useMemo(() => choreHistory(state.chores, people, today, 4), [state.chores, today, people.join("|")]);
+  const onTime = useMemo(() => ({ all: choreOnTimeStats(state.chores, today), d30: choreOnTimeStats(state.chores, today, 30), d7: choreOnTimeStats(state.chores, today, 7) }), [state.chores, today]);
   return (
     <div className="flex flex-col gap-4">
       <Card title={<span className="flex items-center gap-2"><Repeat size={15} />Semaine {isoWeek(monday)} · {monday.toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}</span>}
@@ -2169,8 +2170,8 @@ const Chores: React.FC = () => {
                           <button onClick={() => { dispatch({ type: "chore/skip", id: c.id, date: k }); toast("Report annulé", "info"); }} title="Reportée · cliquer pour annuler le report"
                             className="flex h-10 w-full flex-col items-center justify-center rounded-md border border-dashed border-line text-[10px] text-muted">reportée</button>
                         ) : <button onClick={() => { dispatch({ type: "chore/toggle", id: c.id, date: k, who }); if (!done) toast(solo ? `${c.name} : faite` : `${c.name} : fait par ${who}`); }} title={done ? `Faite par ${by} · cliquer pour annuler` : `À faire par ${who} · cliquer quand c'est fait`}
-                          className={cx("flex h-10 w-full flex-col items-center justify-center rounded-md border text-[11px] transition", done ? "border-ok/40 bg-ok/12 text-ok" : k < today ? "border-bad/30 bg-bad/6 text-bad" : who === "Moi" ? "border-accent/40 bg-accent/8 text-fg" : "border-line bg-sunken text-fg hover:border-accent/50")}>
-                          {done ? <><Check size={14} />{!solo && by !== who && <span className="text-[9px]">{by}</span>}</> : <span className="font-medium">{solo ? "à faire" : who}</span>}
+                          className={cx("flex h-10 w-full flex-col items-center justify-center rounded-md border text-[11px] transition", done && choreDoneLate(c, k) ? "border-warn/50 bg-warn/12 text-warn" : done ? "border-ok/40 bg-ok/12 text-ok" : k < today ? "border-bad/30 bg-bad/6 text-bad" : who === "Moi" ? "border-accent/40 bg-accent/8 text-fg" : "border-line bg-sunken text-fg hover:border-accent/50")}>
+                          {done ? <><Check size={14} />{choreDoneLate(c, k) ? <span className="text-[9px]">en retard</span> : !solo && by !== who && <span className="text-[9px]">{by}</span>}</> : <span className="font-medium">{solo ? "à faire" : who}</span>}
                         </button>}
                         {!done && !skipped && k >= iso(addDays(parseISO(today), -7)) && <button aria-label={`Reporter ${c.name}`} title="Reporter (non faite, sans pénalité)" onClick={() => { dispatch({ type: "chore/skip", id: c.id, date: k }); toast(`${c.name} reportée`, "info"); }}
                           className="absolute right-1 top-1 rounded px-0.5 text-[9px] leading-none text-muted opacity-60 hover:text-fg hover:opacity-100">↷</button>}
@@ -2188,6 +2189,18 @@ const Chores: React.FC = () => {
           <div className="flex flex-col gap-3">{minutesBy.map(({ p, min }) => (
             <div key={p} className="grid grid-cols-[64px_1fr_56px] items-center gap-2 text-[13px]"><span className="truncate">{p}</span><div className="h-2 rounded-full bg-sunken"><div className="h-full rounded-full bg-accent" style={{ width: `${(min / maxMin) * 100}%` }} /></div><span className="text-right font-mono text-xs tabular-nums text-muted">{fmtDur(min)}</span></div>))}</div>
         </Card>}
+        <Card title={<span className="flex items-center gap-2"><Check size={15} />À l'heure ?</span>}>
+          <div className="flex flex-col gap-3" data-testid="chore-ontime">
+            <CounterRow label={solo ? "Mes corvées" : "Mes corvées (Moi)"} target="faites le jour prévu" a={onTime.all} m={onTime.d30} lateWord="en retard ou oubliées" />
+            <p className="text-[12px]">Cette semaine (7 j) : <b className="text-ok">{onTime.d7.ok} à l'heure</b> · <b className="text-bad">{onTime.d7.late} en retard</b></p>
+            <ul className="flex flex-col gap-1 text-[11px] text-muted">
+              <li><span className="mr-1 inline-block h-2.5 w-2.5 rounded-sm border border-ok/40 bg-ok/12 align-middle" />Faite le jour prévu</li>
+              <li><span className="mr-1 inline-block h-2.5 w-2.5 rounded-sm border border-warn/50 bg-warn/12 align-middle" />Faite, mais cochée après le jour prévu</li>
+              <li><span className="mr-1 inline-block h-2.5 w-2.5 rounded-sm border border-bad/30 bg-bad/6 align-middle" />Jour passé, pas faite</li>
+            </ul>
+            <p className="text-[11px] text-muted">Comptées à partir de la première corvée cochée ou reportée ; les corvées reportées (↷) ne comptent pas.</p>
+          </div>
+        </Card>
         <Card title="Historique · 4 semaines">
           {people.length ? (
             <div className="overflow-x-auto"><table className="w-full min-w-[320px] text-left text-[13px]">

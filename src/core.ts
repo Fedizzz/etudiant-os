@@ -44,7 +44,7 @@ export interface Budget {
 }
 /** done : dates faites · doneBy : qui l'a faite ce jour-là · skipped : dates reportées. */
 /** recurrence « once » : une seule fois, le jour `date`. */
-export interface Chore { id: ID; name: string; recurrence: Recurrence; date?: string; day: number; minutes: number; assignees: string[]; done: string[]; doneBy?: Record<string, string>; skipped?: string[]; /** Heure fixe « HH:MM » (sinon placée automatiquement dans un créneau libre). */ time?: string; /** Checklist, et étapes cochées par date. */ steps?: Step[]; stepsDone?: Record<string, ID[]> }
+export interface Chore { id: ID; name: string; recurrence: Recurrence; date?: string; day: number; minutes: number; assignees: string[]; done: string[]; doneBy?: Record<string, string>; skipped?: string[]; /** Heure fixe « HH:MM » (sinon placée automatiquement dans un créneau libre). */ time?: string; /** Checklist, et étapes cochées par date. */ steps?: Step[]; stepsDone?: Record<string, ID[]>; /** Jour où chaque occurrence a été cochée. */ doneOn?: Record<string, string> }
 /** Calendrier externe abonné (lien .ics Celcat, iCloud, Google…). */
 export interface CalFeed { id: ID; name: string; url: string; color: string; lastSync: string | null; lastError: string | null; count?: number }
 /** Occurrence importée d'un calendrier abonné (remplacée à chaque actualisation). */
@@ -326,7 +326,10 @@ export function reducer(s: AppState, a: Action): AppState {
         const was = c.done.includes(a.date);
         const doneBy = { ...(c.doneBy ?? {}) };
         if (was) delete doneBy[a.date]; else doneBy[a.date] = a.who ?? choreAssignee(c, parseISO(a.date));
-        return { ...c, done: was ? c.done.filter((x) => x !== a.date) : [...c.done, a.date], doneBy, skipped: (c.skipped ?? []).filter((x) => x !== a.date) };
+        // Date réelle où la case a été cochée (une corvée cochée après son jour = faite en retard).
+        const doneOn = { ...(c.doneOn ?? {}) };
+        if (was) delete doneOn[a.date]; else doneOn[a.date] = todayISO();
+        return { ...c, done: was ? c.done.filter((x) => x !== a.date) : [...c.done, a.date], doneBy, doneOn, skipped: (c.skipped ?? []).filter((x) => x !== a.date) };
       }),
     };
     case "todo/add": return { ...s, todos: [a.todo, ...(s.todos ?? [])] };
@@ -457,10 +460,11 @@ export function validateState(x: unknown): { ok: true; state: AppState; repaired
     tasks: keep<Task>("tâches", p.tasks, (t) => isStr(t.id) && isStr(t.title) && isDate(t.deadline)).map((t) => ({ ...t, estimate: isNum(t.estimate) && t.estimate > 0 ? t.estimate : 60, spent: isNum(t.spent) && t.spent >= 0 ? t.spent : 0, priority: ([1, 2, 3].includes(t.priority) ? t.priority : 2) as Priority, status: (["todo", "doing", "review", "done"].includes(t.status) ? t.status : "todo") as TaskStatus, slot: t.slot && isDate(t.slot.date) && isTime(t.slot.start) && isTime(t.slot.end) && toMin(t.slot.end) > toMin(t.slot.start) ? t.slot : undefined })).map(({ slot, steps, ...t }) => { const st = cleanSteps(steps, true); return { ...t, ...(slot ? { slot } : {}), ...(st.length ? { steps: st } : {}) }; }),
     groceries: keep<GroceryItem>("articles", p.groceries, (g) => isStr(g.id) && isStr(g.name)).map((g) => ({ ...g, price: isNum(g.price) && g.price >= 0 ? g.price : 0, checked: !!g.checked, qty: isStr(g.qty) ? g.qty : "" })),
     chores: keep<Chore>("corvées", p.chores, (c) => isStr(c.id) && isStr(c.name) && Array.isArray(c.assignees) && (c.recurrence !== "once" || isDate(c.date))).map((c) => {
-      const { time, steps, stepsDone, ...rest } = c;
+      const { time, steps, stepsDone, doneOn: dOn, ...rest } = c;
+      const doneOn = dOn && typeof dOn === "object" ? Object.fromEntries(Object.entries(dOn).filter(([k, v]) => isDate(k) && isDate(v)).slice(-400)) : {};
       const st = cleanSteps(steps, false);
       const sd = stepsDone && typeof stepsDone === "object" ? Object.fromEntries(Object.entries(stepsDone).filter(([k, v]) => isDate(k) && Array.isArray(v)).map(([k, v]) => [k, (v as unknown[]).filter(isStr)]).slice(-120)) : {};
-      return { ...rest, ...(st.length ? { steps: st, stepsDone: sd } : {}), done: Array.isArray(c.done) ? c.done.filter(isDate) : [], skipped: Array.isArray(c.skipped) ? c.skipped.filter(isDate) : [], doneBy: c.doneBy && typeof c.doneBy === "object" ? c.doneBy : {}, ...(isTime(time) ? { time } : {}) };
+      return { ...rest, doneOn, ...(st.length ? { steps: st, stepsDone: sd } : {}), done: Array.isArray(c.done) ? c.done.filter(isDate) : [], skipped: Array.isArray(c.skipped) ? c.skipped.filter(isDate) : [], doneBy: c.doneBy && typeof c.doneBy === "object" ? c.doneBy : {}, ...(isTime(time) ? { time } : {}) };
     }),
     todos: keep<Todo>("tâches perso", Array.isArray(p.todos) ? p.todos : [], (t) => isStr(t.id) && isStr(t.text) && t.text.trim() !== "").map((t) => ({
       id: t.id, text: t.text.slice(0, 200), done: !!t.done, createdAt: isDate(t.createdAt) ? t.createdAt : todayISO(),
@@ -961,7 +965,7 @@ export function choreOnTimeStats(chores: Chore[], today: string, days = 365, me 
       if (!choreScheduledOn(c, d)) continue;
       const mine = (c.doneBy?.[k] ?? choreAssignee(c, d)) === me;
       if (!mine) continue;
-      if (c.done.includes(k)) ok++;
+      if (c.done.includes(k)) { if (choreDoneLate(c, k)) late++; else ok++; }
       else if (i > 0 && !(c.skipped ?? []).includes(k)) late++;
     }
   }
@@ -1014,3 +1018,6 @@ export const TODO_KINDS: { k: TodoKind; label: string; emoji: string }[] = [
   { k: "admin", label: "Administratif", emoji: "📄" }, { k: "rdv", label: "Rendez-vous", emoji: "📅" }, { k: "appel", label: "Appel / message", emoji: "📞" },
   { k: "achat", label: "Achat / course", emoji: "🛍️" }, { k: "santé", label: "Santé", emoji: "🩺" }, { k: "perso", label: "Perso", emoji: "⭐" }, { k: "autre", label: "Autre", emoji: "📌" },
 ];
+
+/** Corvée faite, mais cochée après son jour prévu. */
+export const choreDoneLate = (c: Chore, date: string) => c.done.includes(date) && !!c.doneOn?.[date] && c.doneOn[date] > date;
