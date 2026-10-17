@@ -356,7 +356,8 @@ export function reducer(s: AppState, a: Action): AppState {
       const cur = h.stepsDone?.[a.date] ?? [];
       return { ...h, stepsDone: { ...h.stepsDone, [a.date]: cur.includes(a.stepId) ? cur.filter((x) => x !== a.stepId) : [...cur, a.stepId] } };
     }) };
-    case "chore/pin": return { ...s, chores: s.chores.map((c) => (c.id !== a.id ? c : { ...c, pinned: { ...Object.fromEntries(Object.entries(c.pinned ?? {}).filter(([k]) => k >= iso(addDays(new Date(), -30)))), [a.date]: a.time } })) };
+    // time vide = retirer l'heure figée (la corvée est replacée automatiquement).
+    case "chore/pin": return { ...s, chores: s.chores.map((c) => (c.id !== a.id ? c : { ...c, pinned: { ...Object.fromEntries(Object.entries(c.pinned ?? {}).filter(([k]) => k >= iso(addDays(new Date(), -30)) && k !== a.date)), ...(a.time ? { [a.date]: a.time } : {}) } })) };
     case "chore/update": return { ...s, chores: s.chores.map((c) => (c.id === a.id ? { ...c, ...a.patch } : c)) };
     case "chore/step": return { ...s, chores: s.chores.map((c) => {
       if (c.id !== a.id) return c;

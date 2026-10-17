@@ -1250,25 +1250,30 @@ const durText = (min: number) => fmtDur(min);
 /** Déplacer une occurrence de corvée (autre jour et/ou autre heure) depuis le planning. */
 const ChoreMove: React.FC<{ chore: Chore; date: string; start: number; onDone: () => void }> = ({ chore, date, start, onDone }) => {
   const { dispatch, toast } = useStore();
-  const [d, setD] = useState(date); const [t, setT] = useState(toHHMM(start));
+  const [d, setD] = useState(date); const [t, setT] = useState(toHHMM(start)); const [auto, setAuto] = useState(false);
   const apply = () => {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !/^\d{2}:\d{2}$/.test(t)) { toast("Choisissez un jour et une heure.", "bad"); return; }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || (!auto && !/^\d{2}:\d{2}$/.test(t))) { toast("Choisissez un jour et une heure.", "bad"); return; }
     if (d < todayISO()) { toast("Choisissez aujourd'hui ou un jour à venir.", "bad"); return; }
-    if (d === date) dispatch({ type: "chore/pin", id: chore.id, date, time: t });
-    else if (chore.recurrence === "once") dispatch({ type: "chore/update", id: chore.id, patch: { date: d, day: weekday(parseISO(d)), pinned: { [d]: t } } });
+    const pin = auto ? {} : { [d]: t };
+    if (d === date) dispatch({ type: "chore/pin", id: chore.id, date, time: auto ? "" : t });
+    else if (chore.recurrence === "once") dispatch({ type: "chore/update", id: chore.id, patch: { date: d, day: weekday(parseISO(d)), pinned: pin } });
     else {
       // Occurrence d'une corvée récurrente : reportée ce jour-là, et recréée une seule fois au nouveau jour.
       dispatch({ type: "chore/skip", id: chore.id, date });
-      dispatch({ type: "chore/add", chore: { id: uid(), name: chore.name, recurrence: "once", date: d, day: weekday(parseISO(d)), minutes: chore.minutes, assignees: [chore.assignees[0] ?? "Moi"], done: [], pinned: { [d]: t }, ...(chore.steps?.length ? { steps: chore.steps, stepsDone: {} } : {}) } });
+      dispatch({ type: "chore/add", chore: { id: uid(), name: chore.name, recurrence: "once", date: d, day: weekday(parseISO(d)), minutes: chore.minutes, assignees: [chore.assignees[0] ?? "Moi"], done: [], pinned: pin, ...(chore.steps?.length ? { steps: chore.steps, stepsDone: {} } : {}) } });
     }
-    toast(`${chore.name} : déplacée au ${fmtDate(d)} à ${t}`); onDone();
+    toast(auto ? `${chore.name} : déplacée au ${fmtDate(d)} (heure automatique)` : `${chore.name} : déplacée au ${fmtDate(d)} à ${t}`); onDone();
   };
   return (
     <div className="rounded-xl border-2 border-line p-3" data-testid="chore-move">
       <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">Déplacer cette corvée</p>
+      <div className="mb-2 flex gap-1.5" role="group">
+        {([[false, "🕒 Heure précise"], [true, "⚡ Juste le jour (heure auto)"]] as [boolean, string][]).map(([v, l]) => <button key={l} type="button" aria-pressed={auto === v} onClick={() => setAuto(v)}
+          className={cx("flex-1 rounded-lg border-2 px-2 py-1.5 text-[12px] font-semibold", auto === v ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-line bg-sunken text-muted")}>{l}</button>)}
+      </div>
       <div className="flex flex-wrap items-end gap-2">
         <Field label="Jour" htmlFor="cm-d"><Input id="cm-d" type="date" min={todayISO()} value={d} onChange={(e) => setD(e.target.value)} /></Field>
-        <Field label="Heure" htmlFor="cm-t"><Input id="cm-t" type="time" value={t} onChange={(e) => setT(e.target.value)} /></Field>
+        {!auto && <Field label="Heure" htmlFor="cm-t"><Input id="cm-t" type="time" value={t} onChange={(e) => setT(e.target.value)} /></Field>}
         <Btn variant="primary" onClick={apply}><Check size={14} />Déplacer</Btn>
       </div>
       {chore.recurrence !== "once" && <p className="mt-1.5 text-[11px] text-muted">Seulement cette fois : les autres jours de la corvée ne changent pas.</p>}
