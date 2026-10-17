@@ -357,3 +357,19 @@ test("traduction : textes exacts et modèles {0}", async () => {
   assert.equal(translate(d, "Ignoré"), null);
   assert.equal(translate(d, "42"), null);
 });
+
+test("routines : jours prévus, stats, série, étapes, nettoyage", () => {
+  // TODAY = jeudi 15/10 ; créée le lundi 12, prévue lun→ven.
+  const h: C.Habit = { id: "h", name: "Médicaments", emoji: "💊", cat: "santé", days: [0, 1, 2, 3, 4], done: ["2026-10-12", "2026-10-14"], since: "2026-10-12" };
+  assert.equal(C.habitOn(h, "2026-10-17"), false); // samedi
+  assert.equal(C.habitOn(h, "2026-10-09"), false); // avant création
+  assert.deepEqual(C.habitStats([h], TODAY), { ok: 2, late: 1 }); // 13 oublié, aujourd'hui pas encore compté
+  assert.equal(C.habitStreak(h, TODAY), 1);
+  let s = C.reducer({ ...base(), habits: [h] }, { type: "habit/toggle", id: "h", date: TODAY });
+  assert.equal(C.habitStreak(s.habits![0], TODAY), 2);
+  s = C.reducer({ ...s, habits: [{ ...s.habits![0], steps: [{ id: "a", text: "Matin" }] }] }, { type: "habit/step", id: "h", date: TODAY, stepId: "a" });
+  assert.deepEqual(C.habitStepsDone(s.habits![0], TODAY), ["a"]);
+  const v = C.validateState(JSON.parse(JSON.stringify({ ...s, habits: [...s.habits!, { id: "x", name: "Eau", done: ["bad"], days: [9], cat: "zz" }] })));
+  assert.ok(v.ok);
+  if (v.ok) { const x = v.state.habits![1]; assert.deepEqual(x.days, [0, 1, 2, 3, 4, 5, 6]); assert.equal(x.cat, "autre"); assert.deepEqual(x.done, []); }
+});

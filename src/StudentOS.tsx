@@ -4,8 +4,8 @@ import { MiniPdf } from "./pdf.ts";
 import { layoutLanes } from "./core.ts";
 import { DAY_WORDS, dayOf, pageGeometry, parseGrid } from "./timetable.ts";
 import { parseIcs, normalizeFeedUrl, isFeedUrl } from "./ical.ts";
-import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, choreStepsDone, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, onTimeGuess, onTimeStats, taskOnTimeStats, choreOnTimeStats, pad, parseAmount, parseISO, parseReceipt, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
-import type { Action, Aisle, Chore, AppState, Block, Budget, Course, DayPlan, Expense, ExpenseCat, GroceryTemplate, ID, Phase, PomodoroCfg, Priority, ReceiptResult, Recurrence, EventRecurrence, CalFeed, FeedEvent, SettingsState, SleepLog, Step, Task, TaskKind, TaskStatus, TemplateItem, ViewKey } from "./core.ts";
+import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, choreStepsDone, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, onTimeGuess, onTimeStats, taskOnTimeStats, choreOnTimeStats, HABIT_CATS, habitOn, habitStats, habitStepsDone, habitStreak, pad, parseAmount, parseISO, parseReceipt, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
+import type { Action, Aisle, Chore, Habit, HabitCat, AppState, Block, Budget, Course, DayPlan, Expense, ExpenseCat, GroceryTemplate, ID, Phase, PomodoroCfg, Priority, ReceiptResult, Recurrence, EventRecurrence, CalFeed, FeedEvent, SettingsState, SleepLog, Step, Task, TaskKind, TaskStatus, TemplateItem, ViewKey } from "./core.ts";
 import type { AppEnv } from "./env.ts";
 import { LangSwitch } from "./i18n.tsx";
 
@@ -656,6 +656,8 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
   const cur = state.settings.currency;
   const choreStep = useChoreStep();
   const ot = useMemo(() => ({ all: onTimeStats(state.sleep, today), d30: onTimeStats(state.sleep, today, 30) }), [state.sleep, today]);
+  const ht = useMemo(() => ({ all: habitStats(state.habits ?? [], today), d30: habitStats(state.habits ?? [], today, 30) }), [state.habits, today]);
+  const habitsToday = (state.habits ?? []).filter((h) => habitOn(h, today));
   const tt = useMemo(() => ({ all: taskOnTimeStats(state.tasks, today), d30: taskOnTimeStats(state.tasks, today, 30), call: choreOnTimeStats(state.chores, today), c30: choreOnTimeStats(state.chores, today, 30) }), [state.tasks, state.chores, today]);
   // Toutes les valeurs viennent des mêmes fonctions que les modules (une seule source de vérité).
   const days7 = useMemo(() => planRange(state, today, 7, today), [state, today]);
@@ -776,10 +778,14 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
         <Card title={<span className="flex items-center gap-2"><BedDouble size={15} />À l'heure ?</span>} action={<Btn size="sm" variant="ghost" onClick={() => go("sleep")}>Cocher</Btn>}>
           <OnTimeCounter all={ot.all} d30={ot.d30} bedTarget={state.settings.bedDefault} wakeTarget={state.settings.wakeDefault} />
         </Card>
+        {habitsToday.length > 0 && <Card title={<span className="flex items-center gap-2"><Sparkles size={15} />Routines du jour · {habitsToday.filter((h) => h.done.includes(today)).length}/{habitsToday.length}</span>} action={<Btn size="sm" variant="ghost" onClick={() => go("routines")}>Tout voir</Btn>}>
+          <HabitToday date={today} compact />
+        </Card>}
         <Card title={<span className="flex items-center gap-2"><ListChecks size={15} />Tâches à l'heure ?</span>} action={<Btn size="sm" variant="ghost" onClick={() => go("academic")}>Tâches</Btn>}>
           <div className="flex flex-col gap-3" data-testid="task-ontime">
             <CounterRow label="Tâches" target="avant l'échéance" a={tt.all} m={tt.d30} />
             {state.chores.length > 0 && <CounterRow label="Ménage" target="le jour prévu" a={tt.call} m={tt.c30} lateWord="oubliées" />}
+            {(state.habits ?? []).length > 0 && <CounterRow label="Routines" target="le jour prévu" a={ht.all} m={ht.d30} lateWord="oubliées" />}
             <p className="text-[11px] text-muted">✓ terminée au plus tard le jour de l'échéance · ✗ terminée après, ou encore ouverte et en retard. Ménage : vos corvées faites le jour prévu ; les reportées ne comptent pas.</p>
           </div>
         </Card>
@@ -2264,6 +2270,157 @@ const ChoreStepsEdit: React.FC<{ c: Chore; onDone: () => void }> = ({ c, onDone 
 };
 
 // ---------------------------------------------------------------- Module : Sommeil
+// ---------------------------------------------------------------- Module : Routines (soins, médicaments, habitudes)
+const HABIT_PRESETS: { group: string; name: string; emoji: string; cat: HabitCat; time?: string; steps?: string[]; days?: number[] }[] = [
+  { group: "Soins", name: "Routine soin du soir", emoji: "🌙", cat: "soin", time: "22:30", steps: ["Démaquillant", "Nettoyant", "Sérum", "Crème hydratante"] },
+  { group: "Soins", name: "Routine soin du matin", emoji: "🧴", cat: "soin", time: "07:45", steps: ["Nettoyant", "Crème hydratante", "Crème solaire"] },
+  { group: "Soins", name: "Se brosser les dents", emoji: "🪥", cat: "soin", steps: ["Matin", "Soir"] },
+  { group: "Soins", name: "Masque visage", emoji: "🧖", cat: "soin", days: [6] },
+  { group: "Santé", name: "Prendre mes médicaments", emoji: "💊", cat: "santé", time: "08:00" },
+  { group: "Santé", name: "Vitamines", emoji: "🍊", cat: "santé", time: "08:00" },
+  { group: "Santé", name: "Boire 2 L d'eau", emoji: "💧", cat: "santé", steps: ["Matin", "Midi", "Après-midi", "Soir"] },
+  { group: "Santé", name: "Prendre la pilule", emoji: "💊", cat: "santé", time: "21:00" },
+  { group: "Sport", name: "Étirements", emoji: "🤸", cat: "sport", time: "07:30" },
+  { group: "Sport", name: "Marche 30 min", emoji: "🚶", cat: "sport" },
+  { group: "Sport", name: "Séance de sport", emoji: "🏋️", cat: "sport", days: [0, 2, 4] },
+  { group: "Bien-être", name: "Méditation 10 min", emoji: "🧘", cat: "bien-être" },
+  { group: "Bien-être", name: "Lire 20 min", emoji: "📖", cat: "bien-être", time: "22:00" },
+  { group: "Bien-être", name: "Journal / gratitude", emoji: "✍️", cat: "bien-être", time: "22:15" },
+  { group: "Bien-être", name: "Pas d'écran avant de dormir", emoji: "📵", cat: "bien-être", time: "23:00" },
+  { group: "Maison", name: "Faire mon lit", emoji: "🛏️", cat: "maison", time: "07:40" },
+  { group: "Maison", name: "Préparer mon sac", emoji: "🎒", cat: "maison", time: "21:30", days: [6, 0, 1, 2, 3] },
+  { group: "Maison", name: "Arroser les plantes", emoji: "🪴", cat: "maison", days: [2, 5] },
+];
+const HABIT_EMOJIS = ["✨", "🌙", "🧴", "🪥", "💊", "💧", "🍊", "🤸", "🏋️", "🚶", "🧘", "📖", "✍️", "📵", "🛏️", "🎒", "🪴", "🥗", "☀️", "🐶"];
+const catOf = (k: HabitCat) => HABIT_CATS.find((c) => c.k === k) ?? HABIT_CATS[HABIT_CATS.length - 1];
+const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
+
+/** Coche une étape ; la routine est validée quand toutes ses étapes le sont. */
+function useHabitStep() {
+  const { dispatch, toast } = useStore();
+  return (h: Habit, date: string, stepId: ID) => {
+    const was = habitStepsDone(h, date);
+    const now = was.includes(stepId) ? was.filter((x) => x !== stepId) : [...was, stepId];
+    dispatch({ type: "habit/step", id: h.id, date, stepId });
+    const all = !!h.steps?.length && now.length === h.steps.length, done = h.done.includes(date);
+    if (all && !done) { dispatch({ type: "habit/toggle", id: h.id, date }); toast(`${h.emoji} ${h.name} : fait ✓`); }
+    else if (!all && done && was.length === h.steps?.length) dispatch({ type: "habit/toggle", id: h.id, date });
+  };
+}
+
+/** Liste des routines du jour (onglet Routines et tableau de bord). */
+const HabitToday: React.FC<{ date: string; compact?: boolean }> = ({ date, compact }) => {
+  const { state, dispatch, toast } = useStore();
+  const step = useHabitStep();
+  const list = (state.habits ?? []).filter((h) => habitOn(h, date)).sort((a, b) => (a.time ?? "99").localeCompare(b.time ?? "99") || a.name.localeCompare(b.name));
+  if (!list.length) return null;
+  return (
+    <ul className="flex flex-col divide-y divide-line" data-testid="habits-today">
+      {list.map((h) => { const done = h.done.includes(date), streak = habitStreak(h, date); return (
+        <li key={h.id} className="flex flex-wrap items-center gap-2 py-2 first:pt-0 last:pb-0 text-[13px]">
+          <button onClick={() => { dispatch({ type: "habit/toggle", id: h.id, date }); if (!done) toast(`${h.emoji} ${h.name} : fait ✓`); }} aria-label={done ? `Annuler ${h.name}` : `Marquer ${h.name} comme fait`}
+            className={cx("grid h-6 w-6 shrink-0 place-items-center rounded-md border-2 transition", done ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-fg/40 hover:border-accent")}>{done && <Check size={13} strokeWidth={3} />}</button>
+          <span className="text-base leading-none" aria-hidden>{h.emoji}</span>
+          <span className={cx("min-w-0 flex-1 truncate font-medium", done && "text-muted line-through")}>{h.name}</span>
+          {h.time && <span className="font-mono text-[11px] text-muted">{h.time}</span>}
+          {streak > 1 && <span className="text-[11px] font-semibold text-warn" title="Série en cours">🔥 {streak}</span>}
+          {!compact && <span className="hidden h-2 w-2 rounded-full sm:inline-block" style={{ background: catOf(h.cat).color }} title={catOf(h.cat).label} />}
+          {h.note && !compact && <p className="basis-full pl-8 text-[11px] text-muted">{h.note}</p>}
+          {!!h.steps?.length && <div className="basis-full pl-8"><StepsCheck small steps={h.steps} done={(id) => habitStepsDone(h, date).includes(id)} onToggle={(id) => step(h, date, id)} label={`Étapes de ${h.name}`} /></div>}
+        </li>); })}
+    </ul>
+  );
+};
+
+const HabitForm: React.FC<{ habit?: Habit; preset?: (typeof HABIT_PRESETS)[number] | null; onDone: () => void }> = ({ habit, preset, onDone }) => {
+  const { dispatch, toast } = useStore();
+  const init = habit ?? (preset ? { name: preset.name, emoji: preset.emoji, cat: preset.cat, time: preset.time, days: preset.days ?? ALL_DAYS, steps: (preset.steps ?? []).map((text) => ({ id: uid(), text })), note: "" } : null);
+  const [f, setF] = useState({ name: init?.name ?? "", emoji: init?.emoji ?? "✨", cat: (init?.cat ?? "soin") as HabitCat, time: init?.time ?? "", days: init?.days ?? ALL_DAYS, note: init?.note ?? "" });
+  const [steps, setSteps] = useState<Step[]>(init?.steps ?? []);
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!f.name.trim()) { toast("Donnez un nom à la routine.", "bad"); return; }
+    if (!f.days.length) { toast("Choisissez au moins un jour.", "bad"); return; }
+    const clean = steps.map((x) => ({ id: x.id, text: x.text.trim() })).filter((x) => x.text);
+    const data = { name: f.name.trim(), emoji: f.emoji, cat: f.cat, days: [...f.days].sort(), time: f.time || undefined, note: f.note.trim() || undefined, steps: clean.length ? clean : undefined };
+    if (habit) { dispatch({ type: "habit/update", id: habit.id, patch: data }); toast("Routine mise à jour"); }
+    else { dispatch({ type: "habit/add", habit: { id: uid(), ...data, done: [], stepsDone: {}, since: todayISO() } }); toast(`${f.emoji} ${f.name.trim()} ajoutée`); }
+    onDone();
+  };
+  return (
+    <form onSubmit={submit} className="grid grid-cols-2 gap-3">
+      <Field label="Nom" htmlFor="hb-name" className="col-span-2"><Input id="hb-name" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="Ex. Prendre mes médicaments" /></Field>
+      <div className="col-span-2"><p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">Icône</p>
+        <div className="flex flex-wrap gap-1.5">{HABIT_EMOJIS.map((em) => <button key={em} type="button" onClick={() => setF({ ...f, emoji: em })} aria-label={`Icône ${em}`} aria-pressed={f.emoji === em}
+          className={cx("grid h-9 w-9 place-items-center rounded-lg border-2 text-lg transition", f.emoji === em ? "border-fg bg-hi" : "border-line bg-sunken hover:border-fg/60")}>{em}</button>)}</div></div>
+      <Field label="Catégorie" htmlFor="hb-cat"><Select id="hb-cat" value={f.cat} onChange={(e) => setF({ ...f, cat: e.target.value as HabitCat })}>{HABIT_CATS.map((c) => <option key={c.k} value={c.k}>{c.label}</option>)}</Select></Field>
+      <Field label="Heure (facultatif)" htmlFor="hb-time"><Input id="hb-time" type="time" value={f.time} onChange={(e) => setF({ ...f, time: e.target.value })} /></Field>
+      <div className="col-span-2"><p className="mb-1.5 flex items-center justify-between text-[11px] font-medium uppercase tracking-wider text-muted">Jours
+        <span className="flex gap-2 normal-case tracking-normal"><button type="button" className="text-accent hover:underline" onClick={() => setF({ ...f, days: ALL_DAYS })}>Tous les jours</button><button type="button" className="text-accent hover:underline" onClick={() => setF({ ...f, days: [0, 1, 2, 3, 4] })}>En semaine</button></span></p>
+        <div className="flex gap-1.5">{DAYS.map((d, i) => { const on = f.days.includes(i); return <button key={d} type="button" aria-pressed={on} onClick={() => setF({ ...f, days: on ? f.days.filter((x) => x !== i) : [...f.days, i] })}
+          className={cx("h-9 flex-1 rounded-lg border-2 text-[12px] font-semibold transition", on ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-line bg-sunken text-muted")}>{d}</button>; })}</div></div>
+      <Field label="Note (dose, produit…)" htmlFor="hb-note" className="col-span-2"><Input id="hb-note" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} placeholder="Ex. 1 comprimé après le repas" /></Field>
+      <StepsEditor id="hb-steps" steps={steps} onChange={setSteps} className="col-span-2" placeholder="Ex. Nettoyant, sérum, crème…" />
+      <div className="col-span-2 flex justify-end gap-2"><Btn type="button" variant="ghost" onClick={onDone}>Annuler</Btn><Btn type="submit" variant="primary">{habit ? <><Check size={14} />Enregistrer</> : <><Plus size={14} />Ajouter</>}</Btn></div>
+    </form>
+  );
+};
+
+const Routines: React.FC = () => {
+  const { state, dispatch, undoable } = useStore();
+  const today = todayISO();
+  const habits = state.habits ?? [];
+  const [form, setForm] = useState<{ habit?: Habit; preset?: (typeof HABIT_PRESETS)[number] | null } | null>(null);
+  const [offset, setOffset] = useState(0);
+  const monday = addDays(parseISO(today), offset * 7 - weekday(parseISO(today)));
+  const week = Array.from({ length: 7 }, (_, i) => iso(addDays(monday, i)));
+  const todays = habits.filter((h) => habitOn(h, today)), doneToday = todays.filter((h) => h.done.includes(today)).length;
+  const all = habitStats(habits, today), d30 = habitStats(habits, today, 30);
+  const presets = HABIT_PRESETS.filter((p) => !habits.some((h) => norm(h.name) === norm(p.name)));
+  return (
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+      <Card title={<span className="flex items-center gap-2"><Sparkles size={15} />Aujourd'hui · {todays.length ? `${doneToday}/${todays.length}` : "—"}</span>} action={<Btn size="sm" variant="primary" onClick={() => setForm({})}><Plus size={13} />Routine</Btn>}>
+        {todays.length ? <>
+          <div className="mb-3 h-1.5 rounded-full bg-sunken"><div className="h-full rounded-full bg-ok transition-all" style={{ width: `${(doneToday / todays.length) * 100}%` }} /></div>
+          <HabitToday date={today} />
+          {doneToday === todays.length && <p className="mt-3 text-center text-[13px] font-semibold text-ok">Tout est fait aujourd'hui, bravo ! 🎉</p>}
+        </> : <Empty icon={<Sparkles size={18} />} title={habits.length ? "Rien de prévu aujourd'hui" : "Aucune routine"} hint={habits.length ? "Vos routines ne sont pas prévues ce jour-là." : "Soin du soir, médicaments, eau, sport… Choisissez une suggestion ci-dessous ou créez la vôtre."} />}
+      </Card>
+      <Card title="Bilan">
+        <div className="flex flex-col gap-3" data-testid="habit-stats">
+          <CounterRow label="Routines" target="faites le jour prévu" a={all} m={d30} lateWord="oubliées" />
+          {habits.length > 0 && <ul className="flex flex-col gap-1.5 text-[13px]">{[...habits].sort((a, b) => habitStreak(b, today) - habitStreak(a, today)).slice(0, 5).map((h) => (
+            <li key={h.id} className="flex items-center gap-2"><span aria-hidden>{h.emoji}</span><span className="min-w-0 flex-1 truncate">{h.name}</span><span className="font-mono text-[12px] tabular-nums text-muted">🔥 {habitStreak(h, today)} j</span></li>))}</ul>}
+          <p className="text-[11px] text-muted">Une routine non cochée un jour prévu compte comme oubliée (à partir du jour de sa création). Aujourd'hui ne compte qu'une fois coché.</p>
+        </div>
+      </Card>
+      <Card title={<span className="flex items-center gap-2"><Repeat size={15} />Semaine {isoWeek(monday)}</span>} className="md:col-span-2"
+        action={<><Btn size="sm" variant="ghost" onClick={() => setOffset(offset - 1)} aria-label="Semaine précédente"><ChevronLeft size={14} /></Btn><Btn size="sm" onClick={() => setOffset(0)}>Cette semaine</Btn><Btn size="sm" variant="ghost" onClick={() => setOffset(offset + 1)} aria-label="Semaine suivante"><ChevronRight size={14} /></Btn></>}>
+        {habits.length ? <div className="overflow-x-auto"><table className="w-full min-w-[640px] border-separate border-spacing-1 text-[12px]">
+          <thead><tr><th className="text-left text-[11px] font-medium uppercase tracking-wider text-muted">Routine</th>{week.map((d) => <th key={d} className={cx("rounded-md py-1 text-center font-medium", d === today ? "bg-accent/10 text-accent" : "text-muted")}>{DAYS[weekday(parseISO(d))]} {parseISO(d).getDate()}</th>)}<th /></tr></thead>
+          <tbody>{habits.map((h) => (
+            <tr key={h.id} className="group">
+              <td className="pr-2"><p className="flex items-center gap-1.5 font-medium text-fg"><span aria-hidden>{h.emoji}</span>{h.name}</p><p className="text-[11px] text-muted">{catOf(h.cat).label}{h.time ? ` · ${h.time}` : ""}{h.days.length < 7 ? ` · ${h.days.map((d) => DAYS[d]).join(", ")}` : ""}</p></td>
+              {week.map((d) => { const on = habitOn(h, d), done = h.done.includes(d); return (
+                <td key={d} className="text-center">{on ? <button onClick={() => d <= today && dispatch({ type: "habit/toggle", id: h.id, date: d })} disabled={d > today} aria-label={`${h.name} le ${fmtDate(d)} : ${done ? "fait" : "non fait"}`}
+                  className={cx("flex h-9 w-full items-center justify-center rounded-md border transition", done ? "border-ok/40 bg-ok/12 text-ok" : d < today ? "border-bad/30 bg-bad/6 text-bad" : d === today ? "border-accent/40 bg-accent/8" : "border-line bg-sunken text-muted opacity-60")}>
+                  {done ? <Check size={14} strokeWidth={3} /> : d < today ? <X size={12} /> : ""}</button> : <span className="block h-9 rounded-md bg-sunken/40" />}</td>); })}
+              <td className="whitespace-nowrap"><button className="p-1 text-muted hover:text-accent" aria-label={`Modifier ${h.name}`} onClick={() => setForm({ habit: h })}><Pencil size={12} /></button>
+                <button className="p-1 text-muted hover:text-bad" aria-label={`Supprimer ${h.name}`} onClick={() => undoable({ type: "habit/remove", id: h.id }, `Routine « ${h.name} » supprimée`)}><Trash2 size={12} /></button></td>
+            </tr>))}</tbody></table></div>
+          : <p className="text-xs text-muted">Le tableau de la semaine apparaîtra avec votre première routine.</p>}
+      </Card>
+      {presets.length > 0 && <Card title="Suggestions" className="md:col-span-2">
+        <div className="flex flex-col gap-3">{[...new Set(presets.map((p) => p.group))].map((g) => (
+          <div key={g}><p className="mb-1 text-[11px] font-semibold text-muted">{g}</p><div className="flex flex-wrap gap-1.5">{presets.filter((p) => p.group === g).map((p) => (
+            <button key={p.name} onClick={() => setForm({ preset: p })} className="rounded-full border border-line bg-sunken px-2.5 py-1 text-[12px] transition hover:border-fg/60">{p.emoji} {p.name}</button>))}</div></div>))}</div>
+        <p className="mt-2 text-[11px] text-muted">Touchez une suggestion pour la personnaliser (heure, jours, étapes) avant de l'ajouter. Rappel : l'application ne remplace pas un avis médical ; suivez la posologie de votre ordonnance.</p>
+      </Card>}
+      {form && <Modal title={form.habit ? "Modifier la routine" : "Nouvelle routine"} onClose={() => setForm(null)}><HabitForm habit={form.habit} preset={form.preset} onDone={() => setForm(null)} /></Modal>}
+    </div>
+  );
+};
+
 const Sleep: React.FC = () => {
   const { state, dispatch, toast, undoable } = useStore();
   const s = state.settings;
@@ -2674,6 +2831,7 @@ const NAV: { key: ViewKey; label: string; icon: React.FC<{ size?: number }>; sho
   { key: "groceries", label: "Courses", icon: ShoppingCart, short: "5" },
   { key: "budget", label: "Budget", icon: Wallet, short: "6" },
   { key: "chores", label: "Ménage", icon: Home, short: "7" },
+  { key: "routines", label: "Routines", icon: Sparkles, short: "0" },
   { key: "sleep", label: "Sommeil", icon: Moon, short: "8" },
   { key: "settings", label: "Réglages", icon: Settings, short: "9" },
 ];
@@ -2900,6 +3058,7 @@ export default function StudentOS({ state, dispatch, env, view, onView, notice, 
             {view === "groceries" && <Groceries />}
             {view === "budget" && <BudgetView />}
             {view === "chores" && <Chores />}
+            {view === "routines" && <Routines />}
             {view === "sleep" && <Sleep />}
             {view === "settings" && <SettingsView />}
             </>}

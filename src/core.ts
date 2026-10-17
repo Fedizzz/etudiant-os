@@ -9,7 +9,7 @@ export type TaskKind = "devoir" | "examen" | "projet";
 export type Priority = 1 | 2 | 3;
 export type Recurrence = "daily" | "weekly" | "biweekly";
 export type Aisle = "Frais" | "Fruits & légumes" | "Épicerie" | "Boissons" | "Surgelés" | "Hygiène" | "Entretien";
-export type ViewKey = "dashboard" | "planning" | "academic" | "focus" | "groceries" | "budget" | "chores" | "sleep" | "settings";
+export type ViewKey = "dashboard" | "planning" | "academic" | "focus" | "groceries" | "budget" | "chores" | "routines" | "sleep" | "settings";
 /** Catégories intégrées ; l'utilisateur peut en ajouter (settings.customCats). */
 export type ExpenseCat = "Courses" | "Logement" | "Transport" | "Études" | "Restauration" | "Loisirs" | "Santé" | "Autre" | (string & {});
 
@@ -52,6 +52,9 @@ export type EventRecurrence = "none" | "daily" | "weekly" | "biweekly" | "monthl
 /** Événement personnel du planning (rendez-vous, sport, job…) à heure précise, ponctuel ou récurrent. */
 export interface PlanEvent { id: ID; title: string; date: string; start: string; end: string; recurrence: EventRecurrence; until: string | null; color?: string; skipped?: string[] }
 /** bedOk / wakeOk : couché / levé à l'heure prévue (coché par l'utilisateur ; absent = non renseigné). */
+export type HabitCat = "soin" | "santé" | "sport" | "bien-être" | "maison" | "autre";
+/** Routine quotidienne : days = jours de la semaine (0 = lundi) ; done = dates faites ; stepsDone = étapes cochées par date. */
+export interface Habit { id: ID; name: string; emoji: string; cat: HabitCat; time?: string; days: number[]; done: string[]; steps?: Step[]; stepsDone?: Record<string, ID[]>; note?: string; since: string }
 export interface SleepLog { date: string; bed: string; wake: string; quality: 1 | 2 | 3 | 4 | 5; bedOk?: boolean; wakeOk?: boolean }
 /** id = identifiant de session : un même id n'est jamais enregistré deux fois. */
 export interface FocusEntry { id?: ID; date: string; minutes: number; taskId: ID | null; courseId?: ID | null; interrupted?: boolean }
@@ -85,6 +88,8 @@ export interface AppState {
   events: PlanEvent[];
   /** Événements des calendriers abonnés (cache synchronisé, fenêtre de quelques mois). */
   feedEvents?: FeedEvent[];
+  /** Routines du quotidien (soins, médicaments, habitudes). */
+  habits?: Habit[];
   templates: GroceryTemplate[]; products: Product[]; timer: TimerState;
 }
 
@@ -225,6 +230,8 @@ export type Action =
   | { type: "chore/skip"; id: ID; date: string }
   | { type: "chore/update"; id: ID; patch: Partial<Chore> } | { type: "chore/step"; id: ID; date: string; stepId: ID }
   | { type: "task/step"; id: ID; stepId: ID }
+  | { type: "habit/add"; habit: Habit } | { type: "habit/update"; id: ID; patch: Partial<Habit> } | { type: "habit/remove"; id: ID }
+  | { type: "habit/toggle"; id: ID; date: string } | { type: "habit/step"; id: ID; date: string; stepId: ID }
   | { type: "feed/add"; feed: CalFeed } | { type: "feed/remove"; id: ID } | { type: "feed/update"; id: ID; patch: Partial<CalFeed> }
   | { type: "feed/synced"; id: ID; events: FeedEvent[]; at: string }
   | { type: "event/update"; id: ID; patch: Partial<PlanEvent> }
@@ -315,6 +322,15 @@ export function reducer(s: AppState, a: Action): AppState {
         return { ...c, done: was ? c.done.filter((x) => x !== a.date) : [...c.done, a.date], doneBy, skipped: (c.skipped ?? []).filter((x) => x !== a.date) };
       }),
     };
+    case "habit/add": return { ...s, habits: [...(s.habits ?? []), a.habit] };
+    case "habit/update": return { ...s, habits: (s.habits ?? []).map((h) => (h.id === a.id ? { ...h, ...a.patch } : h)) };
+    case "habit/remove": return { ...s, habits: (s.habits ?? []).filter((h) => h.id !== a.id) };
+    case "habit/toggle": return { ...s, habits: (s.habits ?? []).map((h) => (h.id !== a.id ? h : { ...h, done: h.done.includes(a.date) ? h.done.filter((d) => d !== a.date) : [...h.done, a.date].sort() })) };
+    case "habit/step": return { ...s, habits: (s.habits ?? []).map((h) => {
+      if (h.id !== a.id) return h;
+      const cur = h.stepsDone?.[a.date] ?? [];
+      return { ...h, stepsDone: { ...h.stepsDone, [a.date]: cur.includes(a.stepId) ? cur.filter((x) => x !== a.stepId) : [...cur, a.stepId] } };
+    }) };
     case "chore/update": return { ...s, chores: s.chores.map((c) => (c.id === a.id ? { ...c, ...a.patch } : c)) };
     case "chore/step": return { ...s, chores: s.chores.map((c) => {
       if (c.id !== a.id) return c;
@@ -433,6 +449,14 @@ export function validateState(x: unknown): { ok: true; state: AppState; repaired
       const st = cleanSteps(steps, false);
       const sd = stepsDone && typeof stepsDone === "object" ? Object.fromEntries(Object.entries(stepsDone).filter(([k, v]) => isDate(k) && Array.isArray(v)).map(([k, v]) => [k, (v as unknown[]).filter(isStr)]).slice(-120)) : {};
       return { ...rest, ...(st.length ? { steps: st, stepsDone: sd } : {}), done: Array.isArray(c.done) ? c.done.filter(isDate) : [], skipped: Array.isArray(c.skipped) ? c.skipped.filter(isDate) : [], doneBy: c.doneBy && typeof c.doneBy === "object" ? c.doneBy : {}, ...(isTime(time) ? { time } : {}) };
+    }),
+    habits: keep<Habit>("routines", Array.isArray(p.habits) ? p.habits : [], (h) => isStr(h.id) && isStr(h.name) && Array.isArray(h.done)).map((h) => {
+      const st = cleanSteps(h.steps, false);
+      const days = Array.isArray(h.days) ? [...new Set(h.days.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))].sort() : [];
+      const sd = h.stepsDone && typeof h.stepsDone === "object" ? Object.fromEntries(Object.entries(h.stepsDone).filter(([k, v]) => isDate(k) && Array.isArray(v)).map(([k, v]) => [k, (v as unknown[]).filter(isStr)]).slice(-120)) : {};
+      return { id: h.id, name: h.name.slice(0, 80), emoji: isStr(h.emoji) ? h.emoji.slice(0, 8) : "✨", cat: (HABIT_CATS.some((c) => c.k === h.cat) ? h.cat : "autre") as HabitCat,
+        days: days.length ? days : [0, 1, 2, 3, 4, 5, 6], done: h.done.filter(isDate), since: isDate(h.since) ? h.since : todayISO(),
+        ...(isTime(h.time) ? { time: h.time } : {}), ...(st.length ? { steps: st, stepsDone: sd } : {}), ...(isStr(h.note) && h.note.trim() ? { note: h.note.slice(0, 200) } : {}) };
     }),
     feedEvents: Array.isArray(p.feedEvents) ? (p.feedEvents as FeedEvent[]).filter((e) => e && isStr(e.feedId) && isDate(e.date) && isTime(e.start) && isTime(e.end)).slice(0, 5000) : [],
     events: keep<PlanEvent>("événements", Array.isArray(p.events) ? p.events : [], (e) => isStr(e.id) && isStr(e.title) && isDate(e.date) && isTime(e.start) && isTime(e.end))
@@ -916,4 +940,34 @@ export function choreOnTimeStats(chores: Chore[], today: string, days = 365, me 
     }
   }
   return { ok, late };
+}
+
+export const HABIT_CATS: { k: HabitCat; label: string; color: string }[] = [
+  { k: "soin", label: "Soins", color: "#c2417a" }, { k: "santé", label: "Santé & médicaments", color: "#0f9d76" },
+  { k: "sport", label: "Sport", color: "#d9822b" }, { k: "bien-être", label: "Bien-être", color: "#7a5af5" },
+  { k: "maison", label: "Maison", color: "#1d9bb5" }, { k: "autre", label: "Autre", color: "#5b6b8c" },
+];
+/** La routine est-elle prévue ce jour-là ? */
+export const habitOn = (h: Habit, date: string) => date >= h.since && h.days.includes(weekday(parseISO(date)));
+export const habitStepsDone = (h: Habit, date: string) => (h.stepsDone?.[date] ?? []).filter((id) => h.steps?.some((x) => x.id === id));
+/** Faites / manquées (jours passés prévus non faits) depuis la création, sur `days` jours max. Aujourd'hui n'est jamais « manqué ». */
+export function habitStats(habits: Habit[], today: string, days = 365): OnTimeCount {
+  let ok = 0, late = 0;
+  const t0 = parseISO(today);
+  for (const h of habits) for (let i = 0; i < days; i++) {
+    const k = iso(addDays(t0, -i)); if (k < h.since) break;
+    if (!habitOn(h, k)) continue;
+    if (h.done.includes(k)) ok++; else if (i > 0) late++;
+  }
+  return { ok, late };
+}
+/** Série : jours prévus consécutifs faits (aujourd'hui compte s'il est fait, sinon on part d'hier). */
+export function habitStreak(h: Habit, today: string): number {
+  let n = 0; const t0 = parseISO(today);
+  for (let i = 0; i < 400; i++) {
+    const k = iso(addDays(t0, -i)); if (k < h.since) break;
+    if (!habitOn(h, k)) continue;
+    if (h.done.includes(k)) n++; else if (i > 0) break;
+  }
+  return n;
 }
