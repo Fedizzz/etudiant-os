@@ -1247,6 +1247,35 @@ const BLOCK_COLORS: { k: string; label: string; hex: string }[] = [
 const KIND_NAME: Record<Block["kind"], string> = { class: "Cours", task: "Travail planifié", chore: "Ménage", meal: "Repas", sleep: "Sommeil", busy: "Indisponibilité", event: "Événement" };
 const durText = (min: number) => fmtDur(min);
 /** Fiche détaillée d'un créneau (toucher un bloc du planning) : tout le texte, la salle, les dates, et sa couleur. */
+/** Déplacer une occurrence de corvée (autre jour et/ou autre heure) depuis le planning. */
+const ChoreMove: React.FC<{ chore: Chore; date: string; start: number; onDone: () => void }> = ({ chore, date, start, onDone }) => {
+  const { dispatch, toast } = useStore();
+  const [d, setD] = useState(date); const [t, setT] = useState(toHHMM(start));
+  const apply = () => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !/^\d{2}:\d{2}$/.test(t)) { toast("Choisissez un jour et une heure.", "bad"); return; }
+    if (d < todayISO()) { toast("Choisissez aujourd'hui ou un jour à venir.", "bad"); return; }
+    if (d === date) dispatch({ type: "chore/pin", id: chore.id, date, time: t });
+    else if (chore.recurrence === "once") dispatch({ type: "chore/update", id: chore.id, patch: { date: d, day: weekday(parseISO(d)), pinned: { [d]: t } } });
+    else {
+      // Occurrence d'une corvée récurrente : reportée ce jour-là, et recréée une seule fois au nouveau jour.
+      dispatch({ type: "chore/skip", id: chore.id, date });
+      dispatch({ type: "chore/add", chore: { id: uid(), name: chore.name, recurrence: "once", date: d, day: weekday(parseISO(d)), minutes: chore.minutes, assignees: [chore.assignees[0] ?? "Moi"], done: [], pinned: { [d]: t }, ...(chore.steps?.length ? { steps: chore.steps, stepsDone: {} } : {}) } });
+    }
+    toast(`${chore.name} : déplacée au ${fmtDate(d)} à ${t}`); onDone();
+  };
+  return (
+    <div className="rounded-xl border-2 border-line p-3" data-testid="chore-move">
+      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">Déplacer cette corvée</p>
+      <div className="flex flex-wrap items-end gap-2">
+        <Field label="Jour" htmlFor="cm-d"><Input id="cm-d" type="date" min={todayISO()} value={d} onChange={(e) => setD(e.target.value)} /></Field>
+        <Field label="Heure" htmlFor="cm-t"><Input id="cm-t" type="time" value={t} onChange={(e) => setT(e.target.value)} /></Field>
+        <Btn variant="primary" onClick={apply}><Check size={14} />Déplacer</Btn>
+      </div>
+      {chore.recurrence !== "once" && <p className="mt-1.5 text-[11px] text-muted">Seulement cette fois : les autres jours de la corvée ne changent pas.</p>}
+    </div>
+  );
+};
+
 const BlockDetail: React.FC<{ b: Block; date: string; onClose: () => void }> = ({ b, date, onClose }) => {
   const { state, dispatch, toast, openTask, undoable } = useStore();
   const cls = b.kind === "class" && !b.feedId ? state.classes.find((c) => c.id === b.refId) : undefined;
@@ -1288,6 +1317,7 @@ const BlockDetail: React.FC<{ b: Block; date: string; onClose: () => void }> = (
         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-[13.5px]">
           {rows.map(([k, v]) => <React.Fragment key={k}><dt className="text-muted">{k}</dt><dd className="min-w-0 break-words">{v}</dd></React.Fragment>)}
         </dl>
+        {chore && <ChoreMove chore={chore} date={date} start={b.start} onDone={onClose} />}
         {canColor && (
           <div>
             <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">Couleur{course ? " de la matière" : ""}</p>

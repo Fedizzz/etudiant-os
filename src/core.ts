@@ -831,7 +831,7 @@ export function planDay(state: AppState, date: string, remaining?: Map<ID, numbe
   const hardSpans = fixed.filter((b) => isHard(b.kind)).map((b) => [b.start, b.end]);
   for (let i = fixed.length - 1; i >= 0; i--) if (fixed[i].kind === "meal" && hardSpans.some(([s0, e0]) => s0 < fixed[i].end && e0 > fixed[i].start)) fixed.splice(i, 1);
   // Corvées à heure fixe (les miennes, non faites) : bloc fixe à l'heure choisie.
-  const slotOf = (c: Chore) => c.time ?? c.pinned?.[date];
+  const slotOf = (c: Chore) => c.pinned?.[date] ?? c.time;
   const timedChores = date < today ? [] : chores.filter((c) => slotOf(c) && choreScheduledOn(c, d) && choreAssignee(c, d) === "Moi" && !c.done.includes(date) && !(c.skipped ?? []).includes(date));
   // Tâches à créneau précis : bloc fixe le jour choisi.
   for (const t of tasks) if (t.slot && t.status !== "done" && t.slot.date === date && toMin(t.slot.end) > toMin(t.slot.start))
