@@ -72,6 +72,8 @@ export interface SettingsState {
   fallAsleep: number; maxBlock: number; theme: "system" | "light" | "dark"; pomodoro: PomodoroCfg;
   onboarded: boolean; roommates: string[]; currency: string;
   accent: string; hiddenViews: ViewKey[]; quickExpenses: QuickExpense[];
+  /** Tableau de bord personnalisé : ordre des cartes et cartes masquées (identifiants). */
+  dashLayout?: { order: string[]; hidden: string[] };
   /** Objectif de moyenne générale, objectif de focus quotidien (min), indisponibilités hebdomadaires. */
   gradeTarget: number | null; focusGoal: number; unavailable: Unavailability[];
   /** Catégories de dépenses ajoutées par l'utilisateur. */
@@ -438,6 +440,8 @@ export function validateState(x: unknown): { ok: true; state: AppState; repaired
   if (!isTime(settings.bedDefault)) settings.bedDefault = DEFAULT_SETTINGS.bedDefault;
   settings.roommates = Array.isArray(settings.roommates) ? settings.roommates.filter(isStr) : [];
   settings.hiddenViews = Array.isArray(settings.hiddenViews) ? settings.hiddenViews : [];
+  { const dl = settings.dashLayout as unknown as { order?: unknown; hidden?: unknown } | undefined; const ids = (v: unknown) => (Array.isArray(v) ? [...new Set(v.filter(isStr))].slice(0, 40) : []);
+    if (dl && typeof dl === "object") settings.dashLayout = { order: ids(dl.order), hidden: ids(dl.hidden) }; else delete settings.dashLayout; }
   settings.quickExpenses = Array.isArray(settings.quickExpenses) ? settings.quickExpenses.filter((q) => q && isStr(q.label) && isNum(q.amount)) : DEFAULT_SETTINGS.quickExpenses;
   settings.feeds = Array.isArray(settings.feeds) ? settings.feeds.filter((f) => f && isStr(f.id) && isStr(f.url)).map((f) => ({ id: f.id, name: isStr(f.name) ? f.name.slice(0, 40) : "Calendrier", url: f.url.slice(0, 2000), color: isStr(f.color) ? f.color : "#2f6fed", lastSync: isStr(f.lastSync) ? f.lastSync : null, lastError: isStr(f.lastError) ? f.lastError : null, ...(isNum(f.count) ? { count: f.count } : {}) })) : [];
   settings.feedColors = settings.feedColors && typeof settings.feedColors === "object" ? Object.fromEntries(Object.entries(settings.feedColors).filter(([k, v]) => isStr(k) && isStr(v) && /^#[0-9a-f]{6}$/i.test(v)).slice(0, 300)) : {};

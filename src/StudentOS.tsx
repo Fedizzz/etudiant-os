@@ -650,6 +650,53 @@ export const OnTimeCounter: React.FC<{ all: OnTime; d30: OnTime; bedTarget: stri
   );
 };
 
+interface DashBlock { id: string; label: string; span: string; show: boolean; el: React.ReactNode }
+/** Ordre effectif : ordre enregistré, puis les nouvelles cartes à leur place par défaut. */
+export function dashOrder(ids: string[], saved: string[] = []): string[] {
+  const known = saved.filter((id) => ids.includes(id));
+  const out = [...known];
+  ids.forEach((id, i) => { if (!out.includes(id)) { const prev = ids.slice(0, i).reverse().find((x) => out.includes(x)); out.splice(prev ? out.indexOf(prev) + 1 : 0, 0, id); } });
+  return out;
+}
+/** Grille du tableau de bord, réorganisable (bouton Personnaliser). */
+const DashGrid: React.FC<{ blocks: DashBlock[] }> = ({ blocks }) => {
+  const { state, dispatch, toast } = useStore();
+  const [edit, setEdit] = useState(false);
+  const layout = state.settings.dashLayout ?? { order: [], hidden: [] };
+  const order = dashOrder(blocks.map((b) => b.id), layout.order);
+  const byId = new Map(blocks.map((b) => [b.id, b]));
+  const save = (patch: Partial<{ order: string[]; hidden: string[] }>) => dispatch({ type: "settings", patch: { dashLayout: { order, hidden: layout.hidden, ...patch } } });
+  const move = (id: string, dir: -1 | 1) => {
+    // On saute les cartes invisibles pour que chaque clic ait un effet visible.
+    const vis = order.filter((x) => byId.get(x)?.show || edit && layout.hidden.includes(x));
+    const i = vis.indexOf(id), j = i + dir; if (j < 0 || j >= vis.length) return;
+    const next = [...order], a = next.indexOf(id), b = next.indexOf(vis[j]); [next[a], next[b]] = [next[b], next[a]]; save({ order: next });
+  };
+  const toggle = (id: string) => save({ hidden: layout.hidden.includes(id) ? layout.hidden.filter((x) => x !== id) : [...layout.hidden, id] });
+  const shown = order.map((id) => byId.get(id)!).filter((b) => b.show && (edit || !layout.hidden.includes(b.id)));
+  return (
+    <>
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        {edit && <p className="mr-auto text-[12px] text-muted">Utilisez ↑ ↓ pour déplacer une carte et l'œil pour la masquer.</p>}
+        {edit && <Btn size="sm" variant="ghost" onClick={() => { dispatch({ type: "settings", patch: { dashLayout: undefined } }); toast("Disposition par défaut rétablie", "info"); }}>Réinitialiser</Btn>}
+        <Btn size="sm" variant={edit ? "primary" : "ghost"} onClick={() => setEdit(!edit)} aria-pressed={edit}>{edit ? <><Check size={13} />Terminé</> : <><Pencil size={13} />Personnaliser</>}</Btn>
+      </div>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3" data-testid="dash-grid">
+        {shown.map((b, i) => { const hidden = layout.hidden.includes(b.id); return (
+          <section key={b.id} data-dash={b.id} className={cx("relative min-w-0", b.span, edit && "rounded-[24px] outline-dashed outline-2 outline-offset-4 outline-accent/50", hidden && "opacity-40")}>
+            {edit && <div className="absolute -top-3 right-3 z-10 flex items-center gap-1 rounded-full border-2 border-fg bg-panel px-1.5 py-0.5 shadow-[2px_2px_0_0_rgb(var(--ink))]">
+              <span className="max-w-[140px] truncate px-1 text-[11px] font-semibold">{b.label}</span>
+              <button className="grid h-7 w-7 place-items-center rounded-full hover:bg-sunken disabled:opacity-30" disabled={i === 0} onClick={() => move(b.id, -1)} aria-label={`Monter ${b.label}`}>↑</button>
+              <button className="grid h-7 w-7 place-items-center rounded-full hover:bg-sunken disabled:opacity-30" disabled={i === shown.length - 1} onClick={() => move(b.id, 1)} aria-label={`Descendre ${b.label}`}>↓</button>
+              <button className="grid h-7 w-7 place-items-center rounded-full hover:bg-sunken" onClick={() => toggle(b.id)} aria-label={hidden ? `Afficher ${b.label}` : `Masquer ${b.label}`} title={hidden ? "Afficher" : "Masquer"}>{hidden ? "🙈" : "👁"}</button>
+            </div>}
+            <div className={cx("h-full [&>*]:h-full", edit && "pointer-events-none select-none")}>{b.el}</div>
+          </section>); })}
+      </div>
+    </>
+  );
+};
+
 const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }> = ({ go, openNewTask }) => {
   const { state, dispatch, toast, openTask } = useStore();
   const today = todayISO();
@@ -699,24 +746,16 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
   ];
   const stepsLeft = steps.filter((x) => !x.done).length;
   const debtTone = ss.nights7 === 0 ? undefined : ss.debt7 > 240 ? "bad" : ss.debt7 > 60 ? "warn" : "ok";
-  return (
-    <div className="flex flex-col gap-4">
-      <TodoDashCard go={go} />
-      {stepsLeft > 0 && (
+  const blocks: DashBlock[] = [
+    { id: "todos", label: "Mes tâches perso", span: "md:col-span-2 xl:col-span-3", show: true, el: <TodoDashCard go={go} /> },
+    { id: "start", label: "Pour bien démarrer", span: "md:col-span-2 xl:col-span-3", show: stepsLeft > 0, el: (<>
         <Card title={<span className="flex items-center gap-2"><Sparkles size={15} className="text-accent" />Pour bien démarrer · {steps.length - stepsLeft}/{steps.length}</span>}>
           <div className="mb-3 h-1.5 rounded-full bg-sunken"><div className="h-full rounded-full bg-accent transition-all" style={{ width: `${((steps.length - stepsLeft) / steps.length) * 100}%` }} /></div>
           <ul className="grid gap-2 sm:grid-cols-2">{steps.map((x) => (
             <li key={x.label}><button onClick={x.run} disabled={x.done} className={cx("flex w-full items-center gap-2.5 rounded-xl border px-3 py-2 text-left text-[13px] transition", x.done ? "border-transparent text-muted line-through" : "border-line hover:border-accent hover:bg-accent/5")}>
               <span className={cx("grid h-5 w-5 shrink-0 place-items-center rounded-full border", x.done ? "border-ok bg-ok text-onaccent" : "border-line")}>{x.done && <Check size={11} strokeWidth={3} />}</span>{x.label}{!x.done && <ChevronRight size={14} className="ml-auto text-muted" />}</button></li>))}</ul>
-        </Card>)}
-      {plan.level === "surcharge" && (
-        <div className="flex items-start gap-3 rounded-xl border border-bad/30 bg-bad/8 p-4 text-sm">
-          <AlertTriangle size={18} className="mt-0.5 shrink-0 text-bad" />
-          <div className="min-w-0"><p className="font-semibold text-bad">Risque de surcharge aujourd'hui ({Math.round(plan.load * 100)} %)</p>
-            <p className="text-muted">{plan.overflow.length ? `${fmtDur(plan.overflow.reduce((n, o) => n + o.minutes, 0))} de travail ne tient pas dans la journée. ` : ""}Repoussez une échéance ou découpez une tâche.</p></div>
-          <Btn size="sm" className="ml-auto shrink-0" onClick={() => go("planning")}>Voir le planning</Btn>
-        </div>
-      )}
+        </Card></>) },
+    { id: "stats", label: "Chiffres clés", span: "md:col-span-2 xl:col-span-3", show: true, el: (<>
       <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2 md:grid-cols-6 md:[&>*]:col-span-2 md:[&>*:nth-child(n+4)]:col-span-3 xl:grid-cols-5 xl:[&>*]:col-span-1 xl:[&>*:nth-child(n+4)]:col-span-1">
         <button onClick={() => go("focus")} className="text-left"><Stat label="Focus · 7 jours" value={fmtDur(fs.week)} sub={delta === null ? (fs.week ? "pas de semaine précédente" : "aucune session") : `${delta >= 0 ? "+" : ""}${delta} % vs semaine précédente`} tone={delta === null ? undefined : delta >= 0 ? "ok" : "warn"} /></button>
         <button onClick={() => go("academic")} className="text-left"><Stat label="Terminées · 7 j" value={String(doneWeek)} sub={`${open.length} ouvertes · ${late.length} en retard`} tone={late.length ? "bad" : undefined} /></button>
@@ -724,7 +763,8 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
         <button onClick={() => go("chores")} className="text-left"><Stat label="Ménage aujourd'hui" value={chores.length ? `${chores.length - choresLeft.length}/${chores.length}` : "—"} sub={!chores.length ? "aucune corvée prévue" : choresLeft.length ? (solo ? `${choresLeft.length} à faire` : `${myLeft ? `${myLeft} pour vous` : "rien pour vous"} · ${choresLeft.length} à faire`) : "tout est fait"} tone={!chores.length ? undefined : choresLeft.length ? (lateChores ? "warn" : undefined) : "ok"} /></button>
         <button onClick={() => go("budget")} className="text-left min-[360px]:col-span-2"><Stat label="Budget restant" value={money(bs.remaining, cur)} sub={`${money(bs.spent, cur)} dépensés ce mois${bs.overCats.length ? ` · ${bs.overCats.length} plafond${bs.overCats.length > 1 ? "s" : ""} dépassé${bs.overCats.length > 1 ? "s" : ""}` : ""}`} tone={bs.remaining < 0 || bs.overCats.length ? "bad" : bs.remaining < state.budget.monthly * 0.15 ? "warn" : "ok"} /></button>
       </div>
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+    </>) },
+    { id: "today", label: "Aujourd'hui", span: "md:col-span-2", show: true, el: (<>
         <Card title="Aujourd'hui" className="md:col-span-2" action={<Btn size="sm" variant="ghost" onClick={() => go("planning")}>Planning</Btn>}>
           {late.length > 0 && (
             <div className="mb-3 rounded-xl border border-bad/30 bg-bad/5 p-3">
@@ -753,6 +793,8 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
             </ul>
           ) : <Empty icon={<Check size={18} />} title={open.length ? "Rien de planifié aujourd'hui" : "Aucune tâche ouverte"} hint={open.length ? "Vos tâches sont réparties sur les jours suivants." : "Ajoutez un devoir, un projet ou un examen : il sera réparti dans vos créneaux libres."} action={!open.length ? <Btn variant="primary" onClick={openNewTask}><Plus size={14} />Nouvelle tâche</Btn> : undefined} />}
         </Card>
+    </>) },
+    { id: "progress", label: "Avancement des tâches", span: "", show: true, el: (<>
         <Card title="Avancement des tâches">
           {state.tasks.length ? <div className="flex flex-col gap-3">
             {(["todo", "doing", "review", "done"] as TaskStatus[]).map((st) => {
@@ -763,12 +805,16 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
             <p className="text-[11px] text-muted">Temps passé : {fmtDur(open.reduce((n, t) => n + t.spent, 0))} sur {fmtDur(open.reduce((n, t) => n + t.estimate, 0))} estimés (tâches ouvertes).</p>
           </div> : <Empty icon={<ListChecks size={18} />} title="Aucune tâche" hint="La progression apparaîtra avec vos premières tâches." />}
         </Card>
+    </>) },
+    { id: "focus", label: "Temps de focus", span: "", show: true, el: (<>
         <Card title="Temps de focus" action={<Pill tone="info">7 derniers jours</Pill>}>
           {fs.week ? <>
             <BarChart data={fs.byDay.map((d) => ({ label: DAYS[weekday(parseISO(d.date))], value: d.minutes / 60, tone: "accent" }))} goal={state.settings.focusGoal / 60} unit={(v) => `${v.toFixed(v < 10 && v % 1 ? 1 : 0)}h`} height={120} />
             <p className="mt-2 text-xs text-muted">Pointillés : objectif de {fmtDur(state.settings.focusGoal)} par jour (Réglages).</p></>
             : <Empty icon={<Timer size={18} />} title="Aucune session cette semaine" hint="Le graphique se remplit avec vos sessions du minuteur." action={<Btn onClick={() => go("focus")}><Play size={13} />Lancer le minuteur</Btn>} />}
         </Card>
+    </>) },
+    { id: "sleep", label: "Sommeil", span: "", show: true, el: (<>
         <Card title="Sommeil" action={<Btn size="sm" variant="ghost" onClick={() => go("sleep")}>Détails</Btn>}>
           {ss.nights7 ? <>
             <BarChart data={lastNDays(7).map((d) => { const l = state.sleep.find((x) => x.date === d); const h = l ? sleepMinutes(l.bed, l.wake) / 60 : 0;
@@ -776,12 +822,18 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
             <p className="mt-2 text-xs text-muted">Tiret : nuit non saisie (non comptée).</p></>
             : <Empty icon={<Moon size={18} />} title="Aucune nuit cette semaine" hint="Enregistrez vos heures de coucher et de réveil pour suivre votre régularité." action={<Btn onClick={() => go("sleep")}>Enregistrer une nuit</Btn>} />}
         </Card>
+    </>) },
+    { id: "sleepOnTime", label: "Coucher & réveil à l'heure", span: "", show: true, el: (<>
         <Card title={<span className="flex items-center gap-2"><BedDouble size={15} />À l'heure ?</span>} action={<Btn size="sm" variant="ghost" onClick={() => go("sleep")}>Cocher</Btn>}>
           <OnTimeCounter all={ot.all} d30={ot.d30} bedTarget={state.settings.bedDefault} wakeTarget={state.settings.wakeDefault} />
         </Card>
-        {habitsToday.length > 0 && <Card title={<span className="flex items-center gap-2"><Sparkles size={15} />Routines du jour · {habitsToday.filter((h) => h.done.includes(today)).length}/{habitsToday.length}</span>} action={<Btn size="sm" variant="ghost" onClick={() => go("routines")}>Tout voir</Btn>}>
+    </>) },
+    { id: "routines", label: "Routines du jour", span: "", show: habitsToday.length > 0, el: (<>
+<Card title={<span className="flex items-center gap-2"><Sparkles size={15} />Routines du jour · {habitsToday.filter((h) => h.done.includes(today)).length}/{habitsToday.length}</span>} action={<Btn size="sm" variant="ghost" onClick={() => go("routines")}>Tout voir</Btn>}>
           <HabitToday date={today} compact />
-        </Card>}
+        </Card>
+    </>) },
+    { id: "taskOnTime", label: "Tâches à l'heure", span: "", show: true, el: (<>
         <Card title={<span className="flex items-center gap-2"><ListChecks size={15} />Tâches à l'heure ?</span>} action={<Btn size="sm" variant="ghost" onClick={() => go("academic")}>Tâches</Btn>}>
           <div className="flex flex-col gap-3" data-testid="task-ontime">
             <CounterRow label="Tâches" target="avant l'échéance" a={tt.all} m={tt.d30} />
@@ -791,12 +843,16 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
             <p className="text-[11px] text-muted">✓ terminée au plus tard le jour de l'échéance · ✗ terminée après, ou encore ouverte et en retard. Ménage : vos corvées faites le jour prévu ; les reportées ne comptent pas.</p>
           </div>
         </Card>
+    </>) },
+    { id: "load", label: "Charge des 7 prochains jours", span: "", show: true, el: (<>
         <Card title="Charge des 7 prochains jours" action={<Btn size="sm" variant="ghost" onClick={() => go("planning")}>Planning</Btn>}>
           <div className="flex flex-col gap-2.5">
             {days7.map((p) => (<div key={p.date} className="grid grid-cols-[52px_1fr] items-center gap-2"><span className="text-xs text-muted">{DAYS[weekday(parseISO(p.date))]} {parseISO(p.date).getDate()}</span><LoadMeter load={p.load} level={p.level} /></div>))}
           </div>
           <p className="mt-2 text-[11px] text-muted">Cours, indisponibilités, tâches et corvées ; le travail planifié un jour n'est pas recompté les jours suivants.</p>
         </Card>
+    </>) },
+    { id: "deadlines", label: "Prochaines échéances", span: "md:col-span-2", show: true, el: (<>
         <Card title="Prochaines échéances" className="md:col-span-2" action={<Btn size="sm" variant="ghost" onClick={() => go("academic")}>Tout voir</Btn>}>
           {upcoming.length ? (
             <ul className="flex flex-col divide-y divide-line">
@@ -809,6 +865,8 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
             </ul>
           ) : <Empty icon={<Check size={18} />} title={late.length ? "Rien d'autre à venir" : "Rien à rendre"} hint={late.length ? "Seules des tâches en retard restent ouvertes." : "Aucune échéance à venir."} />}
         </Card>
+    </>) },
+    { id: "chores", label: "Ménage du jour", span: "md:col-span-2 xl:col-span-1", show: true, el: (<>
         <Card title={<span className="flex items-center gap-2"><Home size={15} />Ménage du jour</span>} className="md:col-span-2 xl:col-span-1" action={<Btn size="sm" variant="ghost" onClick={() => go("chores")}>Tout voir</Btn>}>
           {chores.length ? (
             <ul className="flex flex-col divide-y divide-line">
@@ -828,7 +886,19 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
           ) : <Empty icon={<Home size={18} />} title={state.chores.length ? "Rien aujourd'hui" : "Aucune corvée"} hint={state.chores.length ? "Aucune corvée n'est prévue aujourd'hui dans la rotation." : solo ? "Créez vos corvées dans Ménage." : "Créez vos corvées et la rotation entre colocataires dans Ménage."} action={!state.chores.length ? <Btn onClick={() => go("chores")}><Plus size={13} />Créer une corvée</Btn> : undefined} />}
           {lateChores > 0 && <p className="mt-2 text-[11px] text-warn">{lateChores} corvée{lateChores > 1 ? "s" : ""} non faite{lateChores > 1 ? "s" : ""} ces 3 derniers jours.</p>}
         </Card>
-      </div>
+    </>) },
+  ];
+  return (
+    <div className="flex flex-col gap-4">
+      {plan.level === "surcharge" && (
+        <div className="flex items-start gap-3 rounded-xl border border-bad/30 bg-bad/8 p-4 text-sm">
+          <AlertTriangle size={18} className="mt-0.5 shrink-0 text-bad" />
+          <div className="min-w-0"><p className="font-semibold text-bad">Risque de surcharge aujourd'hui ({Math.round(plan.load * 100)} %)</p>
+            <p className="text-muted">{plan.overflow.length ? `${fmtDur(plan.overflow.reduce((n, o) => n + o.minutes, 0))} de travail ne tient pas dans la journée. ` : ""}Repoussez une échéance ou découpez une tâche.</p></div>
+          <Btn size="sm" className="ml-auto shrink-0" onClick={() => go("planning")}>Voir le planning</Btn>
+        </div>
+      )}
+      <DashGrid blocks={blocks} />
     </div>
   );
 };
