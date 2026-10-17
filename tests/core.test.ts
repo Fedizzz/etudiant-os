@@ -421,3 +421,14 @@ test("corvée cochée après son jour = en retard", () => {
   assert.equal(C.choreDoneLate(s.chores[0], y), true);
   assert.deepEqual(C.choreOnTimeStats(s.chores, C.todayISO()), { ok: 1, late: 1 });
 });
+
+test("jours de travail / révision : le travail n'est placé que ces jours-là", () => {
+  const t = task({ estimate: 240, deadline: "2026-10-20", doDates: ["2026-10-16", "2026-10-18"] });
+  assert.equal(C.dailyQuota(t, "2026-10-15", 240, TODAY), 0);
+  assert.equal(C.dailyQuota(t, "2026-10-16", 240, TODAY), 120);
+  assert.equal(C.dailyQuota(t, "2026-10-18", 120, TODAY), 120);
+  // Jours choisis tous passés : retour à la répartition normale.
+  assert.ok(C.dailyQuota({ ...t, doDates: ["2026-10-10"] }, TODAY, 240, TODAY) > 0);
+  const v = C.validateState(JSON.parse(JSON.stringify({ ...base(), tasks: [{ ...t, doDates: ["2026-10-18", "x", "2026-10-16", "2026-10-16"] }] })));
+  assert.ok(v.ok && JSON.stringify(v.state.tasks[0].doDates) === '["2026-10-16","2026-10-18"]');
+});

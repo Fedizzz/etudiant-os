@@ -449,6 +449,9 @@ const TaskForm: React.FC<{ onDone: () => void; task?: Task }> = ({ onDone, task 
   const [mode, setMode] = useState<"duration" | "slot">(task?.slot ? "slot" : "duration");
   const [slot, setSlot] = useState(task?.slot ?? { date: todayISO(), start: "14:00", end: "16:00" });
   const [steps, setSteps] = useState<Step[]>(task?.steps ?? []);
+  const [doDates, setDoDates] = useState<string[]>(task?.doDates ?? []);
+  const [doPick, setDoPick] = useState(todayISO());
+  const isExam = f.kind === "examen";
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!f.title.trim()) { toast("Donnez un titre à la tâche.", "bad"); return; }
@@ -461,7 +464,8 @@ const TaskForm: React.FC<{ onDone: () => void; task?: Task }> = ({ onDone, task 
     } else if (!(f.estimate >= 5)) { toast("L'estimation doit être d'au moins 5 minutes.", "bad"); return; }
     if (!(f.spent >= 0)) { toast("Le temps passé ne peut pas être négatif.", "bad"); return; }
     if (!task && f.deadline < todayISO()) toast("Échéance déjà passée : la tâche apparaîtra en retard.", "info");
-    const data = { ...f, estimate, title: f.title.trim(), courseId: f.courseId || null, slot: chosen, steps: steps.map((x) => ({ ...x, text: x.text.trim() })).filter((x) => x.text) };
+    const data = { ...f, estimate, title: f.title.trim(), courseId: f.courseId || null, slot: chosen, steps: steps.map((x) => ({ ...x, text: x.text.trim() })).filter((x) => x.text), doDates: mode === "duration" && doDates.length ? [...doDates].sort() : undefined };
+    if (data.doDates?.some((d) => d > f.deadline)) { toast(isExam ? "Les jours de révision doivent être avant l'examen." : "Les jours de travail doivent être avant l'échéance.", "bad"); return; }
     if (task) { dispatch({ type: "task/update", id: task.id, patch: data }); toast("Tâche mise à jour"); }
     else { const { slot: sl, ...rest } = data; dispatch({ type: "task/add", task: { id: uid(), ...rest, ...(sl ? { slot: sl } : {}), status: "todo", createdAt: todayISO() } }); toast(sl ? `Tâche ajoutée : ${fmtDate(sl.date)}, ${sl.start}–${sl.end}` : "Tâche ajoutée et planifiée"); }
     onDone();
@@ -475,11 +479,21 @@ const TaskForm: React.FC<{ onDone: () => void; task?: Task }> = ({ onDone, task 
         <option value="devoir">Devoir</option><option value="examen">Examen</option><option value="projet">Projet</option></Select></Field>
       <Field label="Priorité" htmlFor="tf-prio"><Select id="tf-prio" value={f.priority} onChange={(e) => setF({ ...f, priority: Number(e.target.value) as Priority })}>
         <option value={1}>Basse</option><option value={2}>Normale</option><option value={3}>Haute</option></Select></Field>
-      <Field label="Échéance" htmlFor="tf-dl" className="col-span-2"><Input id="tf-dl" type="date" value={f.deadline} onChange={(e) => setF({ ...f, deadline: e.target.value })} /></Field>
+      <Field label={isExam ? "Date de l'examen" : "Échéance (à rendre)"} htmlFor="tf-dl" className="col-span-2"><Input id="tf-dl" type="date" value={f.deadline} onChange={(e) => setF({ ...f, deadline: e.target.value })} /></Field>
       <TimeMode id="tf-mode" value={mode} onChange={setMode} className="col-span-2" />
       {mode === "duration" ? <>
         <Field label="Durée estimée (min)" htmlFor="tf-est" className="col-span-2"><Input id="tf-est" type="number" min={15} step={15} value={f.estimate} onChange={(e) => setF({ ...f, estimate: Math.max(15, Number(e.target.value)) })} /></Field>
-        <p className="col-span-2 self-end pb-2 text-[11px] text-muted">Répartie automatiquement dans vos créneaux libres avant l'échéance.</p>
+        <p className="col-span-2 self-end pb-2 text-[11px] text-muted">{doDates.length ? `Répartie sur ${doDates.length} jour${doDates.length > 1 ? "s" : ""} choisi${doDates.length > 1 ? "s" : ""}.` : "Répartie automatiquement dans vos créneaux libres avant l'échéance."}</p>
+        <div className="col-span-2 sm:col-span-4" data-testid="do-dates">
+          <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">{isExam ? "Jours de révision" : "Jours de travail (do date)"} <span className="normal-case tracking-normal">· facultatif</span></p>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {[...doDates].sort().map((d) => <span key={d} className="inline-flex items-center gap-1 rounded-full border-2 border-fg bg-hi px-2.5 py-0.5 text-[12px] font-medium text-[rgb(24_22_46)]">{fmtDate(d)}
+              <button type="button" aria-label={`Retirer le ${fmtDate(d)}`} onClick={() => setDoDates(doDates.filter((x) => x !== d))}><X size={11} /></button></span>)}
+            <Input type="date" aria-label={isExam ? "Jour de révision" : "Jour de travail"} value={doPick} min={todayISO()} max={f.deadline} onChange={(e) => setDoPick(e.target.value)} className="h-8 w-auto py-0 text-[12px]" />
+            <Btn type="button" size="sm" onClick={() => { if (doPick && !doDates.includes(doPick)) setDoDates([...doDates, doPick]); }}><Plus size={12} />Ajouter</Btn>
+          </div>
+          <p className="mt-1 text-[11px] text-muted">{isExam ? "Le temps de révision est réparti uniquement sur ces jours, avant l'examen." : "Le travail est placé uniquement ces jours-là, avant l'échéance."} Sans jour choisi : réparti automatiquement.</p>
+        </div>
       </> : <>
         <Field label="Jour" htmlFor="tf-sday" className="col-span-2"><Input id="tf-sday" type="date" value={slot.date} onChange={(e) => setSlot({ ...slot, date: e.target.value })} /></Field>
         <Field label="Début" htmlFor="tf-sstart"><Input id="tf-sstart" type="time" value={slot.start} onChange={(e) => setSlot({ ...slot, start: e.target.value })} /></Field>
@@ -1503,6 +1517,7 @@ const Academic: React.FC<{ openNewTask: () => void }> = ({ openNewTask }) => {
                     <button className="text-muted opacity-60 transition hover:text-bad group-hover:opacity-100" aria-label="Supprimer la tâche" onClick={() => undoable({ type: "task/remove", id: t.id }, `Tâche « ${t.title} » supprimée`)}><Trash2 size={12} /></button></span>
                   </div>
                   <p className={cx("text-[13px] font-medium leading-snug", s === "done" && "text-muted line-through")}>{t.title}</p>
+                  {!!t.doDates?.length && s !== "done" && <p className="mt-1 text-[11px] text-muted">{t.kind === "examen" ? "📖 Révision" : "🛠 Travail"} : {t.doDates.map((d) => fmtDate(d)).join(" · ")}</p>}
                   {!!t.steps?.length && <div className="mt-1.5" onPointerDown={(e) => e.stopPropagation()}><p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted">Checklist · {t.steps.filter((x) => x.done).length}/{t.steps.length}</p>
                     <StepsCheck small steps={t.steps} done={(id) => !!t.steps?.find((x) => x.id === id)?.done} onToggle={(stepId) => dispatch({ type: "task/step", id: t.id, stepId })} label={`Checklist de ${t.title}`} /></div>}
                   <div className="mt-2 h-1 rounded-full bg-sunken"><div className="h-full rounded-full bg-accent" style={{ width: `${pct}%` }} /></div>

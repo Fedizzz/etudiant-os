@@ -24,6 +24,8 @@ export interface Task {
   deadline: string; estimate: number; spent: number; priority: Priority; createdAt: string; doneAt?: string;
   /** Créneau précis choisi par l'utilisateur (sinon : réparti automatiquement selon l'estimation). */
   slot?: { date: string; start: string; end: string };
+  /** Jours où l'on veut travailler (devoir, projet) ou réviser (examen) ; vide = réparti automatiquement jusqu'à l'échéance. */
+  doDates?: string[];
   /** Checklist (sous-étapes cochables). */
   steps?: Step[];
 }
@@ -461,7 +463,7 @@ export function validateState(x: unknown): { ok: true; state: AppState; repaired
       const ok = Array.isArray(dates) ? dates.filter((r) => Array.isArray(r) && isDate(r[0]) && isDate(r[1]) && r[0] <= r[1]) : [];
       return ok.length ? { ...c, dates: ok } : c;
     }),
-    tasks: keep<Task>("tâches", p.tasks, (t) => isStr(t.id) && isStr(t.title) && isDate(t.deadline)).map((t) => ({ ...t, estimate: isNum(t.estimate) && t.estimate > 0 ? t.estimate : 60, spent: isNum(t.spent) && t.spent >= 0 ? t.spent : 0, priority: ([1, 2, 3].includes(t.priority) ? t.priority : 2) as Priority, status: (["todo", "doing", "review", "done"].includes(t.status) ? t.status : "todo") as TaskStatus, slot: t.slot && isDate(t.slot.date) && isTime(t.slot.start) && isTime(t.slot.end) && toMin(t.slot.end) > toMin(t.slot.start) ? t.slot : undefined })).map(({ slot, steps, ...t }) => { const st = cleanSteps(steps, true); return { ...t, ...(slot ? { slot } : {}), ...(st.length ? { steps: st } : {}) }; }),
+    tasks: keep<Task>("tâches", p.tasks, (t) => isStr(t.id) && isStr(t.title) && isDate(t.deadline)).map((t) => ({ ...t, estimate: isNum(t.estimate) && t.estimate > 0 ? t.estimate : 60, spent: isNum(t.spent) && t.spent >= 0 ? t.spent : 0, priority: ([1, 2, 3].includes(t.priority) ? t.priority : 2) as Priority, status: (["todo", "doing", "review", "done"].includes(t.status) ? t.status : "todo") as TaskStatus, slot: t.slot && isDate(t.slot.date) && isTime(t.slot.start) && isTime(t.slot.end) && toMin(t.slot.end) > toMin(t.slot.start) ? t.slot : undefined })).map(({ slot, steps, doDates, ...t }) => { const st = cleanSteps(steps, true); const dd = Array.isArray(doDates) ? [...new Set(doDates.filter(isDate))].sort().slice(0, 60) : []; return { ...t, ...(slot ? { slot } : {}), ...(st.length ? { steps: st } : {}), ...(dd.length ? { doDates: dd } : {}) }; }),
     groceries: keep<GroceryItem>("articles", p.groceries, (g) => isStr(g.id) && isStr(g.name)).map((g) => ({ ...g, price: isNum(g.price) && g.price >= 0 ? g.price : 0, checked: !!g.checked, qty: isStr(g.qty) ? g.qty : "" })),
     chores: keep<Chore>("corvées", p.chores, (c) => isStr(c.id) && isStr(c.name) && Array.isArray(c.assignees) && (c.recurrence !== "once" || isDate(c.date))).map((c) => {
       const { time, steps, stepsDone, doneOn: dOn, ...rest } = c;
@@ -742,6 +744,13 @@ export function layoutLanes<T extends { start: number; end: number }>(blocks: T[
  */
 export function dailyQuota(t: Task, date: string, remaining = Math.max(0, t.estimate - t.spent), today = date): number {
   if (!(remaining > 0)) return 0;
+  // Jours de travail / de révision choisis : le travail n'est placé que ces jours-là (à parts égales).
+  const dd = (t.doDates ?? []).filter((d) => d >= today && d <= t.deadline);
+  if (dd.length) {
+    if (!dd.includes(date)) return 0;
+    const n = dd.filter((d) => d >= date).length;
+    return Math.min(remaining, Math.ceil(remaining / n / 5) * 5);
+  }
   const left = daysBetween(date, t.deadline);
   const spread = left < 0 ? Math.max(1, OVERDUE_SPREAD - daysBetween(today, date)) : Math.max(1, left);
   const factor = t.priority === 3 ? 1.25 : t.priority === 1 ? 0.85 : 1;
