@@ -1599,6 +1599,7 @@ const Academic: React.FC<{ openNewTask: () => void }> = ({ openNewTask }) => {
 
   return (
     <div className="flex flex-col gap-4">
+      <AcademicNotes />
       <div className="flex flex-wrap items-center gap-2">
         <Select id="ac-filter" aria-label="Filtrer par module" className="w-auto" value={filter} onChange={(e) => setFilter(e.target.value)}>
           <option value="">Tous les modules</option>{state.courses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select>
@@ -1642,7 +1643,6 @@ const Academic: React.FC<{ openNewTask: () => void }> = ({ openNewTask }) => {
 
 
       {!state.tasks.length && <Empty icon={<GraduationCap size={18} />} title="Aucune tâche pour l'instant" hint="Ajoutez vos devoirs, examens et projets : ils seront répartis automatiquement dans votre planning." action={<Btn variant="primary" onClick={openNewTask}><Plus size={14} />Première tâche</Btn>} />}
-      <AcademicNotes />
       <Card title="Modules" action={<span className="font-mono text-xs text-muted">{state.courses.length}</span>}>
         {state.courses.length ? (
           <ul className="flex flex-col divide-y divide-line text-[13px]">
