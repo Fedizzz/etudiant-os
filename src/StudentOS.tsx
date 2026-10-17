@@ -1343,6 +1343,26 @@ const BlockDetail: React.FC<{ b: Block; date: string; onClose: () => void }> = (
 };
 
 /** Emploi du temps de toute la semaine : 7 colonnes, créneaux simultanés côte à côte, toucher = fiche détaillée. */
+/** Échéances du jour (devoirs à rendre, examens) : bandeau d'alerte à la couleur de la matière. */
+const DueBadges: React.FC<{ date: string; compact?: boolean }> = ({ date, compact }) => {
+  const { state, openTask } = useStore();
+  const due = state.tasks.filter((t) => t.status !== "done" && t.deadline === date);
+  if (!due.length) return null;
+  return (
+    <div className={cx("flex flex-col", compact ? "gap-0.5" : "gap-1.5")} data-testid="due-badges">
+      {due.map((t) => { const c = state.courses.find((x) => x.id === t.courseId); const col = c?.color ?? "#e0453a"; const exam = t.kind === "examen"; return (
+        <button key={t.id} onClick={() => openTask(t.id)} title={`${exam ? "Examen" : "À rendre"} : ${t.title}`}
+          className={cx("flex w-full items-center gap-1.5 overflow-hidden rounded-md border-2 text-left font-semibold text-fg", compact ? "px-1 py-0.5 text-[10px]" : "px-2.5 py-1.5 text-[12.5px]")}
+          style={{ borderColor: col, background: `repeating-linear-gradient(-45deg, ${col}26 0 8px, ${col}0d 8px 16px)` }}>
+          <span className="grid shrink-0 place-items-center rounded-full font-bold text-white" style={{ background: col, width: compact ? 14 : 20, height: compact ? 14 : 20, fontSize: compact ? 9 : 12 }}>!</span>
+          {!compact && <span className="shrink-0 rounded px-1 text-[10px] font-bold uppercase tracking-wider text-white" style={{ background: col }}>{exam ? "Examen" : "À rendre"}</span>}
+          <span className="min-w-0 flex-1 truncate">{t.title}</span>
+          {!compact && c && <span className="shrink-0 text-[11px] font-medium text-muted">{c.code || c.name}</span>}
+        </button>); })}
+    </div>
+  );
+};
+
 const WeekGrid: React.FC<{ week: DayPlan[]; today: string; onPick: (b: Block, date: string) => void; onDay: (date: string) => void }> = ({ week, today, onPick, onDay }) => {
   const shown = week.map((d) => d.blocks.filter((b) => b.kind !== "sleep" && b.kind !== "meal"));
   const all = shown.flat();
@@ -1356,7 +1376,7 @@ const WeekGrid: React.FC<{ week: DayPlan[]; today: string; onPick: (b: Block, da
       <div className="grid min-w-[760px] grid-cols-[40px_repeat(7,minmax(0,1fr))] gap-x-1">
         <div />
         {week.map((d) => { const dt = parseISO(d.date); return (
-          <button key={d.date} onClick={() => onDay(d.date)} className={cx("rounded-lg py-1 text-center text-[11px] font-semibold", d.date === today ? "bg-accent/12 text-accent" : "text-muted hover:bg-sunken")}>{DAYS[weekday(dt)]} {dt.getDate()}</button>); })}
+          <div key={d.date} className="flex min-w-0 flex-col gap-0.5"><button onClick={() => onDay(d.date)} className={cx("rounded-lg py-1 text-center text-[11px] font-semibold", d.date === today ? "bg-accent/12 text-accent" : "text-muted hover:bg-sunken")}>{DAYS[weekday(dt)]} {dt.getDate()}</button><DueBadges date={d.date} compact /></div>); })}
         <div className="relative" style={{ height: (endH - startH) * PX }}>
           {Array.from({ length: endH - startH }, (_, i) => <span key={i} className="absolute left-0 font-mono text-[9.5px] text-muted" style={{ top: i * PX }}>{pad(startH + i)}:00</span>)}
         </div>
@@ -1429,6 +1449,7 @@ const Planning: React.FC = () => {
         </>}
         {plan.past && <p className="mt-3 text-xs text-muted">Journée passée : seuls les cours et indisponibilités sont affichés.</p>}
         {mode === "week" ? <div><p className="mb-2 text-[11px] text-muted md:hidden">Glissez horizontalement pour voir toute la semaine · touchez un créneau pour le détail.</p><WeekGrid week={week} today={today} onPick={(bb, d) => setSel({ b: bb, date: d })} onDay={(d) => { setOffset(daysBetween(today, d)); setMode("day"); }} /></div> : <>
+        <div className="mt-4"><DueBadges date={date} /></div>
         <div className="relative mt-4 overflow-hidden rounded-lg border border-line" style={{ height: (endH - startH) * PX }}>
           {Array.from({ length: endH - startH }, (_, i) => (
             <div key={i} className="absolute inset-x-0 border-t border-line/70" style={{ top: i * PX }}><span className="absolute left-2 top-0.5 font-mono text-[10px] text-muted">{pad((startH + i) % 24)}:00</span></div>
