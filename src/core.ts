@@ -100,6 +100,8 @@ export interface AppState {
   habits?: Habit[];
   /** Tâches perso ponctuelles (hors cours) : appeler la banque, rendez-vous… */
   todos?: Todo[];
+  /** Bloc-notes de l'onglet Académique : texte libre et dessin (PNG, Apple Pencil / doigt). */
+  notes?: { text: string; ink?: string };
   templates: GroceryTemplate[]; products: Product[]; timer: TimerState;
 }
 
@@ -240,6 +242,7 @@ export type Action =
   | { type: "chore/skip"; id: ID; date: string }
   | { type: "chore/update"; id: ID; patch: Partial<Chore> } | { type: "chore/step"; id: ID; date: string; stepId: ID }
   | { type: "task/step"; id: ID; stepId: ID }
+  | { type: "notes/set"; patch: { text?: string; ink?: string | undefined } }
   | { type: "todo/add"; todo: Todo } | { type: "todo/toggle"; id: ID } | { type: "todo/remove"; id: ID } | { type: "todo/update"; id: ID; patch: Partial<Todo> } | { type: "todo/clearDone" }
   | { type: "habit/add"; habit: Habit } | { type: "habit/update"; id: ID; patch: Partial<Habit> } | { type: "habit/remove"; id: ID }
   | { type: "habit/toggle"; id: ID; date: string } | { type: "habit/step"; id: ID; date: string; stepId: ID }
@@ -336,6 +339,7 @@ export function reducer(s: AppState, a: Action): AppState {
         return { ...c, done: was ? c.done.filter((x) => x !== a.date) : [...c.done, a.date], doneBy, doneOn, skipped: (c.skipped ?? []).filter((x) => x !== a.date) };
       }),
     };
+    case "notes/set": return { ...s, notes: { text: "", ...s.notes, ...a.patch } };
     case "todo/add": return { ...s, todos: [a.todo, ...(s.todos ?? [])] };
     case "todo/toggle": return { ...s, todos: (s.todos ?? []).map((t) => (t.id !== a.id ? t : t.done ? (({ doneAt: _, ...x }) => ({ ...x, done: false }))(t) : { ...t, done: true, doneAt: todayISO() })) };
     case "todo/remove": return { ...s, todos: (s.todos ?? []).filter((t) => t.id !== a.id) };
@@ -472,6 +476,8 @@ export function validateState(x: unknown): { ok: true; state: AppState; repaired
       const sd = stepsDone && typeof stepsDone === "object" ? Object.fromEntries(Object.entries(stepsDone).filter(([k, v]) => isDate(k) && Array.isArray(v)).map(([k, v]) => [k, (v as unknown[]).filter(isStr)]).slice(-120)) : {};
       return { ...rest, doneOn, ...(st.length ? { steps: st, stepsDone: sd } : {}), done: Array.isArray(c.done) ? c.done.filter(isDate) : [], skipped: Array.isArray(c.skipped) ? c.skipped.filter(isDate) : [], doneBy: c.doneBy && typeof c.doneBy === "object" ? c.doneBy : {}, ...(isTime(time) ? { time } : {}) };
     }),
+    notes: p.notes && typeof p.notes === "object" ? { text: isStr((p.notes as { text?: unknown }).text) ? (p.notes as { text: string }).text.slice(0, 20000) : "",
+      ...((() => { const ink = (p.notes as { ink?: unknown }).ink; return isStr(ink) && ink.startsWith("data:image/png;base64,") && ink.length < 900_000 ? { ink } : {}; })()) } : undefined,
     todos: keep<Todo>("tâches perso", Array.isArray(p.todos) ? p.todos : [], (t) => isStr(t.id) && isStr(t.text) && t.text.trim() !== "").map((t) => ({
       id: t.id, text: t.text.slice(0, 200), done: !!t.done, createdAt: isDate(t.createdAt) ? t.createdAt : todayISO(),
       ...(isDate(t.due) ? { due: t.due } : {}), ...(t.done && isDate(t.doneAt) ? { doneAt: t.doneAt } : {}),

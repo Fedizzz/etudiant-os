@@ -451,6 +451,7 @@ const TaskForm: React.FC<{ onDone: () => void; task?: Task }> = ({ onDone, task 
   const [steps, setSteps] = useState<Step[]>(task?.steps ?? []);
   const [doDates, setDoDates] = useState<string[]>(task?.doDates ?? []);
   const [doPick, setDoPick] = useState(todayISO());
+  const [pickDays, setPickDays] = useState(!!task?.doDates?.length);
   const isExam = f.kind === "examen";
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -464,7 +465,7 @@ const TaskForm: React.FC<{ onDone: () => void; task?: Task }> = ({ onDone, task 
     } else if (!(f.estimate >= 5)) { toast("L'estimation doit être d'au moins 5 minutes.", "bad"); return; }
     if (!(f.spent >= 0)) { toast("Le temps passé ne peut pas être négatif.", "bad"); return; }
     if (!task && f.deadline < todayISO()) toast("Échéance déjà passée : la tâche apparaîtra en retard.", "info");
-    const data = { ...f, estimate, title: f.title.trim(), courseId: f.courseId || null, slot: chosen, steps: steps.map((x) => ({ ...x, text: x.text.trim() })).filter((x) => x.text), doDates: mode === "duration" && doDates.length ? [...doDates].sort() : undefined };
+    const data = { ...f, estimate, title: f.title.trim(), courseId: f.courseId || null, slot: chosen, steps: steps.map((x) => ({ ...x, text: x.text.trim() })).filter((x) => x.text), doDates: mode === "duration" && pickDays && doDates.length ? [...doDates].sort() : undefined };
     if (data.doDates?.some((d) => d > f.deadline)) { toast(isExam ? "Les jours de révision doivent être avant l'examen." : "Les jours de travail doivent être avant l'échéance.", "bad"); return; }
     if (task) { dispatch({ type: "task/update", id: task.id, patch: data }); toast("Tâche mise à jour"); }
     else { const { slot: sl, ...rest } = data; dispatch({ type: "task/add", task: { id: uid(), ...rest, ...(sl ? { slot: sl } : {}), status: "todo", createdAt: todayISO() } }); toast(sl ? `Tâche ajoutée : ${fmtDate(sl.date)}, ${sl.start}–${sl.end}` : "Tâche ajoutée et planifiée"); }
@@ -485,14 +486,19 @@ const TaskForm: React.FC<{ onDone: () => void; task?: Task }> = ({ onDone, task 
         <Field label="Durée estimée (min)" htmlFor="tf-est" className="col-span-2"><Input id="tf-est" type="number" min={15} step={15} value={f.estimate} onChange={(e) => setF({ ...f, estimate: Math.max(15, Number(e.target.value)) })} /></Field>
         <p className="col-span-2 self-end pb-2 text-[11px] text-muted">{doDates.length ? `Répartie sur ${doDates.length} jour${doDates.length > 1 ? "s" : ""} choisi${doDates.length > 1 ? "s" : ""}.` : "Répartie automatiquement dans vos créneaux libres avant l'échéance."}</p>
         <div className="col-span-2 sm:col-span-4" data-testid="do-dates">
-          <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">{isExam ? "Jours de révision" : "Jours de travail (do date)"} <span className="normal-case tracking-normal">· facultatif</span></p>
-          <div className="flex flex-wrap items-center gap-1.5">
+          <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">{isExam ? "Jours de révision" : "Jours de travail (do date)"}</p>
+          <div className="mb-2 flex gap-1.5" role="group">
+            {([[false, "Pas de do date (automatique)"], [true, isExam ? "Choisir mes jours de révision" : "Choisir mes jours"]] as [boolean, string][]).map(([v, l]) => (
+              <button key={l} type="button" aria-pressed={pickDays === v} onClick={() => { setPickDays(v); if (!v) setDoDates([]); }}
+                className={cx("flex-1 rounded-lg border-2 px-2 py-1.5 text-[12px] font-semibold transition", pickDays === v ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-line bg-sunken text-muted")}>{l}</button>))}
+          </div>
+          {pickDays && <div className="flex flex-wrap items-center gap-1.5">
             {[...doDates].sort().map((d) => <span key={d} className="inline-flex items-center gap-1 rounded-full border-2 border-fg bg-hi px-2.5 py-0.5 text-[12px] font-medium text-[rgb(24_22_46)]">{fmtDate(d)}
               <button type="button" aria-label={`Retirer le ${fmtDate(d)}`} onClick={() => setDoDates(doDates.filter((x) => x !== d))}><X size={11} /></button></span>)}
             <Input type="date" aria-label={isExam ? "Jour de révision" : "Jour de travail"} value={doPick} min={todayISO()} max={f.deadline} onChange={(e) => setDoPick(e.target.value)} className="h-8 w-auto py-0 text-[12px]" />
             <Btn type="button" size="sm" onClick={() => { if (doPick && !doDates.includes(doPick)) setDoDates([...doDates, doPick]); }}><Plus size={12} />Ajouter</Btn>
-          </div>
-          <p className="mt-1 text-[11px] text-muted">{isExam ? "Le temps de révision est réparti uniquement sur ces jours, avant l'examen." : "Le travail est placé uniquement ces jours-là, avant l'échéance."} Sans jour choisi : réparti automatiquement.</p>
+          </div>}
+          <p className="mt-1 text-[11px] text-muted">{!pickDays ? "Le travail est réparti automatiquement dans vos créneaux libres jusqu'à l'échéance." : isExam ? "Le temps de révision est réparti uniquement sur ces jours, avant l'examen." : "Le travail est placé uniquement ces jours-là, avant l'échéance."}</p>
         </div>
       </> : <>
         <Field label="Jour" htmlFor="tf-sday" className="col-span-2"><Input id="tf-sday" type="date" value={slot.date} onChange={(e) => setSlot({ ...slot, date: e.target.value })} /></Field>
@@ -1347,7 +1353,7 @@ const Planning: React.FC = () => {
   const [ev, setEv] = useState({ title: "", date: today, start: "18:00", end: "19:00", recurrence: "none" as EventRecurrence, until: "" });
   const upcomingEvents = [...(state.events ?? [])].filter((e) => e.recurrence !== "none" ? !e.until || e.until >= today : e.date >= today).sort((a, b) => a.date.localeCompare(b.date) || toMin(a.start) - toMin(b.start));
   const startH = Math.floor(plan.wake / 60), endH = Math.ceil(Math.min(plan.bed, 1440 + 120) / 60);
-  const PX = 52; // pixels par heure
+  const PX = 84; // pixels par heure (assez haut pour lire les blocs courts)
   const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
   const [exporting, setExporting] = useState(false);
   const [sel, setSel] = useState<{ b: Block; date: string } | null>(null);
@@ -1394,19 +1400,19 @@ const Planning: React.FC = () => {
           {offset === 0 && nowMin > startH * 60 && nowMin < endH * 60 && (
             <div className="absolute inset-x-0 z-10 h-px bg-bad" style={{ top: ((nowMin - startH * 60) / 60) * PX }}><span className="absolute -left-0.5 -top-[3px] h-[7px] w-[7px] rounded-full bg-bad" /></div>
           )}
-          {plan.blocks.map((b, i) => { const ln = lanes[i]; return (
+          {plan.blocks.map((b, i) => { const ln = lanes[i]; const h = Math.max(22, ((b.end - b.start) / 60) * PX - 3), compact = h < 44; return (
             <div key={i} role="button" tabIndex={0} onClick={() => setSel({ b, date })} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSel({ b, date }); } }} title={`${toHHMM(b.start)}–${toHHMM(b.end)} · ${b.label}`}
-              className={cx("absolute cursor-pointer overflow-hidden rounded-md px-2 py-1 text-xs transition hover:brightness-95", BLOCK_STYLE[b.kind], ln.lanes > 1 && "ring-1 ring-bg")}
-              style={{ top: ((b.start - startH * 60) / 60) * PX + 1, height: Math.max(18, ((b.end - b.start) / 60) * PX - 2), borderLeftColor: b.color,
+              className={cx("absolute cursor-pointer overflow-hidden rounded-md px-2 text-xs shadow-sm transition hover:brightness-95", compact ? "flex items-center gap-1.5 py-0" : "py-1.5", BLOCK_STYLE[b.kind], ln.lanes > 1 && "ring-1 ring-bg")}
+              style={{ top: ((b.start - startH * 60) / 60) * PX + 1.5, height: h, borderLeftColor: b.color,
                 left: `calc(3.5rem + (100% - 4rem) * ${ln.lane} / ${ln.lanes})`, width: `calc((100% - 4rem) / ${ln.lanes} - 3px)` }}>
-              <div className="flex items-center gap-1.5">
-                <span className="font-mono text-[10px] tabular-nums text-muted">{toHHMM(b.start)}–{toHHMM(b.end)}</span>
+              <div className={cx("flex items-center gap-1.5", compact && "shrink-0")}>
+                <span className="font-mono text-[10px] tabular-nums text-muted">{toHHMM(b.start)}{compact ? "" : `–${toHHMM(b.end)}`}</span>
                 {b.kind === "task" && <Zap size={10} className="text-accent" />}{b.kind === "chore" && <Home size={10} className="text-warn" />}{b.kind === "meal" && <Coffee size={10} />}{b.kind === "event" && <CalendarClock size={10} className="text-pink" />}
                 {b.kind === "event" && b.refId && <button className="ml-auto rounded px-1 text-[10px] text-muted hover:bg-sunken hover:text-bad" aria-label={`Retirer ${b.label} ce jour-là`} title="Retirer cette occurrence"
                   onClick={(e) => { e.stopPropagation(); const evt = state.events.find((x) => x.id === b.refId); if (!evt) return;
                     if (evt.recurrence === "none") undoable({ type: "event/remove", id: evt.id }, `« ${evt.title} » supprimé`); else undoable({ type: "event/skip", id: evt.id, date }, `« ${evt.title} » retiré ce jour-là`); }}>✕</button>}
               </div>
-              <p className={cx("font-medium text-fg", ln.lanes > 1 ? "break-words leading-tight [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:4] overflow-hidden" : "truncate")}>{b.label}</p>
+              <p className={cx("font-medium text-fg", compact ? "min-w-0 flex-1 truncate text-[12px]" : ln.lanes > 1 ? "break-words leading-tight [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:4] overflow-hidden" : "truncate")}>{b.label}</p>
             </div>
           ); })}
         </div>
@@ -1503,6 +1509,83 @@ export const STATUS: Record<TaskStatus, { label: string; color: string }> = {
 const ORDER: TaskStatus[] = ["todo", "doing", "review", "done"];
 const KIND_LABEL: Record<TaskKind, string> = { devoir: "Devoir", examen: "Examen", projet: "Projet" };
 
+// ---------------------------------------------------------------- Bloc-notes (clavier ou Apple Pencil)
+const INK_W = 1200, INK_H = 900;
+const InkPad: React.FC<{ ink?: string; onSave: (dataUrl: string | undefined) => void }> = ({ ink, onSave }) => {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const [tool, setTool] = useState<"pen" | "hl" | "eraser">("pen");
+  const [color, setColor] = useState("ink");
+  const history = useRef<ImageData[]>([]);
+  const penSeen = useRef(false); // dès qu'un stylet est détecté, le doigt / la paume n'écrit plus
+  const last = useRef<{ x: number; y: number; p: number } | null>(null);
+  const saveT = useRef<number>();
+  const colors: Record<string, string> = { ink: "#18162e", blue: "#3448f0", red: "#e0453a", green: "#0f9d76" };
+  useEffect(() => {
+    const c = ref.current; if (!c) return; const g = c.getContext("2d")!;
+    g.clearRect(0, 0, INK_W, INK_H);
+    if (ink) { const img = new Image(); img.onload = () => g.drawImage(img, 0, 0); img.src = ink; }
+  }, []); // dessin initial seulement
+  const pos = (e: React.PointerEvent) => { const r = ref.current!.getBoundingClientRect(); return { x: ((e.clientX - r.left) / r.width) * INK_W, y: ((e.clientY - r.top) / r.height) * INK_H, p: e.pressure > 0 ? e.pressure : 0.5 }; };
+  const save = () => { window.clearTimeout(saveT.current); saveT.current = window.setTimeout(() => onSave(ref.current!.toDataURL("image/png")), 400); };
+  const down = (e: React.PointerEvent) => {
+    if (e.pointerType === "pen") penSeen.current = true; else if (penSeen.current && e.pointerType === "touch") return;
+    const g = ref.current!.getContext("2d")!; history.current = [...history.current.slice(-14), g.getImageData(0, 0, INK_W, INK_H)];
+    ref.current!.setPointerCapture(e.pointerId); last.current = pos(e);
+  };
+  const moveTo = (e: React.PointerEvent) => {
+    if (!last.current || (penSeen.current && e.pointerType === "touch")) return;
+    const g = ref.current!.getContext("2d")!; const pts = (e.nativeEvent as PointerEvent).getCoalescedEvents?.() ?? [e.nativeEvent];
+    for (const ev of pts) {
+      const r = ref.current!.getBoundingClientRect(); const p = { x: ((ev.clientX - r.left) / r.width) * INK_W, y: ((ev.clientY - r.top) / r.height) * INK_H, p: ev.pressure > 0 ? ev.pressure : 0.5 };
+      g.globalCompositeOperation = tool === "eraser" ? "destination-out" : "source-over";
+      g.globalAlpha = tool === "hl" ? 0.3 : 1;
+      g.strokeStyle = tool === "hl" ? "#f5d90a" : colors[color]; g.lineCap = "round"; g.lineJoin = "round";
+      g.lineWidth = tool === "eraser" ? 28 : tool === "hl" ? 22 : 1.6 + p.p * 4;
+      g.beginPath(); g.moveTo(last.current.x, last.current.y); g.lineTo(p.x, p.y); g.stroke();
+      last.current = p;
+    }
+  };
+  const up = () => { if (last.current) { last.current = null; save(); } };
+  const undo = () => { const g = ref.current!.getContext("2d")!; const prev = history.current.pop(); if (prev) { g.putImageData(prev, 0, 0); save(); } };
+  const clear = () => { const g = ref.current!.getContext("2d")!; history.current.push(g.getImageData(0, 0, INK_W, INK_H)); g.clearRect(0, 0, INK_W, INK_H); onSave(undefined); };
+  return (
+    <div>
+      <div className="mb-2 flex flex-wrap items-center gap-1.5">
+        {([["pen", "✏️ Stylo"], ["hl", "🖍 Surligneur"], ["eraser", "🧽 Gomme"]] as const).map(([k, l]) => <button key={k} type="button" aria-pressed={tool === k} onClick={() => setTool(k)}
+          className={cx("rounded-full border px-2.5 py-1 text-[12px]", tool === k ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-line bg-sunken")}>{l}</button>)}
+        <span className="mx-1 h-5 w-px bg-line" />
+        {Object.entries(colors).map(([k, v]) => <button key={k} type="button" aria-label={`Couleur ${k}`} aria-pressed={color === k} onClick={() => { setColor(k); setTool("pen"); }}
+          className={cx("h-6 w-6 rounded-full border-2", color === k ? "border-fg ring-2 ring-accent/40" : "border-line")} style={{ background: v }} />)}
+        <span className="ml-auto flex gap-1"><Btn size="sm" variant="ghost" onClick={undo}>↶ Annuler</Btn><Btn size="sm" variant="ghost" onClick={clear}>Effacer</Btn></span>
+      </div>
+      <canvas ref={ref} width={INK_W} height={INK_H} onPointerDown={down} onPointerMove={moveTo} onPointerUp={up} onPointerCancel={up} data-no-ptr
+        className="block w-full touch-none rounded-xl border-2 border-line" aria-label="Zone de dessin (Apple Pencil ou doigt)"
+        style={{ aspectRatio: `${INK_W} / ${INK_H}`, backgroundColor: "#fbfaf5", backgroundImage: "repeating-linear-gradient(to bottom, transparent 0 31px, rgba(80,90,140,.18) 31px 32px)" }} />
+      <p className="mt-1 text-[11px] text-muted">Écrivez avec l'Apple Pencil (pression prise en compte) ou le doigt. Dès que le stylet est utilisé, la paume est ignorée. Enregistré automatiquement.</p>
+    </div>
+  );
+};
+
+const AcademicNotes: React.FC = () => {
+  const { state, dispatch } = useStore();
+  const [mode, setMode] = useState<"text" | "ink">(state.notes?.ink && !state.notes?.text ? "ink" : "text");
+  const [text, setText] = useState(state.notes?.text ?? "");
+  const t = useRef<number>();
+  useEffect(() => { window.clearTimeout(t.current); t.current = window.setTimeout(() => { if (text !== (state.notes?.text ?? "")) dispatch({ type: "notes/set", patch: { text } }); }, 500); return () => window.clearTimeout(t.current); }, [text]);
+  return (
+    <Card title={<span className="flex items-center gap-2"><Pencil size={15} />Bloc-notes</span>} action={<div className="flex gap-1" role="group">
+      {([["text", "⌨️ Clavier"], ["ink", "✍️ Apple Pencil"]] as const).map(([k, l]) => <button key={k} onClick={() => setMode(k)} aria-pressed={mode === k}
+        className={cx("rounded-full border px-2.5 py-1 text-[12px]", mode === k ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-line bg-sunken")}>{l}</button>)}</div>}>
+      {mode === "text"
+        ? <textarea aria-label="Notes" value={text} onChange={(e) => setText(e.target.value)} rows={10} placeholder={"Listez vos devoirs, idées, questions pour le prof…\n- Lire le chapitre 3\n- Exos 4 à 7"}
+            className="w-full resize-y rounded-xl border-2 border-line bg-panel p-3 font-[inherit] text-[14px] leading-8 outline-none focus:border-accent"
+            style={{ backgroundImage: "repeating-linear-gradient(to bottom, transparent 0 31px, rgb(var(--line) / .7) 31px 32px)", backgroundAttachment: "local" }} />
+        : <InkPad ink={state.notes?.ink} onSave={(ink) => dispatch({ type: "notes/set", patch: { ink } })} />}
+      <p className="mt-1 text-[11px] text-muted">Juste pour noter : ces notes ne créent pas de tâches et n'apparaissent pas dans le planning.</p>
+    </Card>
+  );
+};
+
 const Academic: React.FC<{ openNewTask: () => void }> = ({ openNewTask }) => {
   const { state, dispatch, toast, undoable, openTask } = useStore();
   const [filter, setFilter] = useState<string>("");
@@ -1557,6 +1640,7 @@ const Academic: React.FC<{ openNewTask: () => void }> = ({ openNewTask }) => {
 
 
       {!state.tasks.length && <Empty icon={<GraduationCap size={18} />} title="Aucune tâche pour l'instant" hint="Ajoutez vos devoirs, examens et projets : ils seront répartis automatiquement dans votre planning." action={<Btn variant="primary" onClick={openNewTask}><Plus size={14} />Première tâche</Btn>} />}
+      <AcademicNotes />
       <Card title="Modules" action={<span className="font-mono text-xs text-muted">{state.courses.length}</span>}>
         {state.courses.length ? (
           <ul className="flex flex-col divide-y divide-line text-[13px]">
@@ -2340,9 +2424,14 @@ const Chores: React.FC = () => {
               {!presetEnd && <p className="mt-1 text-center text-[11px] font-semibold text-muted">Descendez pour voir plus de suggestions ↓</p>}
             </div>
             <Field label="Corvée" htmlFor="ch-name" className="col-span-2"><Input id="ch-name" placeholder="Ex. Nettoyer la plaque" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
-            <Field label="Récurrence" htmlFor="ch-rec"><Select id="ch-rec" value={f.recurrence} onChange={(e) => setF({ ...f, recurrence: e.target.value as Recurrence })}>{(Object.keys(REC_LABEL) as Recurrence[]).map((r) => <option key={r} value={r}>{REC_LABEL[r]}</option>)}</Select></Field>
-            {f.recurrence === "once" ? <Field label="Date" htmlFor="ch-date"><Input id="ch-date" type="date" value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} /></Field> :
-            <Field label="Jour" htmlFor="ch-day"><Select id="ch-day" value={f.day} disabled={f.recurrence === "daily"} onChange={(e) => setF({ ...f, day: Number(e.target.value) })}>{DAYS_LONG.map((d, i) => <option key={d} value={i}>{d}</option>)}</Select></Field>}
+            <div className="col-span-2 flex gap-1.5" role="group" aria-label="Fréquence">
+              {([[false, "🔁 Récurrente"], [true, "📅 Une seule fois"]] as [boolean, string][]).map(([once, l]) => { const on = (f.recurrence === "once") === once; return (
+                <button key={l} type="button" aria-pressed={on} onClick={() => setF({ ...f, recurrence: once ? "once" : f.recurrence === "once" ? "weekly" : f.recurrence })}
+                  className={cx("flex-1 rounded-lg border-2 px-2 py-2 text-[13px] font-semibold transition", on ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-line bg-sunken text-muted")}>{l}</button>); })}
+            </div>
+            {f.recurrence === "once" ? <Field label="Date choisie" htmlFor="ch-date" className="col-span-2"><Input id="ch-date" type="date" value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} /></Field> : <>
+            <Field label="Récurrence" htmlFor="ch-rec"><Select id="ch-rec" value={f.recurrence} onChange={(e) => setF({ ...f, recurrence: e.target.value as Recurrence })}>{(Object.keys(REC_LABEL) as Recurrence[]).filter((r) => r !== "once").map((r) => <option key={r} value={r}>{REC_LABEL[r]}</option>)}</Select></Field>
+            <Field label="Jour" htmlFor="ch-day"><Select id="ch-day" value={f.day} disabled={f.recurrence === "daily"} onChange={(e) => setF({ ...f, day: Number(e.target.value) })}>{DAYS_LONG.map((d, i) => <option key={d} value={i}>{d}</option>)}</Select></Field></>}
             <TimeMode id="ch-mode" value={cmode} onChange={setCmode} className="col-span-2" />
             {cmode === "duration"
               ? <Field label="Durée (min)" htmlFor="ch-min" className="col-span-2"><Input id="ch-min" type="number" min={5} step={5} value={f.minutes} onChange={(e) => setF({ ...f, minutes: Number(e.target.value) })} /></Field>
