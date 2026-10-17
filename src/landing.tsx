@@ -28,7 +28,7 @@ function Nav({ go, signedIn }: { go: Go; signedIn: boolean }) {
   const [open, setOpen] = useState(false);
   const [headerRef, headerH] = useFixedHeader();
   const hidden = useHideOnScroll(headerH, open);
-  const links: [string, string][] = [["#fonctionnalites", "Fonctionnalités"], ["#comment", "Comment ça marche"], ["#avantages", "Avantages"], ["#faq", "FAQ"]];
+  const links: [string, string][] = [["#fonctionnalites", "Fonctionnalités"], ["#comment", "Comment ça marche"], ["#nouveautes", "Nouveautés"], ["#avantages", "Avantages"], ["#faq", "FAQ"]];
   useEffect(() => { const k = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false); window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, []);
   return (
     <>
@@ -58,13 +58,22 @@ function Nav({ go, signedIn }: { go: Go; signedIn: boolean }) {
 }
 
 const FEATURES: { icon: React.FC<{ size?: number }>; title: string; color: string; points: string[] }[] = [
-  { icon: LayoutDashboard, title: "Tableau de bord", color: "#3448f0", points: ["Tes tâches prévues aujourd'hui, avec un bouton pour lancer le focus", "Retards, échéances et charge des 7 prochains jours", "Sommeil, budget restant et ménage du jour en un coup d'œil"] },
-  { icon: CalendarClock, title: "Planning", color: "#0f9d76", points: ["Emploi du temps fixe et indisponibilités (job, sport…)", "Tes devoirs répartis automatiquement dans tes créneaux libres", "Alerte de surcharge et chevauchements signalés, rien n'est déplacé sans toi"] },
-  { icon: GraduationCap, title: "Académique", color: "#7a5af5", points: ["Modules, devoirs, examens et projets", "Tableau À faire · En cours · En révision · Terminé", "Import de l'emploi du temps depuis le PDF de ton école"] },
+  { icon: LayoutDashboard, title: "Tableau de bord", color: "#3448f0", points: ["Tes tâches prévues aujourd'hui, avec un bouton pour lancer le focus", "Retards, échéances et charge des 7 prochains jours", "Sommeil, budget restant et ménage du jour en un coup d'œil", "Compteurs « à l'heure » : tâches, ménage, coucher et réveil"] },
+  { icon: CalendarClock, title: "Planning", color: "#0f9d76", points: ["Emploi du temps fixe et indisponibilités (job, sport…)", "Tes devoirs répartis automatiquement dans tes créneaux libres", "Alerte de surcharge et chevauchements signalés, rien n'est déplacé sans toi", "Événements récurrents, vue semaine et export PDF", "Synchronisation de ton calendrier Celcat, iCloud ou Google (.ics)"] },
+  { icon: GraduationCap, title: "Académique", color: "#7a5af5", points: ["Modules, devoirs, examens et projets", "Tableau À faire · En cours · En révision · Terminé", "Import de l'emploi du temps depuis le PDF de ton école", "Checklist dans chaque tâche pour avancer étape par étape"] },
   { icon: Timer, title: "Focus", color: "#d9822b", points: ["Minuteur Pomodoro réglable et mode plein écran", "Sessions liées à une tâche ou à une matière", "Temps de travail par jour, semaine et matière"] },
-  { icon: Wallet, title: "Budget & courses", color: "#c2417a", points: ["Budget mensuel, plafonds par catégorie, dépenses récurrentes", "Liste de courses par rayon avec prix appris de tes achats", "Lecture du ticket de caisse en photo (à vérifier avant d'enregistrer)"] },
-  { icon: Home, title: "Ménage", color: "#1d9bb5", points: ["Corvées quotidiennes, hebdomadaires ou bimensuelles", "Rotation automatique entre colocataires", "Report sans pénalité et historique de qui a fait quoi"] },
-  { icon: Moon, title: "Sommeil", color: "#4f46b8", points: ["Heure de coucher conseillée selon ton premier cours", "Moyennes sur 7 et 14 jours, régularité des horaires", "Repères indicatifs, sans prétention médicale"] },
+  { icon: Wallet, title: "Budget & courses", color: "#c2417a", points: ["Budget mensuel, plafonds par catégorie, dépenses récurrentes", "Liste de courses par rayon avec prix appris de tes achats", "Lecture du ticket de caisse en photo (à vérifier avant d'enregistrer)", "Revenus, épargne avec objectif et catégories personnalisées"] },
+  { icon: Home, title: "Ménage", color: "#1d9bb5", points: ["Corvées quotidiennes, hebdomadaires ou bimensuelles", "Rotation automatique entre colocataires", "Report sans pénalité et historique de qui a fait quoi", "Suggestions prêtes (cuisine, linge, nettoyage) et checklist par corvée"] },
+  { icon: Moon, title: "Sommeil", color: "#4f46b8", points: ["Heure de coucher conseillée selon ton premier cours", "Moyennes sur 7 et 14 jours, régularité des horaires", "Repères indicatifs, sans prétention médicale", "Coche chaque nuit si tu t'es couché·e et levé·e à l'heure"] },
+];
+
+const NEWS: { icon: React.FC<{ size?: number }>; title: string; color: string; text: string }[] = [
+  { icon: Check, title: "Checklists", color: "#0f9d76", text: "Découpe une tâche ou une corvée en étapes à cocher. Quand toutes les étapes d'une corvée sont faites, elle est validée toute seule." },
+  { icon: Moon, title: "À l'heure ?", color: "#4f46b8", text: "Coche si tu t'es couché·e et levé·e à l'heure. Le tableau de bord compte tes réussites, tes retards et ta série en cours, aussi pour les tâches et le ménage." },
+  { icon: CalendarClock, title: "Calendrier synchronisé", color: "#3448f0", text: "Colle le lien .ics de Celcat, iCloud ou Google : tes cours apparaissent dans le planning et se mettent à jour automatiquement." },
+  { icon: Wallet, title: "Revenus & épargne", color: "#c2417a", text: "Note ta paye, ta bourse ou l'argent reçu, mets de côté vers un objectif et crée tes propres catégories de dépenses." },
+  { icon: FileText, title: "Planning en PDF", color: "#d9822b", text: "Vue semaine, détail de chaque créneau, couleurs personnalisées et export de ta semaine en PDF à imprimer ou partager." },
+  { icon: Sparkles, title: "4 langues", color: "#1d9bb5", text: "Français, anglais, espagnol et arabe, et un mode sombre « carnet de nuit » repensé." },
 ];
 
 const FAQ: [string, React.ReactNode][] = [
@@ -76,6 +85,8 @@ const FAQ: [string, React.ReactNode][] = [
   ["Et sans connexion internet ?", "Les données déjà chargées restent consultables et tu peux continuer à les modifier : les changements sont mis en attente sur l'appareil et envoyés au retour de la connexion. Certaines fonctions (lecture de ticket, import de PDF, création de compte) nécessitent internet."],
   ["Dois-je installer quelque chose ?", "Non, tout fonctionne dans le navigateur. Tu peux aussi l'ajouter à l'écran d'accueil de ton téléphone (Safari : Partager → Sur l'écran d'accueil ; Chrome : Installer l'application)."],
   ["Qui peut voir mes données ?", "Toi seul. Chaque ligne de la base est liée à ton compte et protégée par des règles d'accès (Row Level Security) testées : un autre utilisateur ne peut ni la lire, ni la modifier."],
+  ["L'application existe-t-elle dans d'autres langues ?", "Oui : le bouton 🌐 en haut de l'écran passe l'interface en anglais, en espagnol ou en arabe (de droite à gauche). Ton choix est mémorisé sur l'appareil."],
+  ["Puis-je importer mon emploi du temps de la fac ?", "Oui, de deux façons : importer le PDF de ton emploi du temps, ou coller le lien de ton calendrier (Celcat, iCloud, Google Agenda, Outlook…) pour qu'il se mette à jour tout seul."],
   ["Comment supprimer mon compte ?", "Réglages → Mon compte → Supprimer mon compte. Ton compte, tes données synchronisées et tes fichiers sont supprimés définitivement. Pense à exporter tes données avant si tu veux les garder."],
 ];
 
@@ -131,8 +142,23 @@ export function Landing({ go, signedIn }: { go: Go; signedIn: boolean }) {
                 </article>))}
               <article className="inked rounded-[22px] bg-hi p-6 text-[rgb(24_22_46)]">
                 <div className="flex items-center gap-3"><span className="grid h-11 w-11 place-items-center rounded-xl border-2 border-[rgb(24_22_46)] bg-panel text-fg"><Zap size={20} /></span><h3 className="font-display text-xl font-bold">Et aussi</h3></div>
-                <ul className="mt-4 flex flex-col gap-2 text-[14px] font-medium">{["Recherche rapide (Ctrl K) et raccourcis clavier", "Thèmes clair et sombre", "Installable sur l'écran d'accueil", "Export de toutes tes données"].map((p) => <li key={p} className="flex gap-2"><Check size={15} className="mt-0.5 shrink-0" />{p}</li>)}</ul>
+                <ul className="mt-4 flex flex-col gap-2 text-[14px] font-medium">{["Recherche rapide (Ctrl K) et raccourcis clavier", "Thèmes clair et sombre", "Installable sur l'écran d'accueil", "Export de toutes tes données", "En français, anglais, espagnol et arabe", "Centre d'aide et signalement de bug intégrés"].map((p) => <li key={p} className="flex gap-2"><Check size={15} className="mt-0.5 shrink-0" />{p}</li>)}</ul>
               </article>
+            </div>
+          </div>
+        </section>
+
+        {/* ---------------------------------------------------------------- Nouveautés */}
+        <section id="nouveautes" className="scroll-mt-20 py-16" aria-labelledby="n-title">
+          <div className="mx-auto max-w-6xl px-4 sm:px-6">
+            <h2 id="n-title" className="font-display text-[32px] font-extrabold tracking-tight sm:text-[40px]">Quoi de <span className="marker">neuf<svg viewBox="0 0 200 20" preserveAspectRatio="none" aria-hidden><path d="M2 12 C 40 6, 80 16, 120 9 S 180 6, 198 11" /></svg></span> ?</h2>
+            <p className="mt-3 max-w-2xl text-muted">Les dernières fonctionnalités, ajoutées à partir de vos retours.</p>
+            <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+              {NEWS.map((f) => (
+                <article key={f.title} className="inked lift rounded-[22px] bg-panel p-6">
+                  <div className="flex items-center gap-3"><span className="grid h-11 w-11 place-items-center rounded-xl border-2 border-fg text-white shadow-[2px_2px_0_0_rgb(var(--ink))]" style={{ background: f.color }}><f.icon size={20} /></span><h3 className="font-display text-xl font-bold">{f.title}</h3><span className="ml-auto rounded-full border-2 border-fg bg-hi px-2 py-0.5 text-[11px] font-bold text-[rgb(24_22_46)]">Nouveau</span></div>
+                  <p className="mt-4 text-[14px] text-muted">{f.text}</p>
+                </article>))}
             </div>
           </div>
         </section>
