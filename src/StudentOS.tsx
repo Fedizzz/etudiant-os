@@ -5,7 +5,7 @@ import { layoutLanes } from "./core.ts";
 import { DAY_WORDS, dayOf, pageGeometry, parseGrid } from "./timetable.ts";
 import { parseIcs, normalizeFeedUrl, isFeedUrl } from "./ical.ts";
 import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, choreStepsDone, choreDoneLate, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, onTimeGuess, onTimeStats, taskOnTimeStats, choreOnTimeStats, HABIT_CATS, habitOn, habitStats, habitStepsDone, habitStreak, todoOnTimeStats, TODO_KINDS, pad, parseAmount, parseISO, parseReceipt, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
-import type { Action, Aisle, Chore, Habit, HabitCat, Todo, TodoKind, AppState, Block, Budget, Course, DayPlan, Expense, ExpenseCat, GroceryTemplate, ID, Phase, PomodoroCfg, Priority, ReceiptResult, Recurrence, EventRecurrence, CalFeed, FeedEvent, SettingsState, SleepLog, Step, Task, TaskKind, TaskStatus, TemplateItem, ViewKey } from "./core.ts";
+import type { Action, Aisle, PlanEvent, Chore, Habit, HabitCat, Todo, TodoKind, AppState, Block, Budget, Course, DayPlan, Expense, ExpenseCat, GroceryTemplate, ID, Phase, PomodoroCfg, Priority, ReceiptResult, Recurrence, EventRecurrence, CalFeed, FeedEvent, SettingsState, SleepLog, Step, Task, TaskKind, TaskStatus, TemplateItem, ViewKey } from "./core.ts";
 import type { AppEnv } from "./env.ts";
 import { LangSwitch } from "./i18n.tsx";
 
@@ -1281,6 +1281,58 @@ const ChoreMove: React.FC<{ chore: Chore; date: string; start: number; onDone: (
   );
 };
 
+/** Bloc « jour + heure précise / juste le jour » réutilisé pour déplacer tâches et événements. */
+const MoveBox: React.FC<{ title: string; date: string; start: number; allowAuto: boolean; note?: string; onApply: (d: string, t: string | null) => void; testId: string }> = ({ title, date, start, allowAuto, note, onApply, testId }) => {
+  const { toast } = useStore();
+  const [d, setD] = useState(date); const [t, setT] = useState(toHHMM(start)); const [auto, setAuto] = useState(false);
+  const go = () => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || (!auto && !/^\d{2}:\d{2}$/.test(t))) { toast("Choisissez un jour et une heure.", "bad"); return; }
+    if (d < todayISO()) { toast("Choisissez aujourd'hui ou un jour à venir.", "bad"); return; }
+    onApply(d, auto ? null : t);
+  };
+  return (
+    <div className="rounded-xl border-2 border-line p-3" data-testid={testId}>
+      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">{title}</p>
+      {allowAuto && <div className="mb-2 flex gap-1.5" role="group">
+        {([[false, "🕒 Heure précise"], [true, "⚡ Juste le jour (heure auto)"]] as [boolean, string][]).map(([v, l]) => <button key={l} type="button" aria-pressed={auto === v} onClick={() => setAuto(v)}
+          className={cx("flex-1 rounded-lg border-2 px-2 py-1.5 text-[12px] font-semibold", auto === v ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-line bg-sunken text-muted")}>{l}</button>)}
+      </div>}
+      <div className="flex flex-wrap items-end gap-2">
+        <Field label="Jour" htmlFor={`${testId}-d`}><Input id={`${testId}-d`} type="date" min={todayISO()} value={d} onChange={(e) => setD(e.target.value)} /></Field>
+        {!auto && <Field label="Heure" htmlFor={`${testId}-t`}><Input id={`${testId}-t`} type="time" value={t} onChange={(e) => setT(e.target.value)} /></Field>}
+        <Btn variant="primary" onClick={go}><Check size={14} />Déplacer</Btn>
+      </div>
+      {note && <p className="mt-1.5 text-[11px] text-muted">{note}</p>}
+    </div>
+  );
+};
+
+const TaskMove: React.FC<{ task: Task; date: string; b: Block; onDone: () => void }> = ({ task, date, b, onDone }) => {
+  const { dispatch, toast } = useStore();
+  const left = Math.max(15, task.estimate - task.spent);
+  return <MoveBox testId="task-move" title="Déplacer ce travail" date={date} start={b.start} allowAuto
+    note={task.slot ? "Créneau précis de la tâche." : "Heure précise : tout le travail restant est placé à ce créneau. Juste le jour : le travail est réparti sur ce jour."}
+    onApply={(d, t) => {
+      if (d > task.deadline) { toast(task.kind === "examen" ? "Ce jour est après l'examen." : "Ce jour est après l'échéance.", "bad"); return; }
+      if (t) { const len = task.slot ? toMin(task.slot.end) - toMin(task.slot.start) : left; dispatch({ type: "task/update", id: task.id, patch: { slot: { date: d, start: t, end: toHHMM(Math.min(23 * 60 + 59, toMin(t) + len)) }, doDates: undefined, noPlan: undefined } }); }
+      else dispatch({ type: "task/update", id: task.id, patch: { slot: undefined, doDates: [d], noPlan: undefined } });
+      toast(`« ${task.title} » : ${t ? `${fmtDate(d)} à ${t}` : `${fmtDate(d)} (heure auto)`}`); onDone();
+    }} />;
+};
+
+const EventMove: React.FC<{ ev: PlanEvent; date: string; onDone: () => void }> = ({ ev, date, onDone }) => {
+  const { dispatch, toast } = useStore();
+  const len = toMin(ev.end) - toMin(ev.start);
+  return <MoveBox testId="event-move" title="Déplacer cet événement" date={date} start={toMin(ev.start)} allowAuto={false}
+    note={ev.recurrence !== "none" ? "Seulement cette fois : les autres occurrences ne changent pas." : undefined}
+    onApply={(d, t) => {
+      const start = t!, end = toHHMM(Math.min(23 * 60 + 59, toMin(start) + len));
+      if (ev.recurrence === "none") dispatch({ type: "event/update", id: ev.id, patch: { date: d, start, end } });
+      else { dispatch({ type: "event/skip", id: ev.id, date }); dispatch({ type: "event/add", event: { id: uid(), title: ev.title, date: d, start, end, recurrence: "none", until: null, ...(ev.color ? { color: ev.color } : {}) } }); }
+      toast(`« ${ev.title} » : ${fmtDate(d)} à ${start}`); onDone();
+    }} />;
+};
+
 const BlockDetail: React.FC<{ b: Block; date: string; onClose: () => void }> = ({ b, date, onClose }) => {
   const { state, dispatch, toast, openTask, undoable } = useStore();
   const cls = b.kind === "class" && !b.feedId ? state.classes.find((c) => c.id === b.refId) : undefined;
@@ -1323,6 +1375,8 @@ const BlockDetail: React.FC<{ b: Block; date: string; onClose: () => void }> = (
           {rows.map(([k, v]) => <React.Fragment key={k}><dt className="text-muted">{k}</dt><dd className="min-w-0 break-words">{v}</dd></React.Fragment>)}
         </dl>
         {chore && <ChoreMove chore={chore} date={date} start={b.start} onDone={onClose} />}
+        {task && <TaskMove task={task} date={date} b={b} onDone={onClose} />}
+        {ev && <EventMove ev={ev} date={date} onDone={onClose} />}
         {canColor && (
           <div>
             <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">Couleur{course ? " de la matière" : ""}</p>
