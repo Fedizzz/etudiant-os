@@ -11,8 +11,8 @@ export function compile(entries: Record<string, string>): Dict {
     if (/\{\d\}/.test(fr)) {
       const parts = norm(fr).split(/(\{\d\})/);
       const order: number[] = [];
-      const src = parts.map((p) => { const m = /^\{(\d)\}$/.exec(p); if (m) { order.push(+m[1]); return "(.+?)"; } return esc(p.replace(/\s+/g, " ")).replace(/ /g, "\\s*"); }).join("");
-      if (src.replace(/\(\.\+\?\)/g, "").length < 4) continue; // modèle trop vague
+      const src = parts.map((p) => { const m = /^\{(\d)\}$/.exec(p); if (m) { order.push(+m[1]); return "(.*?)"; } return esc(p.replace(/\s+/g, " ")).replace(/ /g, "\\s*"); }).join("");
+      if (src.replace(/\(\.\*\?\)/g, "").length < 4) continue; // modèle trop vague
       let out = t; order.forEach((n, i) => { out = out.split(`{${n}}`).join(`\u0000${i}\u0000`); });
       tpl.push({ re: new RegExp(`^${src}$`), out });
     } else exact.set(norm(fr), t);
