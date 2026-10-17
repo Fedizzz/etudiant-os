@@ -48,7 +48,7 @@ export interface Budget {
 }
 /** done : dates faites · doneBy : qui l'a faite ce jour-là · skipped : dates reportées. */
 /** recurrence « once » : une seule fois, le jour `date`. */
-export interface Chore { id: ID; name: string; recurrence: Recurrence; date?: string; day: number; minutes: number; assignees: string[]; done: string[]; doneBy?: Record<string, string>; skipped?: string[]; /** Heure fixe « HH:MM » (sinon placée automatiquement dans un créneau libre). */ time?: string; /** Checklist, et étapes cochées par date. */ steps?: Step[]; stepsDone?: Record<string, ID[]>; /** Jour où chaque occurrence a été cochée. */ doneOn?: Record<string, string> }
+export interface Chore { id: ID; name: string; recurrence: Recurrence; date?: string; day: number; minutes: number; assignees: string[]; done: string[]; doneBy?: Record<string, string>; skipped?: string[]; /** Heure fixe « HH:MM » (sinon placée automatiquement dans un créneau libre). */ time?: string; /** Checklist, et étapes cochées par date. */ steps?: Step[]; stepsDone?: Record<string, ID[]>; /** Jour où chaque occurrence a été cochée. */ doneOn?: Record<string, string>; /** Heure fixée par le planning pour une date (le bloc ne bouge plus ensuite). */ pinned?: Record<string, string> }
 /** Calendrier externe abonné (lien .ics Celcat, iCloud, Google…). */
 export interface CalFeed { id: ID; name: string; url: string; color: string; lastSync: string | null; lastError: string | null; count?: number }
 /** Occurrence importée d'un calendrier abonné (remplacée à chaque actualisation). */
@@ -242,7 +242,7 @@ export type Action =
   | { type: "expense/update"; id: ID; patch: Partial<Expense> }
   | { type: "recurring/save"; item: RecurringExpense } | { type: "recurring/remove"; id: ID } | { type: "recurring/sync"; today: string }
   | { type: "chore/skip"; id: ID; date: string }
-  | { type: "chore/update"; id: ID; patch: Partial<Chore> } | { type: "chore/step"; id: ID; date: string; stepId: ID }
+  | { type: "chore/update"; id: ID; patch: Partial<Chore> } | { type: "chore/pin"; id: ID; date: string; time: string } | { type: "chore/step"; id: ID; date: string; stepId: ID }
   | { type: "task/step"; id: ID; stepId: ID }
   | { type: "notes/set"; patch: { text?: string; ink?: string | undefined } }
   | { type: "todo/add"; todo: Todo } | { type: "todo/toggle"; id: ID } | { type: "todo/remove"; id: ID } | { type: "todo/update"; id: ID; patch: Partial<Todo> } | { type: "todo/clearDone" }
@@ -356,6 +356,7 @@ export function reducer(s: AppState, a: Action): AppState {
       const cur = h.stepsDone?.[a.date] ?? [];
       return { ...h, stepsDone: { ...h.stepsDone, [a.date]: cur.includes(a.stepId) ? cur.filter((x) => x !== a.stepId) : [...cur, a.stepId] } };
     }) };
+    case "chore/pin": return { ...s, chores: s.chores.map((c) => (c.id !== a.id ? c : { ...c, pinned: { ...Object.fromEntries(Object.entries(c.pinned ?? {}).filter(([k]) => k >= iso(addDays(new Date(), -30)))), [a.date]: a.time } })) };
     case "chore/update": return { ...s, chores: s.chores.map((c) => (c.id === a.id ? { ...c, ...a.patch } : c)) };
     case "chore/step": return { ...s, chores: s.chores.map((c) => {
       if (c.id !== a.id) return c;
@@ -472,11 +473,12 @@ export function validateState(x: unknown): { ok: true; state: AppState; repaired
     tasks: keep<Task>("tâches", p.tasks, (t) => isStr(t.id) && isStr(t.title) && isDate(t.deadline)).map((t) => ({ ...t, estimate: isNum(t.estimate) && t.estimate > 0 ? t.estimate : 60, spent: isNum(t.spent) && t.spent >= 0 ? t.spent : 0, priority: ([1, 2, 3].includes(t.priority) ? t.priority : 2) as Priority, status: (["todo", "doing", "review", "done"].includes(t.status) ? t.status : "todo") as TaskStatus, slot: t.slot && isDate(t.slot.date) && isTime(t.slot.start) && isTime(t.slot.end) && toMin(t.slot.end) > toMin(t.slot.start) ? t.slot : undefined })).map(({ slot, steps, doDates, ...t }) => { const st = cleanSteps(steps, true); const dd = Array.isArray(doDates) ? [...new Set(doDates.filter(isDate))].sort().slice(0, 60) : []; return { ...t, ...(slot ? { slot } : {}), ...(st.length ? { steps: st } : {}), ...(dd.length ? { doDates: dd } : {}), ...(t.noPlan === true ? { noPlan: true } : {}) }; }),
     groceries: keep<GroceryItem>("articles", p.groceries, (g) => isStr(g.id) && isStr(g.name)).map((g) => ({ ...g, price: isNum(g.price) && g.price >= 0 ? g.price : 0, checked: !!g.checked, qty: isStr(g.qty) ? g.qty : "" })),
     chores: keep<Chore>("corvées", p.chores, (c) => isStr(c.id) && isStr(c.name) && Array.isArray(c.assignees) && (c.recurrence !== "once" || isDate(c.date))).map((c) => {
-      const { time, steps, stepsDone, doneOn: dOn, ...rest } = c;
+      const { time, steps, stepsDone, doneOn: dOn, pinned: pin, ...rest } = c;
+      const pinned = pin && typeof pin === "object" ? Object.fromEntries(Object.entries(pin).filter(([k, v]) => isDate(k) && isTime(v)).slice(-60)) : {};
       const doneOn = dOn && typeof dOn === "object" ? Object.fromEntries(Object.entries(dOn).filter(([k, v]) => isDate(k) && isDate(v)).slice(-400)) : {};
       const st = cleanSteps(steps, false);
       const sd = stepsDone && typeof stepsDone === "object" ? Object.fromEntries(Object.entries(stepsDone).filter(([k, v]) => isDate(k) && Array.isArray(v)).map(([k, v]) => [k, (v as unknown[]).filter(isStr)]).slice(-120)) : {};
-      return { ...rest, doneOn, ...(st.length ? { steps: st, stepsDone: sd } : {}), done: Array.isArray(c.done) ? c.done.filter(isDate) : [], skipped: Array.isArray(c.skipped) ? c.skipped.filter(isDate) : [], doneBy: c.doneBy && typeof c.doneBy === "object" ? c.doneBy : {}, ...(isTime(time) ? { time } : {}) };
+      return { ...rest, doneOn, pinned, ...(st.length ? { steps: st, stepsDone: sd } : {}), done: Array.isArray(c.done) ? c.done.filter(isDate) : [], skipped: Array.isArray(c.skipped) ? c.skipped.filter(isDate) : [], doneBy: c.doneBy && typeof c.doneBy === "object" ? c.doneBy : {}, ...(isTime(time) ? { time } : {}) };
     }),
     notes: p.notes && typeof p.notes === "object" ? { text: isStr((p.notes as { text?: unknown }).text) ? (p.notes as { text: string }).text.slice(0, 20000) : "",
       ...((() => { const ink = (p.notes as { ink?: unknown }).ink; return isStr(ink) && ink.startsWith("data:image/png;base64,") && ink.length < 900_000 ? { ink } : {}; })()) } : undefined,
@@ -829,11 +831,12 @@ export function planDay(state: AppState, date: string, remaining?: Map<ID, numbe
   const hardSpans = fixed.filter((b) => isHard(b.kind)).map((b) => [b.start, b.end]);
   for (let i = fixed.length - 1; i >= 0; i--) if (fixed[i].kind === "meal" && hardSpans.some(([s0, e0]) => s0 < fixed[i].end && e0 > fixed[i].start)) fixed.splice(i, 1);
   // Corvées à heure fixe (les miennes, non faites) : bloc fixe à l'heure choisie.
-  const timedChores = date < today ? [] : chores.filter((c) => c.time && choreScheduledOn(c, d) && choreAssignee(c, d) === "Moi" && !c.done.includes(date) && !(c.skipped ?? []).includes(date));
+  const slotOf = (c: Chore) => c.time ?? c.pinned?.[date];
+  const timedChores = date < today ? [] : chores.filter((c) => slotOf(c) && choreScheduledOn(c, d) && choreAssignee(c, d) === "Moi" && !c.done.includes(date) && !(c.skipped ?? []).includes(date));
   // Tâches à créneau précis : bloc fixe le jour choisi.
   for (const t of tasks) if (t.slot && t.status !== "done" && t.slot.date === date && toMin(t.slot.end) > toMin(t.slot.start))
     fixed.push({ start: toMin(t.slot.start), end: toMin(t.slot.end), kind: "task", label: t.kind === "examen" ? `Révision · ${t.title}` : t.title, color: courses.find((c) => c.id === t.courseId)?.color, refId: t.id });
-  for (const c of timedChores) fixed.push({ start: toMin(c.time!), end: toMin(c.time!) + c.minutes, kind: "chore", label: c.name, refId: c.id });
+  for (const c of timedChores) { const t = toMin(slotOf(c)!); fixed.push({ start: t, end: t + c.minutes, kind: "chore", label: c.name, refId: c.id }); }
   // Chevauchements entre cours et indisponibilités (jamais déplacés automatiquement : seulement signalés).
   const hard = fixed.filter((b) => isHard(b.kind)).sort((x, y) => x.start - y.start);
   const conflicts: Conflict[] = [];
@@ -854,7 +857,7 @@ export function planDay(state: AppState, date: string, remaining?: Map<ID, numbe
   for (const [s, e] of busy) { if (s > cursor) free.push([cursor, Math.min(s, bed)]); cursor = Math.max(cursor, e); }
   if (cursor < bed - 30) free.push([cursor, bed - 30]);
 
-  const due = past ? [] : chores.filter((c) => !c.time && choreScheduledOn(c, d) && choreAssignee(c, d) === "Moi" && !c.done.includes(date) && !(c.skipped ?? []).includes(date));
+  const due = past ? [] : chores.filter((c) => !slotOf(c) && choreScheduledOn(c, d) && choreAssignee(c, d) === "Moi" && !c.done.includes(date) && !(c.skipped ?? []).includes(date));
   const open = tasks.filter((t) => t.status !== "done" && !t.slot);
   const overdue = open.filter((t) => t.deadline < today && (remaining?.get(t.id) ?? t.estimate - t.spent) > 0);
   const queue = (past ? [] : open)

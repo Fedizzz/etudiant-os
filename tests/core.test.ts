@@ -438,3 +438,12 @@ test("tâche sans do date (noPlan) : jamais placée dans le planning", () => {
   assert.equal(C.dailyQuota(t, TODAY, 300, TODAY), 0);
   assert.equal(C.planFor({ ...base(), tasks: [t] }, TODAY, TODAY).blocks.filter((b) => b.kind === "task").length, 0);
 });
+
+test("corvée figée (pinned) : reste à son créneau même si l'heure est passée", () => {
+  const today = C.todayISO();
+  const c: C.Chore = { id: "p", name: "Aspirateur", recurrence: "daily", day: 0, minutes: 20, assignees: ["Moi"], done: [], pinned: { [today]: "00:05" } };
+  const b = C.planFor({ ...base(), chores: [c] }, today, today).blocks.find((x) => x.refId === "p")!;
+  assert.equal(b.start, 5);
+  const s = C.reducer({ ...base(), chores: [{ ...c, pinned: {} }] }, { type: "chore/pin", id: "p", date: today, time: "18:00" });
+  assert.equal(s.chores[0].pinned![today], "18:00");
+});

@@ -3254,6 +3254,11 @@ export interface StudentOSProps {
 export default function StudentOS({ state, dispatch, env, view, onView, notice, headerExtra, menuExtra, override }: StudentOSProps) {
   const stateRef = useRef(state); stateRef.current = state;
   useFeedAutoSync(state, dispatch, env.fetchCalendar);
+  // Corvées sans heure placées aujourd'hui : on fige leur créneau (placé après l'heure actuelle) pour qu'il ne bouge plus.
+  useEffect(() => {
+    const today = todayISO(); const plan = planFor(state, today);
+    for (const b of plan.blocks) if (b.kind === "chore" && b.refId) { const c = state.chores.find((x) => x.id === b.refId); if (c && !c.time && !c.pinned?.[today]) dispatch({ type: "chore/pin", id: c.id, date: today, time: toHHMM(b.start) }); }
+  }, [state.chores, state.classes, state.events, state.tasks]);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [editTask, setEditTask] = useState<ID | null>(null);
   const setViewRaw = onView;
