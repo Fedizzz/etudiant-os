@@ -404,3 +404,10 @@ test("tâches perso : horaire précis dans le planning, migration de « time »"
   const v = C.validateState(JSON.parse(JSON.stringify({ ...base(), todos: [{ id: "x", text: "Old", done: false, due: TODAY, time: "09:00", createdAt: TODAY, priority: 7, kind: "zz" }] })));
   assert.ok(v.ok); if (v.ok) { const t = v.state.todos![0]; assert.equal(t.start, "09:00"); assert.ok(!("priority" in t) && !("kind" in t)); }
 });
+
+test("planning d'aujourd'hui : rien placé automatiquement avant l'heure actuelle", () => {
+  const today = C.todayISO(), n = new Date(), now = n.getHours() * 60 + n.getMinutes();
+  const s = { ...base(), tasks: [task({ deadline: today, estimate: 120 })] };
+  const p = C.planFor(s, today, today);
+  for (const b of p.blocks.filter((b) => b.kind === "task" || b.kind === "chore")) assert.ok(b.start >= now, `bloc à ${b.start} avant ${now}`);
+});

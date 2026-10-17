@@ -823,7 +823,9 @@ export function planDay(state: AppState, date: string, remaining?: Map<ID, numbe
   // Créneaux libres = journée éveillée moins les blocs fixes, avec 10 min de tampon après chaque cours.
   const busy = fixed.map((b) => [b.start, isHard(b.kind) ? b.end + 10 : b.end] as [number, number]).sort((a, b) => a[0] - b[0]);
   const free: [number, number][] = [];
-  let cursor = wake + 30;
+  // Aujourd'hui : rien n'est placé automatiquement avant l'heure actuelle (arrondie aux 5 min suivantes).
+  const n = new Date(), nowMin = date === iso(n) ? Math.ceil((n.getHours() * 60 + n.getMinutes() + 5) / 5) * 5 : -1;
+  let cursor = Math.max(wake + 30, nowMin);
   for (const [s, e] of busy) { if (s > cursor) free.push([cursor, Math.min(s, bed)]); cursor = Math.max(cursor, e); }
   if (cursor < bed - 30) free.push([cursor, bed - 30]);
 
