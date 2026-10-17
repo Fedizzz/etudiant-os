@@ -373,3 +373,17 @@ test("routines : jours prévus, stats, série, étapes, nettoyage", () => {
   assert.ok(v.ok);
   if (v.ok) { const x = v.state.habits![1]; assert.deepEqual(x.days, [0, 1, 2, 3, 4, 5, 6]); assert.equal(x.cat, "autre"); assert.deepEqual(x.done, []); }
 });
+
+test("tâches perso : ajout, fait/rouvrir, compteur à l'heure, nettoyage", () => {
+  let s = C.reducer(base(), { type: "todo/add", todo: { id: "a", text: "Appeler la banque", done: false, due: "2026-10-13", createdAt: "2026-10-12" } });
+  s = C.reducer(s, { type: "todo/add", todo: { id: "b", text: "RDV dentiste", done: false, due: TODAY, createdAt: TODAY } });
+  s = C.reducer(s, { type: "todo/add", todo: { id: "c", text: "Sans date", done: false, createdAt: TODAY } });
+  assert.deepEqual(C.todoOnTimeStats(s.todos!, TODAY), { ok: 0, late: 1 });
+  s = C.reducer(s, { type: "todo/toggle", id: "b" });
+  assert.equal(s.todos!.find((t) => t.id === "b")!.done, true);
+  s = C.reducer(s, { type: "todo/toggle", id: "b" }); assert.ok(!("doneAt" in s.todos!.find((t) => t.id === "b")!));
+  s = C.reducer(s, { type: "todo/toggle", id: "c" }); s = C.reducer(s, { type: "todo/clearDone" });
+  assert.deepEqual(s.todos!.map((t) => t.id), ["b", "a"]);
+  const v = C.validateState(JSON.parse(JSON.stringify({ ...s, todos: [...s.todos!, { id: "x", text: "  " }, { id: "y", text: "ok", due: "bad" }] })));
+  assert.ok(v.ok && v.state.todos!.length === 3 && !("due" in v.state.todos![2]));
+});

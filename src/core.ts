@@ -55,6 +55,8 @@ export interface PlanEvent { id: ID; title: string; date: string; start: string;
 export type HabitCat = "soin" | "santé" | "sport" | "bien-être" | "maison" | "autre";
 /** Routine quotidienne : days = jours de la semaine (0 = lundi) ; done = dates faites ; stepsDone = étapes cochées par date. */
 export interface Habit { id: ID; name: string; emoji: string; cat: HabitCat; time?: string; days: number[]; done: string[]; steps?: Step[]; stepsDone?: Record<string, ID[]>; note?: string; since: string }
+/** Tâche perso ponctuelle : due = jour prévu (facultatif), time = heure (facultatif). */
+export interface Todo { id: ID; text: string; done: boolean; due?: string; time?: string; doneAt?: string; createdAt: string }
 export interface SleepLog { date: string; bed: string; wake: string; quality: 1 | 2 | 3 | 4 | 5; bedOk?: boolean; wakeOk?: boolean }
 /** id = identifiant de session : un même id n'est jamais enregistré deux fois. */
 export interface FocusEntry { id?: ID; date: string; minutes: number; taskId: ID | null; courseId?: ID | null; interrupted?: boolean }
@@ -90,6 +92,8 @@ export interface AppState {
   feedEvents?: FeedEvent[];
   /** Routines du quotidien (soins, médicaments, habitudes). */
   habits?: Habit[];
+  /** Tâches perso ponctuelles (hors cours) : appeler la banque, rendez-vous… */
+  todos?: Todo[];
   templates: GroceryTemplate[]; products: Product[]; timer: TimerState;
 }
 
@@ -230,6 +234,7 @@ export type Action =
   | { type: "chore/skip"; id: ID; date: string }
   | { type: "chore/update"; id: ID; patch: Partial<Chore> } | { type: "chore/step"; id: ID; date: string; stepId: ID }
   | { type: "task/step"; id: ID; stepId: ID }
+  | { type: "todo/add"; todo: Todo } | { type: "todo/toggle"; id: ID } | { type: "todo/remove"; id: ID } | { type: "todo/update"; id: ID; patch: Partial<Todo> } | { type: "todo/clearDone" }
   | { type: "habit/add"; habit: Habit } | { type: "habit/update"; id: ID; patch: Partial<Habit> } | { type: "habit/remove"; id: ID }
   | { type: "habit/toggle"; id: ID; date: string } | { type: "habit/step"; id: ID; date: string; stepId: ID }
   | { type: "feed/add"; feed: CalFeed } | { type: "feed/remove"; id: ID } | { type: "feed/update"; id: ID; patch: Partial<CalFeed> }
@@ -322,6 +327,11 @@ export function reducer(s: AppState, a: Action): AppState {
         return { ...c, done: was ? c.done.filter((x) => x !== a.date) : [...c.done, a.date], doneBy, skipped: (c.skipped ?? []).filter((x) => x !== a.date) };
       }),
     };
+    case "todo/add": return { ...s, todos: [a.todo, ...(s.todos ?? [])] };
+    case "todo/toggle": return { ...s, todos: (s.todos ?? []).map((t) => (t.id !== a.id ? t : t.done ? (({ doneAt: _, ...x }) => ({ ...x, done: false }))(t) : { ...t, done: true, doneAt: todayISO() })) };
+    case "todo/remove": return { ...s, todos: (s.todos ?? []).filter((t) => t.id !== a.id) };
+    case "todo/update": return { ...s, todos: (s.todos ?? []).map((t) => (t.id === a.id ? { ...t, ...a.patch } : t)) };
+    case "todo/clearDone": return { ...s, todos: (s.todos ?? []).filter((t) => !t.done) };
     case "habit/add": return { ...s, habits: [...(s.habits ?? []), a.habit] };
     case "habit/update": return { ...s, habits: (s.habits ?? []).map((h) => (h.id === a.id ? { ...h, ...a.patch } : h)) };
     case "habit/remove": return { ...s, habits: (s.habits ?? []).filter((h) => h.id !== a.id) };
@@ -450,6 +460,9 @@ export function validateState(x: unknown): { ok: true; state: AppState; repaired
       const sd = stepsDone && typeof stepsDone === "object" ? Object.fromEntries(Object.entries(stepsDone).filter(([k, v]) => isDate(k) && Array.isArray(v)).map(([k, v]) => [k, (v as unknown[]).filter(isStr)]).slice(-120)) : {};
       return { ...rest, ...(st.length ? { steps: st, stepsDone: sd } : {}), done: Array.isArray(c.done) ? c.done.filter(isDate) : [], skipped: Array.isArray(c.skipped) ? c.skipped.filter(isDate) : [], doneBy: c.doneBy && typeof c.doneBy === "object" ? c.doneBy : {}, ...(isTime(time) ? { time } : {}) };
     }),
+    todos: keep<Todo>("tâches perso", Array.isArray(p.todos) ? p.todos : [], (t) => isStr(t.id) && isStr(t.text) && t.text.trim() !== "").map((t) => ({
+      id: t.id, text: t.text.slice(0, 200), done: !!t.done, createdAt: isDate(t.createdAt) ? t.createdAt : todayISO(),
+      ...(isDate(t.due) ? { due: t.due } : {}), ...(isTime(t.time) ? { time: t.time } : {}), ...(t.done && isDate(t.doneAt) ? { doneAt: t.doneAt } : {}) })),
     habits: keep<Habit>("routines", Array.isArray(p.habits) ? p.habits : [], (h) => isStr(h.id) && isStr(h.name) && Array.isArray(h.done)).map((h) => {
       const st = cleanSteps(h.steps, false);
       const days = Array.isArray(h.days) ? [...new Set(h.days.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))].sort() : [];
@@ -970,4 +983,16 @@ export function habitStreak(h: Habit, today: string): number {
     if (h.done.includes(k)) n++; else if (i > 0) break;
   }
   return n;
+}
+
+/** Tâches perso : à l'heure = faites au plus tard le jour prévu ; en retard = faites après, ou encore ouvertes après ce jour. Sans date : non comptées. */
+export function todoOnTimeStats(todos: Todo[], today: string, days?: number): OnTimeCount {
+  let ok = 0, late = 0;
+  const inWin = (d: string) => days === undefined || daysBetween(d, today) < days;
+  for (const t of todos) {
+    if (!t.due) continue;
+    if (t.done && t.doneAt) { if (inWin(t.doneAt)) { if (t.doneAt <= t.due) ok++; else late++; } }
+    else if (!t.done && t.due < today && inWin(t.due)) late++;
+  }
+  return { ok, late };
 }

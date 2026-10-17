@@ -4,8 +4,8 @@ import { MiniPdf } from "./pdf.ts";
 import { layoutLanes } from "./core.ts";
 import { DAY_WORDS, dayOf, pageGeometry, parseGrid } from "./timetable.ts";
 import { parseIcs, normalizeFeedUrl, isFeedUrl } from "./ical.ts";
-import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, choreStepsDone, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, onTimeGuess, onTimeStats, taskOnTimeStats, choreOnTimeStats, HABIT_CATS, habitOn, habitStats, habitStepsDone, habitStreak, pad, parseAmount, parseISO, parseReceipt, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
-import type { Action, Aisle, Chore, Habit, HabitCat, AppState, Block, Budget, Course, DayPlan, Expense, ExpenseCat, GroceryTemplate, ID, Phase, PomodoroCfg, Priority, ReceiptResult, Recurrence, EventRecurrence, CalFeed, FeedEvent, SettingsState, SleepLog, Step, Task, TaskKind, TaskStatus, TemplateItem, ViewKey } from "./core.ts";
+import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, choreStepsDone, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, onTimeGuess, onTimeStats, taskOnTimeStats, choreOnTimeStats, HABIT_CATS, habitOn, habitStats, habitStepsDone, habitStreak, todoOnTimeStats, pad, parseAmount, parseISO, parseReceipt, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
+import type { Action, Aisle, Chore, Habit, HabitCat, Todo, AppState, Block, Budget, Course, DayPlan, Expense, ExpenseCat, GroceryTemplate, ID, Phase, PomodoroCfg, Priority, ReceiptResult, Recurrence, EventRecurrence, CalFeed, FeedEvent, SettingsState, SleepLog, Step, Task, TaskKind, TaskStatus, TemplateItem, ViewKey } from "./core.ts";
 import type { AppEnv } from "./env.ts";
 import { LangSwitch } from "./i18n.tsx";
 
@@ -658,6 +658,7 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
   const ot = useMemo(() => ({ all: onTimeStats(state.sleep, today), d30: onTimeStats(state.sleep, today, 30) }), [state.sleep, today]);
   const ht = useMemo(() => ({ all: habitStats(state.habits ?? [], today), d30: habitStats(state.habits ?? [], today, 30) }), [state.habits, today]);
   const habitsToday = (state.habits ?? []).filter((h) => habitOn(h, today));
+  const todosNow = (state.todos ?? []).filter((t) => !t.done && t.due && t.due <= today).length;
   const tt = useMemo(() => ({ all: taskOnTimeStats(state.tasks, today), d30: taskOnTimeStats(state.tasks, today, 30), call: choreOnTimeStats(state.chores, today), c30: choreOnTimeStats(state.chores, today, 30) }), [state.tasks, state.chores, today]);
   // Toutes les valeurs viennent des mêmes fonctions que les modules (une seule source de vérité).
   const days7 = useMemo(() => planRange(state, today, 7, today), [state, today]);
@@ -778,13 +779,14 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
         <Card title={<span className="flex items-center gap-2"><BedDouble size={15} />À l'heure ?</span>} action={<Btn size="sm" variant="ghost" onClick={() => go("sleep")}>Cocher</Btn>}>
           <OnTimeCounter all={ot.all} d30={ot.d30} bedTarget={state.settings.bedDefault} wakeTarget={state.settings.wakeDefault} />
         </Card>
-        {habitsToday.length > 0 && <Card title={<span className="flex items-center gap-2"><Sparkles size={15} />Routines du jour · {habitsToday.filter((h) => h.done.includes(today)).length}/{habitsToday.length}</span>} action={<Btn size="sm" variant="ghost" onClick={() => go("routines")}>Tout voir</Btn>}>
-          <HabitToday date={today} compact />
+        {(habitsToday.length > 0 || todosNow > 0) && <Card title={<span className="flex items-center gap-2"><Sparkles size={15} />Routines du jour{habitsToday.length ? ` · ${habitsToday.filter((h) => h.done.includes(today)).length}/${habitsToday.length}` : ""}</span>} action={<Btn size="sm" variant="ghost" onClick={() => go("routines")}>Tout voir</Btn>}>
+          <div className="flex flex-col gap-3"><HabitToday date={today} compact />{todosNow > 0 && <TodoList compact />}</div>
         </Card>}
         <Card title={<span className="flex items-center gap-2"><ListChecks size={15} />Tâches à l'heure ?</span>} action={<Btn size="sm" variant="ghost" onClick={() => go("academic")}>Tâches</Btn>}>
           <div className="flex flex-col gap-3" data-testid="task-ontime">
             <CounterRow label="Tâches" target="avant l'échéance" a={tt.all} m={tt.d30} />
             {state.chores.length > 0 && <CounterRow label="Ménage" target="le jour prévu" a={tt.call} m={tt.c30} lateWord="oubliées" />}
+            {(state.todos ?? []).some((t) => t.due) && <CounterRow label="Tâches perso" target="le jour prévu" a={todoOnTimeStats(state.todos ?? [], today)} m={todoOnTimeStats(state.todos ?? [], today, 30)} />}
             {(state.habits ?? []).length > 0 && <CounterRow label="Routines" target="le jour prévu" a={ht.all} m={ht.d30} lateWord="oubliées" />}
             <p className="text-[11px] text-muted">✓ terminée au plus tard le jour de l'échéance · ✗ terminée après, ou encore ouverte et en retard. Ménage : vos corvées faites le jour prévu ; les reportées ne comptent pas.</p>
           </div>
@@ -2366,6 +2368,61 @@ const HabitForm: React.FC<{ habit?: Habit; preset?: (typeof HABIT_PRESETS)[numbe
   );
 };
 
+/** Tâches perso ponctuelles (hors cours). `compact` : seulement en retard + aujourd'hui (tableau de bord). */
+const TodoList: React.FC<{ compact?: boolean }> = ({ compact }) => {
+  const { state, dispatch, toast, undoable } = useStore();
+  const today = todayISO();
+  const todos = state.todos ?? [];
+  const [txt, setTxt] = useState(""); const [due, setDue] = useState(today); const [time, setTime] = useState(""); const [more, setMore] = useState(false);
+  const [showDone, setShowDone] = useState(false);
+  const add = (e: React.FormEvent) => {
+    e.preventDefault(); const t = txt.trim(); if (!t) return;
+    dispatch({ type: "todo/add", todo: { id: uid(), text: t.slice(0, 200), done: false, createdAt: today, ...(due ? { due } : {}), ...(time ? { time } : {}) } });
+    setTxt(""); setTime("");
+  };
+  const open = todos.filter((t) => !t.done);
+  const sortKey = (t: Todo) => `${t.due ?? "9999"}${t.time ?? "99"}`;
+  const groups: [string, Todo[], "bad" | undefined][] = [
+    ["En retard", open.filter((t) => t.due && t.due < today), "bad"],
+    ["Aujourd'hui", open.filter((t) => t.due === today), undefined],
+    ...(compact ? [] : [["À venir", open.filter((t) => t.due && t.due > today), undefined], ["Sans date", open.filter((t) => !t.due), undefined]] as [string, Todo[], undefined][]),
+  ];
+  const done = todos.filter((t) => t.done).sort((a, b) => (b.doneAt ?? "").localeCompare(a.doneAt ?? ""));
+  const row = (t: Todo) => (
+    <li key={t.id} className="group flex items-center gap-2 py-1.5 text-[13px]">
+      <button onClick={() => { dispatch({ type: "todo/toggle", id: t.id }); if (!t.done) toast(`« ${t.text} » fait ✓`); }} aria-label={t.done ? `Rouvrir ${t.text}` : `Marquer ${t.text} comme fait`}
+        className={cx("grid h-5 w-5 shrink-0 place-items-center rounded-full border-2 transition", t.done ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-fg/40 hover:border-accent")}>{t.done && <Check size={11} strokeWidth={3} />}</button>
+      <span className={cx("min-w-0 flex-1 break-words", t.done && "text-muted line-through")}>{t.text}</span>
+      {t.time && <span className="font-mono text-[11px] text-muted">{t.time}</span>}
+      {t.due && t.due !== today && !t.done && <Pill tone={t.due < today ? "bad" : "muted"}>{fmtDate(t.due)}</Pill>}
+      {!compact && <button className="p-1 text-muted opacity-60 hover:text-bad group-hover:opacity-100" aria-label={`Supprimer ${t.text}`} onClick={() => undoable({ type: "todo/remove", id: t.id }, `« ${t.text} » supprimée`)}><Trash2 size={12} /></button>}
+    </li>);
+  const visible = groups.filter(([, l]) => l.length);
+  return (
+    <div className="flex flex-col gap-3" data-testid="todos">
+      {!compact && <form onSubmit={add} className="flex flex-col gap-2">
+        <div className="flex gap-2"><Input aria-label="Nouvelle tâche perso" value={txt} onChange={(e) => setTxt(e.target.value)} placeholder="Ex. Appeler la banque, prendre RDV dentiste…" />
+          <Btn type="submit" variant="primary" disabled={!txt.trim()} aria-label="Ajouter la tâche"><Plus size={14} /></Btn></div>
+        <div className="flex flex-wrap items-center gap-2 text-[12px]">
+          {[["Aujourd'hui", today], ["Demain", iso(addDays(parseISO(today), 1))], ["Sans date", ""]].map(([l, v]) => (
+            <button key={l} type="button" onClick={() => { setDue(v); setMore(false); }} aria-pressed={due === v && !more} className={cx("rounded-full border px-2.5 py-1 transition", due === v && !more ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-line bg-sunken hover:border-fg/60")}>{l}</button>))}
+          <button type="button" onClick={() => setMore(!more)} aria-pressed={more} className={cx("rounded-full border px-2.5 py-1 transition", more ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-line bg-sunken hover:border-fg/60")}>Autre date / heure…</button>
+        </div>
+        {more && <div className="flex gap-2"><Input type="date" aria-label="Date" value={due} onChange={(e) => setDue(e.target.value)} /><Input type="time" aria-label="Heure (facultatif)" value={time} onChange={(e) => setTime(e.target.value)} className="w-32" /></div>}
+      </form>}
+      {visible.length ? visible.map(([label, list, tone]) => (
+        <div key={label}><p className={cx("mb-0.5 text-[11px] font-semibold uppercase tracking-wider", tone === "bad" ? "text-bad" : "text-muted")}>{label} · {list.length}</p>
+          <ul className="flex flex-col divide-y divide-line">{[...list].sort((a, b) => sortKey(a).localeCompare(sortKey(b))).map(row)}</ul></div>))
+        : <p className="text-xs text-muted">{compact ? "Aucune tâche perso pour aujourd'hui." : open.length ? "" : "Rien à faire pour l'instant. Ajoutez une course, un appel, un rendez-vous…"}</p>}
+      {!compact && done.length > 0 && <div>
+        <div className="flex items-center justify-between"><button className="text-[11px] font-semibold uppercase tracking-wider text-muted hover:text-fg" onClick={() => setShowDone(!showDone)} aria-expanded={showDone}>Faites · {done.length} {showDone ? "▾" : "▸"}</button>
+          {showDone && <Btn size="sm" variant="ghost" onClick={() => undoable({ type: "todo/clearDone" }, "Tâches faites effacées")}>Tout effacer</Btn>}</div>
+        {showDone && <ul className="flex flex-col divide-y divide-line">{done.slice(0, 30).map(row)}</ul>}
+      </div>}
+    </div>
+  );
+};
+
 const Routines: React.FC = () => {
   const { state, dispatch, undoable } = useStore();
   const today = todayISO();
@@ -2386,9 +2443,13 @@ const Routines: React.FC = () => {
           {doneToday === todays.length && <p className="mt-3 text-center text-[13px] font-semibold text-ok">Tout est fait aujourd'hui, bravo ! 🎉</p>}
         </> : <Empty icon={<Sparkles size={18} />} title={habits.length ? "Rien de prévu aujourd'hui" : "Aucune routine"} hint={habits.length ? "Vos routines ne sont pas prévues ce jour-là." : "Soin du soir, médicaments, eau, sport… Choisissez une suggestion ci-dessous ou créez la vôtre."} />}
       </Card>
+      <Card title={<span className="flex items-center gap-2"><ListChecks size={15} />Mes tâches perso{(state.todos ?? []).some((t) => !t.done) ? ` · ${(state.todos ?? []).filter((t) => !t.done).length}` : ""}</span>}>
+        <TodoList />
+      </Card>
       <Card title="Bilan">
         <div className="flex flex-col gap-3" data-testid="habit-stats">
           <CounterRow label="Routines" target="faites le jour prévu" a={all} m={d30} lateWord="oubliées" />
+          {(state.todos ?? []).some((t) => t.due) && <CounterRow label="Tâches perso" target="faites le jour prévu" a={todoOnTimeStats(state.todos ?? [], today)} m={todoOnTimeStats(state.todos ?? [], today, 30)} />}
           {habits.length > 0 && <ul className="flex flex-col gap-1.5 text-[13px]">{[...habits].sort((a, b) => habitStreak(b, today) - habitStreak(a, today)).slice(0, 5).map((h) => (
             <li key={h.id} className="flex items-center gap-2"><span aria-hidden>{h.emoji}</span><span className="min-w-0 flex-1 truncate">{h.name}</span><span className="font-mono text-[12px] tabular-nums text-muted">🔥 {habitStreak(h, today)} j</span></li>))}</ul>}
           <p className="text-[11px] text-muted">Une routine non cochée un jour prévu compte comme oubliée (à partir du jour de sa création). Aujourd'hui ne compte qu'une fois coché.</p>
@@ -2831,7 +2892,7 @@ const NAV: { key: ViewKey; label: string; icon: React.FC<{ size?: number }>; sho
   { key: "groceries", label: "Courses", icon: ShoppingCart, short: "5" },
   { key: "budget", label: "Budget", icon: Wallet, short: "6" },
   { key: "chores", label: "Ménage", icon: Home, short: "7" },
-  { key: "routines", label: "Routines", icon: Sparkles, short: "0" },
+  { key: "routines", label: "Routines & perso", icon: Sparkles, short: "0" },
   { key: "sleep", label: "Sommeil", icon: Moon, short: "8" },
   { key: "settings", label: "Réglages", icon: Settings, short: "9" },
 ];
