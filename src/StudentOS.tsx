@@ -2415,8 +2415,8 @@ const TodoForm: React.FC<{ todo?: Todo; onDone: () => void }> = ({ todo, onDone 
         <div className="flex gap-1.5">{([3, 2, 1] as Priority[]).map((p) => <button key={p} type="button" aria-pressed={f.priority === p} onClick={() => setF({ ...f, priority: p })}
           className={cx("h-9 flex-1 rounded-lg border-2 text-[12px] font-semibold transition", f.priority === p ? (p === 3 ? "border-bad bg-bad/12 text-bad" : p === 2 ? "border-warn bg-warn/12 text-warn" : "border-fg/60 bg-sunken text-fg") : "border-line bg-sunken text-muted")}>{p === 3 && "🔥 "}{PRIO[p].label}</button>)}</div></div>
       <Field label="Jour" htmlFor="td-due" className="col-span-2"><Input id="td-due" type="date" value={f.due} onChange={(e) => setF({ ...f, due: e.target.value })} /></Field>
-      <Field label="Début" htmlFor="td-start"><Input id="td-start" type="time" value={f.start} onChange={(e) => setF({ ...f, start: e.target.value })} /></Field>
-      <Field label="Fin" htmlFor="td-end"><Input id="td-end" type="time" value={f.end} onChange={(e) => setF({ ...f, end: e.target.value })} /></Field>
+      <Field label="Début (facultatif)" htmlFor="td-start"><Input id="td-start" type="time" value={f.start} onChange={(e) => setF({ ...f, start: e.target.value })} /></Field>
+      <Field label="Fin (facultatif)" htmlFor="td-end"><Input id="td-end" type="time" value={f.end} onChange={(e) => setF({ ...f, end: e.target.value })} /></Field>
       <p className="col-span-2 -mt-1 text-[11px] text-muted sm:col-span-4">Jour vide = sans date. Avec un début et une fin, la tâche apparaît dans votre planning comme un rendez-vous.{f.due && <> <button type="button" className="text-accent hover:underline" onClick={() => setF({ ...f, due: "", start: "", end: "" })}>Retirer la date</button></>}</p>
       <Field label="Note" htmlFor="td-note" className="col-span-2 sm:col-span-4"><Input id="td-note" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} placeholder="Adresse, numéro, documents à prendre…" /></Field>
       <StepsEditor id="td-steps" steps={steps} onChange={setSteps} checkable className="col-span-2 sm:col-span-4" />
@@ -2451,7 +2451,7 @@ const Perso: React.FC = () => {
   const today = todayISO();
   const todos = state.todos ?? [];
   const [form, setForm] = useState<{ todo?: Todo } | null>(null);
-  const [quick, setQuick] = useState("");
+  const [quick, setQuick] = useState(""); const [qDay, setQDay] = useState(todayISO());
   const [filter, setFilter] = useState<TodoKind | "">("");
   const [showDone, setShowDone] = useState(false);
   const open = todos.filter((t) => !t.done && (!filter || t.kind === filter)).sort(todoSort);
@@ -2466,12 +2466,18 @@ const Perso: React.FC = () => {
   ];
   const done = todos.filter((t) => t.done).sort((a, b) => (b.doneAt ?? "").localeCompare(a.doneAt ?? ""));
   const all = todoOnTimeStats(todos, today), d30 = todoOnTimeStats(todos, today, 30);
-  const addQuick = (e: React.FormEvent) => { e.preventDefault(); const t = quick.trim(); if (!t) return; dispatch({ type: "todo/add", todo: { id: uid(), text: t.slice(0, 200), done: false, createdAt: today, due: today, priority: 2, kind: "perso" } }); setQuick(""); };
+  const addQuick = (e: React.FormEvent) => { e.preventDefault(); const t = quick.trim(); if (!t) return; dispatch({ type: "todo/add", todo: { id: uid(), text: t.slice(0, 200), done: false, createdAt: today, ...(qDay ? { due: qDay } : {}), priority: 2, kind: "perso" } }); setQuick(""); };
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
       <Card title={<span className="flex items-center gap-2"><ListChecks size={15} />À faire · {open.length}</span>} className="lg:col-span-2" action={<Btn size="sm" variant="primary" onClick={() => setForm({})}><Plus size={13} />Tâche détaillée</Btn>}>
-        <form onSubmit={addQuick} className="mb-3 flex gap-2"><Input aria-label="Ajout rapide pour aujourd'hui" value={quick} onChange={(e) => setQuick(e.target.value)} placeholder="Ajout rapide pour aujourd'hui… (Entrée)" />
-          <Btn type="submit" disabled={!quick.trim()} aria-label="Ajouter pour aujourd'hui"><Plus size={14} /></Btn></form>
+        <form onSubmit={addQuick} className="mb-3 flex flex-col gap-2"><div className="flex gap-2"><Input aria-label="Ajout rapide" value={quick} onChange={(e) => setQuick(e.target.value)} placeholder="Ajout rapide… (Entrée)" />
+          <Btn type="submit" disabled={!quick.trim()} aria-label="Ajouter"><Plus size={14} /></Btn></div>
+          <div className="flex flex-wrap items-center gap-1.5 text-[12px]">
+            {([["Aujourd'hui", today], ["Demain", tomorrow], ["Sans date", ""]] as [string, string][]).map(([l, v]) => <button key={l} type="button" aria-pressed={qDay === v} onClick={() => setQDay(v)}
+              className={cx("rounded-full border px-2.5 py-1 transition", qDay === v ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-line bg-sunken hover:border-fg/60")}>{l}</button>)}
+            <Input type="date" aria-label="Autre jour" value={qDay} onChange={(e) => setQDay(e.target.value)} className="h-8 w-auto py-0 text-[12px]" />
+            <span className="text-[11px] text-muted">Juste un jour, sans heure : la tâche reste dans votre liste ce jour-là.</span>
+          </div></form>
         <div className="mb-3 flex flex-wrap gap-1.5">
           <button onClick={() => setFilter("")} aria-pressed={!filter} className={cx("rounded-full border px-2.5 py-1 text-[12px]", !filter ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-line bg-sunken")}>Tout</button>
           {TODO_KINDS.filter((k) => todos.some((t) => !t.done && t.kind === k.k)).map((k) => <button key={k.k} onClick={() => setFilter(k.k)} aria-pressed={filter === k.k} className={cx("rounded-full border px-2.5 py-1 text-[12px]", filter === k.k ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-line bg-sunken")}>{k.emoji} {k.label}</button>)}
@@ -2498,16 +2504,24 @@ const Perso: React.FC = () => {
   );
 };
 
-/** Carte du tableau de bord (tout en haut) : tâches perso en retard + du jour. */
+/** Carte du tableau de bord (tout en haut) : tâches perso en retard, d'aujourd'hui et de demain (pas celles plus lointaines). */
 const TodoDashCard: React.FC<{ go: (v: ViewKey) => void }> = ({ go }) => {
   const { state } = useStore();
-  const today = todayISO();
-  const list = (state.todos ?? []).filter((t) => !t.done && t.due && t.due <= today).sort(todoSort);
-  const doneToday = (state.todos ?? []).filter((t) => t.done && t.doneAt === today && t.due === today).length;
+  const today = todayISO(), tomorrow = iso(addDays(parseISO(today), 1));
+  const todos = state.todos ?? [];
+  const open = todos.filter((t) => !t.done && t.due && t.due <= tomorrow).sort(todoSort);
+  const groups: [string, Todo[], boolean][] = [
+    ["En retard", open.filter((t) => t.due! < today), true],
+    ["Aujourd'hui", open.filter((t) => t.due === today), false],
+    ["Demain", open.filter((t) => t.due === tomorrow), false],
+  ];
+  const doneToday = todos.filter((t) => t.done && t.due === today).length, todayTotal = groups[1][1].length + doneToday;
   return (
-    <Card title={<span className="flex items-center gap-2"><ListChecks size={15} />Mes tâches perso · aujourd'hui{list.length + doneToday ? ` · ${doneToday}/${list.filter((t) => t.due === today).length + doneToday}` : ""}</span>} action={<Btn size="sm" variant="ghost" onClick={() => go("todos")}>Tout voir</Btn>}>
-      {list.length ? <ul className="flex flex-col divide-y divide-line" data-testid="dash-todos">{list.map((t) => <TodoRow key={t.id} t={t} />)}</ul>
-        : <p className="text-[13px] text-muted">{doneToday ? "Tout est fait pour aujourd'hui 🎉" : "Rien de prévu aujourd'hui."} <button className="text-accent hover:underline" onClick={() => go("todos")}>Ajouter une tâche perso</button></p>}
+    <Card title={<span className="flex items-center gap-2"><ListChecks size={15} />Mes tâches perso{todayTotal ? ` · ${doneToday}/${todayTotal} aujourd'hui` : ""}</span>} action={<Btn size="sm" variant="ghost" onClick={() => go("todos")}>Tout voir</Btn>}>
+      {open.length ? <div className="flex flex-col gap-2" data-testid="dash-todos">{groups.filter(([, l]) => l.length).map(([label, list, bad]) => (
+        <div key={label}><p className={cx("text-[11px] font-semibold uppercase tracking-wider", bad ? "text-bad" : "text-muted")}>{label} · {list.length}</p>
+          <ul className="flex flex-col divide-y divide-line">{list.map((t) => <TodoRow key={t.id} t={t} showDate={bad} />)}</ul></div>))}</div>
+        : <p className="text-[13px] text-muted">{doneToday ? "Tout est fait pour aujourd'hui 🎉" : "Rien de prévu aujourd'hui ni demain."} <button className="text-accent hover:underline" onClick={() => go("todos")}>Ajouter une tâche perso</button></p>}
     </Card>
   );
 };
