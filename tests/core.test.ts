@@ -432,3 +432,9 @@ test("jours de travail / révision : le travail n'est placé que ces jours-là",
   const v = C.validateState(JSON.parse(JSON.stringify({ ...base(), tasks: [{ ...t, doDates: ["2026-10-18", "x", "2026-10-16", "2026-10-16"] }] })));
   assert.ok(v.ok && JSON.stringify(v.state.tasks[0].doDates) === '["2026-10-16","2026-10-18"]');
 });
+
+test("tâche sans do date (noPlan) : jamais placée dans le planning", () => {
+  const t = task({ noPlan: true, deadline: "2026-10-20" });
+  assert.equal(C.dailyQuota(t, TODAY, 300, TODAY), 0);
+  assert.equal(C.planFor({ ...base(), tasks: [t] }, TODAY, TODAY).blocks.filter((b) => b.kind === "task").length, 0);
+});

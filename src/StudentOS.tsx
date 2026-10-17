@@ -451,7 +451,8 @@ const TaskForm: React.FC<{ onDone: () => void; task?: Task }> = ({ onDone, task 
   const [steps, setSteps] = useState<Step[]>(task?.steps ?? []);
   const [doDates, setDoDates] = useState<string[]>(task?.doDates ?? []);
   const [doPick, setDoPick] = useState(todayISO());
-  const [pickDays, setPickDays] = useState(!!task?.doDates?.length);
+  const [doMode, setDoMode] = useState<"auto" | "pick" | "none">(task?.noPlan ? "none" : task?.doDates?.length ? "pick" : "auto");
+  const pickDays = doMode === "pick";
   const isExam = f.kind === "examen";
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -465,7 +466,7 @@ const TaskForm: React.FC<{ onDone: () => void; task?: Task }> = ({ onDone, task 
     } else if (!(f.estimate >= 5)) { toast("L'estimation doit être d'au moins 5 minutes.", "bad"); return; }
     if (!(f.spent >= 0)) { toast("Le temps passé ne peut pas être négatif.", "bad"); return; }
     if (!task && f.deadline < todayISO()) toast("Échéance déjà passée : la tâche apparaîtra en retard.", "info");
-    const data = { ...f, estimate, title: f.title.trim(), courseId: f.courseId || null, slot: chosen, steps: steps.map((x) => ({ ...x, text: x.text.trim() })).filter((x) => x.text), doDates: mode === "duration" && pickDays && doDates.length ? [...doDates].sort() : undefined };
+    const data = { ...f, estimate, title: f.title.trim(), courseId: f.courseId || null, slot: chosen, steps: steps.map((x) => ({ ...x, text: x.text.trim() })).filter((x) => x.text), doDates: mode === "duration" && pickDays && doDates.length ? [...doDates].sort() : undefined, noPlan: mode === "duration" && doMode === "none" ? true : undefined };
     if (data.doDates?.some((d) => d > f.deadline)) { toast(isExam ? "Les jours de révision doivent être avant l'examen." : "Les jours de travail doivent être avant l'échéance.", "bad"); return; }
     if (task) { dispatch({ type: "task/update", id: task.id, patch: data }); toast("Tâche mise à jour"); }
     else { const { slot: sl, ...rest } = data; dispatch({ type: "task/add", task: { id: uid(), ...rest, ...(sl ? { slot: sl } : {}), status: "todo", createdAt: todayISO() } }); toast(sl ? `Tâche ajoutée : ${fmtDate(sl.date)}, ${sl.start}–${sl.end}` : "Tâche ajoutée et planifiée"); }
@@ -484,13 +485,13 @@ const TaskForm: React.FC<{ onDone: () => void; task?: Task }> = ({ onDone, task 
       <TimeMode id="tf-mode" value={mode} onChange={setMode} className="col-span-2" />
       {mode === "duration" ? <>
         <Field label="Durée estimée (min)" htmlFor="tf-est" className="col-span-2"><Input id="tf-est" type="number" min={15} step={15} value={f.estimate} onChange={(e) => setF({ ...f, estimate: Math.max(15, Number(e.target.value)) })} /></Field>
-        <p className="col-span-2 self-end pb-2 text-[11px] text-muted">{doDates.length ? `Répartie sur ${doDates.length} jour${doDates.length > 1 ? "s" : ""} choisi${doDates.length > 1 ? "s" : ""}.` : "Répartie automatiquement dans vos créneaux libres avant l'échéance."}</p>
+        <p className="col-span-2 self-end pb-2 text-[11px] text-muted">{doMode === "none" ? "Non placée dans le planning." : doDates.length ? `Répartie sur ${doDates.length} jour${doDates.length > 1 ? "s" : ""} choisi${doDates.length > 1 ? "s" : ""}.` : "Répartie automatiquement dans vos créneaux libres avant l'échéance."}</p>
         <div className="col-span-2 sm:col-span-4" data-testid="do-dates">
           <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">{isExam ? "Jours de révision" : "Jours de travail (do date)"}</p>
           <div className="mb-2 flex gap-1.5" role="group">
-            {([[false, "Pas de do date (automatique)"], [true, isExam ? "Choisir mes jours de révision" : "Choisir mes jours"]] as [boolean, string][]).map(([v, l]) => (
-              <button key={l} type="button" aria-pressed={pickDays === v} onClick={() => { setPickDays(v); if (!v) setDoDates([]); }}
-                className={cx("flex-1 rounded-lg border-2 px-2 py-1.5 text-[12px] font-semibold transition", pickDays === v ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-line bg-sunken text-muted")}>{l}</button>))}
+            {([["auto", "⚡ Automatique"], ["pick", isExam ? "📅 Choisir mes jours de révision" : "📅 Choisir mes jours"], ["none", "🚫 Pas de do date"]] as ["auto" | "pick" | "none", string][]).map(([v, l]) => (
+              <button key={v} type="button" aria-pressed={doMode === v} onClick={() => { setDoMode(v); if (v !== "pick") setDoDates([]); }}
+                className={cx("flex-1 rounded-lg border-2 px-2 py-1.5 text-[12px] font-semibold transition", doMode === v ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-line bg-sunken text-muted")}>{l}</button>))}
           </div>
           {pickDays && <div className="flex flex-wrap items-center gap-1.5">
             {[...doDates].sort().map((d) => <span key={d} className="inline-flex items-center gap-1 rounded-full border-2 border-fg bg-hi px-2.5 py-0.5 text-[12px] font-medium text-[rgb(24_22_46)]">{fmtDate(d)}
@@ -498,7 +499,7 @@ const TaskForm: React.FC<{ onDone: () => void; task?: Task }> = ({ onDone, task 
             <Input type="date" aria-label={isExam ? "Jour de révision" : "Jour de travail"} value={doPick} min={todayISO()} max={f.deadline} onChange={(e) => setDoPick(e.target.value)} className="h-8 w-auto py-0 text-[12px]" />
             <Btn type="button" size="sm" onClick={() => { if (doPick && !doDates.includes(doPick)) setDoDates([...doDates, doPick]); }}><Plus size={12} />Ajouter</Btn>
           </div>}
-          <p className="mt-1 text-[11px] text-muted">{!pickDays ? "Le travail est réparti automatiquement dans vos créneaux libres jusqu'à l'échéance." : isExam ? "Le temps de révision est réparti uniquement sur ces jours, avant l'examen." : "Le travail est placé uniquement ces jours-là, avant l'échéance."}</p>
+          <p className="mt-1 text-[11px] text-muted">{doMode === "none" ? "Aucun temps de travail n'est placé dans le planning : la tâche reste juste dans votre liste jusqu'à l'échéance." : doMode === "auto" ? "Le travail est réparti automatiquement dans vos créneaux libres jusqu'à l'échéance." : isExam ? "Le temps de révision est réparti uniquement sur ces jours, avant l'examen." : "Le travail est placé uniquement ces jours-là, avant l'échéance."}</p>
         </div>
       </> : <>
         <Field label="Jour" htmlFor="tf-sday" className="col-span-2"><Input id="tf-sday" type="date" value={slot.date} onChange={(e) => setSlot({ ...slot, date: e.target.value })} /></Field>
@@ -1620,6 +1621,7 @@ const Academic: React.FC<{ openNewTask: () => void }> = ({ openNewTask }) => {
                     <button className="text-muted opacity-60 transition hover:text-bad group-hover:opacity-100" aria-label="Supprimer la tâche" onClick={() => undoable({ type: "task/remove", id: t.id }, `Tâche « ${t.title} » supprimée`)}><Trash2 size={12} /></button></span>
                   </div>
                   <p className={cx("text-[13px] font-medium leading-snug", s === "done" && "text-muted line-through")}>{t.title}</p>
+                  {t.noPlan && s !== "done" && <p className="mt-1 text-[11px] text-muted">🚫 Pas de do date · hors planning</p>}
                   {!!t.doDates?.length && s !== "done" && <p className="mt-1 text-[11px] text-muted">{t.kind === "examen" ? "📖 Révision" : "🛠 Travail"} : {t.doDates.map((d) => fmtDate(d)).join(" · ")}</p>}
                   {!!t.steps?.length && <div className="mt-1.5" onPointerDown={(e) => e.stopPropagation()}><p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted">Checklist · {t.steps.filter((x) => x.done).length}/{t.steps.length}</p>
                     <StepsCheck small steps={t.steps} done={(id) => !!t.steps?.find((x) => x.id === id)?.done} onToggle={(stepId) => dispatch({ type: "task/step", id: t.id, stepId })} label={`Checklist de ${t.title}`} /></div>}
