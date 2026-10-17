@@ -2386,7 +2386,7 @@ const Personalize: React.FC = () => {
   const set = (patch: Partial<SettingsState>) => dispatch({ type: "settings", patch });
   const [q, setQ] = useState({ label: "", amount: "", category: "Restauration" as ExpenseCat });
   return (
-    <Card title={<span className="flex items-center gap-2"><Palette size={15} />Personnalisation</span>} className="md:col-span-2 lg:col-span-2">
+    <Card title={<span className="flex items-center gap-2"><Palette size={15} />Personnalisation</span>} className="lg:col-span-2">
       <div className="grid gap-6 lg:grid-cols-3">
         <div>
           <p className="mb-2 text-[11px] font-semibold uppercase tracking-[.12em] text-muted">Couleur d'accent</p>
