@@ -4,7 +4,7 @@ import { MiniPdf } from "./pdf.ts";
 import { layoutLanes } from "./core.ts";
 import { DAY_WORDS, dayOf, pageGeometry, parseGrid } from "./timetable.ts";
 import { parseIcs, normalizeFeedUrl, isFeedUrl } from "./ical.ts";
-import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, choreStepsDone, choreDoneLate, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, onTimeGuess, onTimeStats, taskOnTimeStats, choreOnTimeStats, HABIT_CATS, habitOn, habitStats, habitStepsDone, habitStreak, todoOnTimeStats, TODO_KINDS, pad, parseAmount, parseISO, parseReceipt, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
+import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, choreStepsDone, choreDoneLate, NO_DEADLINE, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, onTimeGuess, onTimeStats, taskOnTimeStats, choreOnTimeStats, HABIT_CATS, habitOn, habitStats, habitStepsDone, habitStreak, todoOnTimeStats, TODO_KINDS, pad, parseAmount, parseISO, parseReceipt, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
 import type { Action, Aisle, PlanEvent, Chore, Habit, HabitCat, Todo, TodoKind, AppState, Block, Budget, Course, DayPlan, Expense, ExpenseCat, GroceryTemplate, ID, Phase, PomodoroCfg, Priority, ReceiptResult, Recurrence, EventRecurrence, CalFeed, FeedEvent, SettingsState, SleepLog, Step, Task, TaskKind, TaskStatus, TemplateItem, ViewKey } from "./core.ts";
 import type { AppEnv } from "./env.ts";
 import { LangSwitch } from "./i18n.tsx";
@@ -453,10 +453,16 @@ const TaskForm: React.FC<{ onDone: () => void; task?: Task }> = ({ onDone, task 
   const [doPick, setDoPick] = useState(todayISO());
   const [doMode, setDoMode] = useState<"auto" | "pick" | "none">(task?.noPlan ? "none" : task?.doDates?.length ? "pick" : "auto");
   const pickDays = doMode === "pick";
-  const isExam = f.kind === "examen";
+  const isExam = f.kind === "examen", isPerso = f.kind === "perso";
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!f.title.trim()) { toast("Donnez un titre à la tâche.", "bad"); return; }
+    if (isPerso) {
+      const data = { ...f, title: f.title.trim(), courseId: f.courseId || null, deadline: NO_DEADLINE, noPlan: true, slot: undefined, doDates: undefined, steps: steps.map((x) => ({ ...x, text: x.text.trim() })).filter((x) => x.text) };
+      if (task) { dispatch({ type: "task/update", id: task.id, patch: data }); toast("Tâche mise à jour"); }
+      else { dispatch({ type: "task/add", task: { id: uid(), status: "todo", createdAt: todayISO(), ...data } }); toast("Devoir perso ajouté (sans échéance)"); }
+      onDone(); return;
+    }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(f.deadline) || isNaN(parseISO(f.deadline).getTime())) { toast("Choisissez une date d'échéance valide.", "bad"); return; }
     let estimate = f.estimate, chosen: Task["slot"] | undefined;
     if (mode === "slot") {
@@ -478,9 +484,10 @@ const TaskForm: React.FC<{ onDone: () => void; task?: Task }> = ({ onDone, task 
       <Field label="Module" htmlFor="tf-course" className="col-span-2"><Select id="tf-course" value={f.courseId} onChange={(e) => setF({ ...f, courseId: e.target.value })}>
         <option value="">Sans module</option>{state.courses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select></Field>
       <Field label="Type" htmlFor="tf-kind"><Select id="tf-kind" value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value as TaskKind })}>
-        <option value="devoir">Devoir</option><option value="examen">Examen</option><option value="projet">Projet</option></Select></Field>
+        <option value="devoir">Devoir</option><option value="examen">Examen</option><option value="projet">Projet</option><option value="perso">Devoir perso (sans échéance)</option></Select></Field>
       <Field label="Priorité" htmlFor="tf-prio"><Select id="tf-prio" value={f.priority} onChange={(e) => setF({ ...f, priority: Number(e.target.value) as Priority })}>
         <option value={1}>Basse</option><option value={2}>Normale</option><option value={3}>Haute</option></Select></Field>
+      {isPerso ? <p className="col-span-2 rounded-lg bg-sunken p-2.5 text-[12px] text-muted sm:col-span-4">Devoir perso : pas d'échéance ni de do date. Il reste juste dans votre liste, sans être placé dans le planning.</p> : <>
       <Field label={isExam ? "Date de l'examen" : "Échéance (à rendre)"} htmlFor="tf-dl" className="col-span-2"><Input id="tf-dl" type="date" value={f.deadline} onChange={(e) => setF({ ...f, deadline: e.target.value })} /></Field>
       <TimeMode id="tf-mode" value={mode} onChange={setMode} className="col-span-2" />
       {mode === "duration" ? <>
@@ -505,6 +512,7 @@ const TaskForm: React.FC<{ onDone: () => void; task?: Task }> = ({ onDone, task 
         <Field label="Jour" htmlFor="tf-sday" className="col-span-2"><Input id="tf-sday" type="date" value={slot.date} onChange={(e) => setSlot({ ...slot, date: e.target.value })} /></Field>
         <Field label="Début" htmlFor="tf-sstart"><Input id="tf-sstart" type="time" value={slot.start} onChange={(e) => setSlot({ ...slot, start: e.target.value })} /></Field>
         <Field label="Fin" htmlFor="tf-send"><Input id="tf-send" type="time" value={slot.end} onChange={(e) => setSlot({ ...slot, end: e.target.value })} /></Field>
+      </>}
       </>}
       <StepsEditor id="tf-steps" steps={steps} onChange={setSteps} checkable className="col-span-2 sm:col-span-4" placeholder="Ex. Lire le chapitre, faire les exercices…" />
       {task && <Field label="Temps déjà passé (min)" htmlFor="tf-spent" className="col-span-2"><Input id="tf-spent" type="number" min={0} step={5} value={f.spent} onChange={(e) => setF({ ...f, spent: Math.max(0, Number(e.target.value)) })} /></Field>}
@@ -666,7 +674,7 @@ export const OnTimeCounter: React.FC<{ all: OnTime; d30: OnTime; bedTarget: stri
     <div className="flex flex-col gap-3" data-testid="ontime">
       <CounterRow label="Coucher" target={bedTarget} a={all.bed} m={d30.bed} />
       <CounterRow label="Réveil" target={wakeTarget} a={all.wake} m={d30.wake} />
-      <p className="text-[11px] text-muted">{all.streak > 0 ? <>🔥 Série : <b className="text-fg">{all.streak} nuit{all.streak > 1 ? "s" : ""}</b> d'affilée à l'heure (coucher et réveil).</> : "Cochez chaque nuit si vous vous êtes couché·e et levé·e à l'heure."}</p>
+      <p className="text-[11px] text-muted">{all.streak > 0 ? <><span key={all.streak} className="streak"><span className="flame">🔥</span></span> Série : <b className="text-fg">{all.streak} nuit{all.streak > 1 ? "s" : ""}</b> d'affilée à l'heure (coucher et réveil).</> : "Cochez chaque nuit si vous vous êtes couché·e et levé·e à l'heure."}</p>
     </div>
   );
 };
@@ -762,7 +770,7 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
   const open = state.tasks.filter((t) => t.status !== "done");
   const late = open.filter((t) => t.deadline < today).sort((a, b) => a.deadline.localeCompare(b.deadline));
   const doneWeek = state.tasks.filter((t) => t.doneAt && daysBetween(t.doneAt, today) < 7).length;
-  const upcoming = open.filter((t) => t.deadline >= today).sort((a, b) => a.deadline.localeCompare(b.deadline) || b.priority - a.priority).slice(0, 5);
+  const upcoming = open.filter((t) => t.deadline >= today && t.deadline !== NO_DEADLINE).sort((a, b) => a.deadline.localeCompare(b.deadline) || b.priority - a.priority).slice(0, 5);
   // Tâches prioritaires du jour = blocs proposés par le planning aujourd'hui, regroupés par tâche.
   const todayTasks = useMemo(() => {
     const m = new Map<ID, number>();
@@ -1322,15 +1330,36 @@ const TaskMove: React.FC<{ task: Task; date: string; b: Block; onDone: () => voi
 
 const EventMove: React.FC<{ ev: PlanEvent; date: string; onDone: () => void }> = ({ ev, date, onDone }) => {
   const { dispatch, toast } = useStore();
-  const len = toMin(ev.end) - toMin(ev.start);
-  return <MoveBox testId="event-move" title="Déplacer cet événement" date={date} start={toMin(ev.start)} allowAuto={false}
-    note={ev.recurrence !== "none" ? "Seulement cette fois : les autres occurrences ne changent pas." : undefined}
-    onApply={(d, t) => {
-      const start = t!, end = toHHMM(Math.min(23 * 60 + 59, toMin(start) + len));
-      if (ev.recurrence === "none") dispatch({ type: "event/update", id: ev.id, patch: { date: d, start, end } });
-      else { dispatch({ type: "event/skip", id: ev.id, date }); dispatch({ type: "event/add", event: { id: uid(), title: ev.title, date: d, start, end, recurrence: "none", until: null, ...(ev.color ? { color: ev.color } : {}) } }); }
-      toast(`« ${ev.title} » : ${fmtDate(d)} à ${start}`); onDone();
-    }} />;
+  const [d, setD] = useState(date), [start, setStart] = useState(ev.start), [end, setEnd] = useState(ev.end);
+  const [byDur, setByDur] = useState(false), [dur, setDur] = useState(toMin(ev.end) - toMin(ev.start));
+  const apply = () => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !/^\d{2}:\d{2}$/.test(start)) { toast("Choisissez un jour et une heure.", "bad"); return; }
+    if (d < todayISO()) { toast("Choisissez aujourd'hui ou un jour à venir.", "bad"); return; }
+    const e = byDur ? toHHMM(Math.min(23 * 60 + 59, toMin(start) + Math.max(5, dur || 0))) : end;
+    if (toMin(e) <= toMin(start)) { toast("L'heure de fin doit suivre l'heure de début.", "bad"); return; }
+    if (ev.recurrence === "none") dispatch({ type: "event/update", id: ev.id, patch: { date: d, start, end: e } });
+    else { dispatch({ type: "event/skip", id: ev.id, date }); dispatch({ type: "event/add", event: { id: uid(), title: ev.title, date: d, start, end: e, recurrence: "none", until: null, ...(ev.color ? { color: ev.color } : {}) } }); }
+    toast(`« ${ev.title} » : ${fmtDate(d)} · ${start}–${e}`); onDone();
+  };
+  return (
+    <div className="rounded-xl border-2 border-line p-3" data-testid="event-move">
+      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">Modifier le jour et l'horaire</p>
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Jour" htmlFor="event-move-d"><Input id="event-move-d" type="date" min={todayISO()} value={d} onChange={(e) => setD(e.target.value)} /></Field>
+        <Field label="Début" htmlFor="event-move-t"><Input id="event-move-t" type="time" value={start} onChange={(e) => setStart(e.target.value)} /></Field>
+        <div className="col-span-2 flex gap-1.5" role="group">
+          {([[false, "Heure de fin"], [true, "Durée"]] as [boolean, string][]).map(([v, l]) => <button key={l} type="button" aria-pressed={byDur === v} onClick={() => setByDur(v)}
+            className={cx("flex-1 rounded-lg border-2 px-2 py-1.5 text-[12px] font-semibold", byDur === v ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-line bg-sunken text-muted")}>{l}</button>)}
+        </div>
+        {byDur ? <Field label="Durée (min)" htmlFor="event-move-dur" className="col-span-2"><Input id="event-move-dur" type="number" min={5} step={5} value={dur} onChange={(e) => setDur(Number(e.target.value))} /></Field>
+          : <Field label="Fin" htmlFor="event-move-end" className="col-span-2"><Input id="event-move-end" type="time" value={end} onChange={(e) => setEnd(e.target.value)} /></Field>}
+      </div>
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <p className="text-[11px] text-muted">{ev.recurrence !== "none" ? "Seulement cette fois : les autres occurrences ne changent pas." : ""}</p>
+        <Btn variant="primary" onClick={apply}><Check size={14} />Enregistrer</Btn>
+      </div>
+    </div>
+  );
 };
 
 const BlockDetail: React.FC<{ b: Block; date: string; onClose: () => void }> = ({ b, date, onClose }) => {
@@ -1361,7 +1390,7 @@ const BlockDetail: React.FC<{ b: Block; date: string; onClose: () => void }> = (
   if (cls?.dates?.length) rows.push(["Semaines", periodsText(cls.dates)]);
   if (feed) rows.push(["Source", `Calendrier « ${feed.name} » · actualisé ${sinceText(feed.lastSync)}`]);
   if (ev) rows.push(["Répétition", EVENT_REC_LABEL[ev.recurrence] + (ev.until ? ` jusqu'au ${fmtDate(ev.until)}` : "")]);
-  if (task) rows.push(["Échéance", `${fmtDate(task.deadline)} · reste ${durText(Math.max(0, task.estimate - task.spent))}`]);
+  if (task) rows.push(["Échéance", `${task.deadline === NO_DEADLINE ? "Sans échéance" : fmtDate(task.deadline)} · reste ${durText(Math.max(0, task.estimate - task.spent))}`]);
   if (chore) rows.push(["Récurrence", REC_LABEL[chore.recurrence]]);
   return (
     <Modal title={KIND_NAME[b.kind]} onClose={onClose}>
@@ -1412,6 +1441,24 @@ const DueBadges: React.FC<{ date: string; compact?: boolean }> = ({ date, compac
           {!compact && <span className="shrink-0 rounded px-1 text-[10px] font-bold uppercase tracking-wider text-white" style={{ background: col }}>{exam ? "Examen" : "À rendre"}</span>}
           <span className="min-w-0 flex-1 truncate">{t.title}</span>
           {!compact && c && <span className="shrink-0 text-[11px] font-medium text-muted">{c.code || c.name}</span>}
+        </button>); })}
+    </div>
+  );
+};
+
+/** Routines du jour, en bandeau au-dessus de la journée (pas placées dans les créneaux). */
+const RoutineStrip: React.FC<{ date: string }> = ({ date }) => {
+  const { state, dispatch, toast } = useStore();
+  const list = (state.habits ?? []).filter((h) => habitOn(h, date)).sort((a, b) => (a.time ?? "99").localeCompare(b.time ?? "99"));
+  if (!list.length) return null;
+  const canTick = date <= todayISO();
+  return (
+    <div className="flex flex-wrap gap-1.5" data-testid="routine-strip">
+      <span className="self-center text-[11px] font-semibold uppercase tracking-wider text-muted">Routines</span>
+      {list.map((h) => { const done = h.done.includes(date); return (
+        <button key={h.id} disabled={!canTick} onClick={() => { dispatch({ type: "habit/toggle", id: h.id, date }); if (!done) toast(`${h.emoji} ${h.name} : fait ✓`); }}
+          className={cx("inline-flex items-center gap-1.5 rounded-full border-2 px-2.5 py-1 text-[12px] font-medium transition", done ? "border-ok/60 bg-ok/12 text-ok line-through" : "border-line bg-sunken hover:border-fg/60", !canTick && "opacity-70")}>
+          <span aria-hidden>{done ? "✓" : h.emoji}</span>{h.name}{h.time && <span className="font-mono text-[10px] text-muted">{h.time}</span>}
         </button>); })}
     </div>
   );
@@ -1503,7 +1550,7 @@ const Planning: React.FC = () => {
         </>}
         {plan.past && <p className="mt-3 text-xs text-muted">Journée passée : seuls les cours et indisponibilités sont affichés.</p>}
         {mode === "week" ? <div><p className="mb-2 text-[11px] text-muted md:hidden">Glissez horizontalement pour voir toute la semaine · touchez un créneau pour le détail.</p><WeekGrid week={week} today={today} onPick={(bb, d) => setSel({ b: bb, date: d })} onDay={(d) => { setOffset(daysBetween(today, d)); setMode("day"); }} /></div> : <>
-        <div className="mt-4"><DueBadges date={date} /></div>
+        <div className="mt-4 flex flex-col gap-2"><DueBadges date={date} /><RoutineStrip date={date} /></div>
         <div className="relative mt-4 overflow-hidden rounded-lg border border-line" style={{ height: (endH - startH) * PX }}>
           {Array.from({ length: endH - startH }, (_, i) => (
             <div key={i} className="absolute inset-x-0 border-t border-line/70" style={{ top: i * PX }}><span className="absolute left-2 top-0.5 font-mono text-[10px] text-muted">{pad((startH + i) % 24)}:00</span></div>
@@ -1618,7 +1665,7 @@ export const STATUS: Record<TaskStatus, { label: string; color: string }> = {
   review: { label: "En révision", color: "rgb(var(--warn))" }, done: { label: "Terminé", color: "rgb(var(--ok))" },
 };
 const ORDER: TaskStatus[] = ["todo", "doing", "review", "done"];
-const KIND_LABEL: Record<TaskKind, string> = { devoir: "Devoir", examen: "Examen", projet: "Projet" };
+const KIND_LABEL: Record<TaskKind, string> = { devoir: "Devoir", examen: "Examen", projet: "Projet", perso: "Devoir perso" };
 
 // ---------------------------------------------------------------- Bloc-notes (clavier ou Apple Pencil)
 const INK_W = 1200, INK_H = 900;
@@ -1739,7 +1786,7 @@ const Academic: React.FC<{ openNewTask: () => void }> = ({ openNewTask }) => {
                   <div className="mt-2 h-1 rounded-full bg-sunken"><div className="h-full rounded-full bg-accent" style={{ width: `${pct}%` }} /></div>
                   <div className="mt-2 flex items-center gap-2 text-[11px] text-muted">
                     <span className="font-mono tabular-nums">{fmtDur(t.spent)} / {fmtDur(t.estimate)}</span>
-                    <span className={cx("ml-auto", s !== "done" && left < 0 && "font-semibold text-bad", s !== "done" && left >= 0 && left <= 2 && "text-warn")}>{fmtDate(t.deadline)}</span>
+                    <span className={cx("ml-auto", s !== "done" && left < 0 && "font-semibold text-bad", s !== "done" && left >= 0 && left <= 2 && "text-warn")}>{t.deadline === NO_DEADLINE ? "Sans échéance" : fmtDate(t.deadline)}</span>
                   </div>
                   <div className="mt-2 flex justify-between">
                     <Btn size="sm" variant="ghost" disabled={s === "todo"} onClick={() => move(t, -1)} aria-label="Statut précédent"><ChevronLeft size={13} /></Btn>
@@ -2641,12 +2688,12 @@ const HabitToday: React.FC<{ date: string; compact?: boolean }> = ({ date, compa
     <ul className="flex flex-col divide-y divide-line" data-testid="habits-today">
       {list.map((h) => { const done = h.done.includes(date), streak = habitStreak(h, date); return (
         <li key={h.id} className="flex flex-wrap items-center gap-2 py-2 first:pt-0 last:pb-0 text-[13px]">
-          <button onClick={() => { dispatch({ type: "habit/toggle", id: h.id, date }); if (!done) toast(`${h.emoji} ${h.name} : fait ✓`); }} aria-label={done ? `Annuler ${h.name}` : `Marquer ${h.name} comme fait`}
+          <button onClick={() => { dispatch({ type: "habit/toggle", id: h.id, date }); if (!done) toast(streak >= 1 ? `🔥 ${h.name} : série de ${streak + 1} jours !` : `${h.emoji} ${h.name} : fait ✓`); }} aria-label={done ? `Annuler ${h.name}` : `Marquer ${h.name} comme fait`}
             className={cx("grid h-6 w-6 shrink-0 place-items-center rounded-md border-2 transition", done ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-fg/40 hover:border-accent")}>{done && <Check size={13} strokeWidth={3} />}</button>
           <span className="text-base leading-none" aria-hidden>{h.emoji}</span>
           <span className={cx("min-w-0 flex-1 truncate font-medium", done && "text-muted line-through")}>{h.name}</span>
           {h.time && <span className="font-mono text-[11px] text-muted">{h.time}</span>}
-          {streak > 1 && <span className="text-[11px] font-semibold text-warn" title="Série en cours">🔥 {streak}</span>}
+          {streak > 1 && <span key={streak} className="streak text-[11px] font-semibold text-warn" title="Série en cours"><span className="flame">🔥</span>{streak}</span>}
           {!compact && <span className="hidden h-2 w-2 rounded-full sm:inline-block" style={{ background: catOf(h.cat).color }} title={catOf(h.cat).label} />}
           {h.note && !compact && <p className="basis-full pl-8 text-[11px] text-muted">{h.note}</p>}
           {!!h.steps?.length && <div className="basis-full pl-8"><StepsCheck small steps={h.steps} done={(id) => habitStepsDone(h, date).includes(id)} onToggle={(id) => step(h, date, id)} label={`Étapes de ${h.name}`} /></div>}
@@ -2856,7 +2903,7 @@ const Routines: React.FC = () => {
         <div className="flex flex-col gap-3" data-testid="habit-stats">
           <CounterRow label="Routines" target="faites le jour prévu" a={all} m={d30} lateWord="oubliées" />
           {habits.length > 0 && <ul className="flex flex-col gap-1.5 text-[13px]">{[...habits].sort((a, b) => habitStreak(b, today) - habitStreak(a, today)).slice(0, 5).map((h) => (
-            <li key={h.id} className="flex items-center gap-2"><span aria-hidden>{h.emoji}</span><span className="min-w-0 flex-1 truncate">{h.name}</span><span className="font-mono text-[12px] tabular-nums text-muted">🔥 {habitStreak(h, today)} j</span></li>))}</ul>}
+            <li key={h.id} className="flex items-center gap-2"><span aria-hidden>{h.emoji}</span><span className="min-w-0 flex-1 truncate">{h.name}</span><span key={habitStreak(h, today)} className="streak font-mono text-[12px] tabular-nums text-muted"><span className="flame">🔥</span>{habitStreak(h, today)} j</span></li>))}</ul>}
           <p className="text-[11px] text-muted">Une routine non cochée un jour prévu compte comme oubliée (à partir du jour de sa création). Aujourd'hui ne compte qu'une fois coché.</p>
         </div>
       </Card>
@@ -3460,7 +3507,7 @@ export default function StudentOS({ state, dispatch, env, view, onView, notice, 
     { id: "help", group: "Actions", label: "Raccourcis clavier", hint: "?", icon: <Keyboard size={14} />, run: () => setHelp(true) },
     ...NAV.map((n) => ({ id: `page-${n.key}`, group: "Pages", label: n.label, keywords: "aller page", hint: n.short, icon: <n.icon size={14} />, run: () => setView(n.key) })),
     ...state.tasks.map((t) => ({ id: `task-${t.id}`, group: "Tâches", label: t.title, keywords: `${state.courses.find((c) => c.id === t.courseId)?.name ?? ""} ${t.kind} ${t.status === "done" ? "terminé" : ""}`,
-      icon: t.status === "done" ? <Check size={14} /> : <ListChecks size={14} />, hint: t.status === "done" ? undefined : fmtDate(t.deadline), run: () => setEditTask(t.id) })),
+      icon: t.status === "done" ? <Check size={14} /> : <ListChecks size={14} />, hint: t.status === "done" || t.deadline === NO_DEADLINE ? undefined : fmtDate(t.deadline), run: () => setEditTask(t.id) })),
   ];
   const hour = new Date().getHours();
   const greet = hour < 6 ? "Bonne nuit" : hour < 18 ? "Bonjour" : "Bonsoir";
@@ -3505,8 +3552,7 @@ export default function StudentOS({ state, dispatch, env, view, onView, notice, 
           </div>
         </aside>
         <div className="flex min-w-0 flex-1 flex-col">
-          <div aria-hidden className="md:hidden" style={{ height: headerH }} />
-          <header ref={headerRef} className={cx("fixed inset-x-0 top-0 z-30 border-b-2 border-dashed border-line bg-bg transition-transform duration-300 [transition-timing-function:var(--ease)] md:sticky md:inset-x-auto md:z-20 md:!translate-y-0", headerHidden && "-translate-y-full")} style={{ paddingTop: "var(--safe-top)", backgroundColor: "rgb(var(--bg))" }}>
+          <header ref={headerRef} className={cx("relative z-30 border-b-2 border-dashed border-line bg-bg md:sticky md:top-0 md:z-20", headerHidden && "-translate-y-full")} style={{ paddingTop: "var(--safe-top)", backgroundColor: "rgb(var(--bg))" }}>
             <div className="mx-auto flex max-w-6xl 2xl:max-w-[1560px] min-[2200px]:max-w-[1880px] items-center gap-1.5 py-3 px-4 sm:gap-3 sm:px-6">
               <div className="min-w-0 flex-1 basis-0"><p className="truncate text-xs text-muted">{greet} {state.settings.name}<span className="hidden min-[400px]:inline"> · {new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}</span></p>
                 <h1 className="truncate pb-0.5 font-display text-[18px] min-[400px]:text-[20px] sm:text-[26px] font-extrabold leading-tight tracking-tight"><span key={override?.key ?? view} className="marker">{override?.title ?? current.label}<svg viewBox="0 0 200 20" preserveAspectRatio="none" aria-hidden><path d="M2 12 C 40 6, 80 16, 120 9 S 180 6, 198 11" /></svg></span></h1></div>

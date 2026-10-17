@@ -5,7 +5,9 @@
 // ---------------------------------------------------------------- Types
 export type ID = string;
 export type TaskStatus = "todo" | "doing" | "review" | "done";
-export type TaskKind = "devoir" | "examen" | "projet";
+export type TaskKind = "devoir" | "examen" | "projet" | "perso";
+/** Échéance « sans date » (devoir perso) : très loin dans le futur, jamais en retard. */
+export const NO_DEADLINE = "9999-12-31";
 export type Priority = 1 | 2 | 3;
 export type Recurrence = "daily" | "weekly" | "biweekly" | "once";
 export type Aisle = "Frais" | "Fruits & légumes" | "Épicerie" | "Boissons" | "Surgelés" | "Hygiène" | "Entretien";
@@ -973,6 +975,7 @@ export function taskOnTimeStats(tasks: Task[], today: string, days?: number): On
   const inWin = (d: string) => days === undefined || daysBetween(d, today) < days;
   let ok = 0, late = 0;
   for (const t of tasks) {
+    if (t.deadline === NO_DEADLINE) continue;
     if (t.status === "done" && t.doneAt) { if (!inWin(t.doneAt)) continue; if (t.doneAt <= t.deadline) ok++; else late++; }
     else if (t.status !== "done" && t.deadline < today && inWin(t.deadline)) late++;
   }

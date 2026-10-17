@@ -168,3 +168,10 @@ button:hover > .sketch-icon, button:hover .sketch-icon { transform: rotate(-6deg
     content: ""; position: fixed; right: 26px; bottom: 22px; width: 54px; height: 54px; pointer-events: none; opacity: .35; z-index: 0;
     background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 60' fill='none' stroke='%23f3ecdc' stroke-width='2' stroke-linecap='round'><path d='M38 9c-11 2-18 12-16 23s13 18 24 15c-4 6-12 9-20 7C13 51 6 38 10 26 14 14 26 7 38 9Z'/><path d='M48 13l1.5 3.5L53 18l-3.5 1.5L48 23l-1.5-3.5L43 18l3.5-1.5Z'/><path d='M52 33h.1M44 40h.1'/></svg>") no-repeat center / contain; }
 }
+
+/* Série (🔥) : petite explosion quand la série augmente, puis flamme qui vacille. */
+@keyframes streak-pop { 0% { transform: scale(.6); } 35% { transform: scale(1.45) rotate(-10deg); } 60% { transform: scale(.92) rotate(4deg); } 100% { transform: scale(1); } }
+@keyframes streak-flicker { 0%, 100% { transform: scale(1) rotate(0); } 50% { transform: scale(1.12) rotate(-6deg); } }
+.streak { display: inline-flex; align-items: center; gap: .15em; animation: streak-pop .6s var(--spring, cubic-bezier(.34,1.56,.64,1)) both; }
+.streak .flame { display: inline-block; transform-origin: 50% 90%; animation: streak-flicker 1.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .streak, .streak .flame { animation: none; } }
