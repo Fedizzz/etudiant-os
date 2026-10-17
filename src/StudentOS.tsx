@@ -673,6 +673,25 @@ export function dashOrder(ids: string[], saved: string[] = []): string[] {
   return out;
 }
 /** Grille du tableau de bord, réorganisable (bouton Personnaliser). */
+/** Prochains cours ou événements (7 jours), à partir de l'heure actuelle. */
+const UpcomingCard: React.FC<{ days: DayPlan[]; kind: "class" | "event"; go: (v: ViewKey) => void }> = ({ days, kind, go }) => {
+  const now = new Date(), today = todayISO(), nowMin = now.getHours() * 60 + now.getMinutes();
+  const items = days.flatMap((d) => d.blocks.filter((b) => b.kind === kind && (d.date > today || b.end > nowMin)).map((b) => ({ b, date: d.date })))
+    .sort((x, y) => x.date.localeCompare(y.date) || x.b.start - y.b.start).slice(0, 6);
+  const isClass = kind === "class";
+  const when = (date: string) => { const n = daysBetween(today, date); return n === 0 ? "Aujourd'hui" : n === 1 ? "Demain" : fmtDate(date); };
+  return (
+    <Card title={<span className="flex items-center gap-2">{isClass ? <GraduationCap size={15} /> : <CalendarClock size={15} />}{isClass ? "Prochains cours" : "Prochains événements"}</span>} action={<Btn size="sm" variant="ghost" onClick={() => go("planning")}>Planning</Btn>}>
+      {items.length ? <ul className="flex flex-col divide-y divide-line" data-testid={`upcoming-${kind}`}>{items.map(({ b, date }, i) => { const live = date === today && b.start <= nowMin && b.end > nowMin; return (
+        <li key={i} className="flex items-center gap-2.5 py-2 first:pt-0 last:pb-0 text-[13px]">
+          <span className="h-8 w-1 shrink-0 rounded-full" style={{ background: b.color ?? (isClass ? "rgb(var(--accent))" : "#d6457a") }} />
+          <div className="min-w-0 flex-1"><p className="truncate font-medium">{b.label}</p><p className="text-[11px] text-muted">{when(date)} · <span className="font-mono tabular-nums">{toHHMM(b.start)}–{toHHMM(b.end)}</span></p></div>
+          {live && <Pill tone="ok">En cours</Pill>}
+        </li>); })}</ul>
+        : <p className="text-[13px] text-muted">{isClass ? "Aucun cours dans les 7 prochains jours." : "Aucun événement dans les 7 prochains jours."}</p>}
+    </Card>
+  );
+};
 const DashGrid: React.FC<{ blocks: DashBlock[] }> = ({ blocks }) => {
   const { state, dispatch, toast } = useStore();
   const [edit, setEdit] = useState(false);
@@ -858,6 +877,8 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
           </div>
         </Card>
     </>) },
+    { id: "classes", label: "Prochains cours", span: "", show: true, el: <UpcomingCard days={days7} kind="class" go={go} /> },
+    { id: "events", label: "Prochains événements", span: "", show: true, el: <UpcomingCard days={days7} kind="event" go={go} /> },
     { id: "load", label: "Charge des 7 prochains jours", span: "", show: true, el: (<>
         <Card title="Charge des 7 prochains jours" action={<Btn size="sm" variant="ghost" onClick={() => go("planning")}>Planning</Btn>}>
           <div className="flex flex-col gap-2.5">
