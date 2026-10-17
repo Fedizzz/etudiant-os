@@ -9,7 +9,7 @@ export type TaskKind = "devoir" | "examen" | "projet";
 export type Priority = 1 | 2 | 3;
 export type Recurrence = "daily" | "weekly" | "biweekly" | "once";
 export type Aisle = "Frais" | "Fruits & légumes" | "Épicerie" | "Boissons" | "Surgelés" | "Hygiène" | "Entretien";
-export type ViewKey = "dashboard" | "planning" | "academic" | "focus" | "groceries" | "budget" | "chores" | "routines" | "sleep" | "settings";
+export type ViewKey = "dashboard" | "planning" | "academic" | "focus" | "groceries" | "budget" | "chores" | "todos" | "routines" | "sleep" | "settings";
 /** Catégories intégrées ; l'utilisateur peut en ajouter (settings.customCats). */
 export type ExpenseCat = "Courses" | "Logement" | "Transport" | "Études" | "Restauration" | "Loisirs" | "Santé" | "Autre" | (string & {});
 
@@ -56,8 +56,9 @@ export interface PlanEvent { id: ID; title: string; date: string; start: string;
 export type HabitCat = "soin" | "santé" | "sport" | "bien-être" | "maison" | "autre";
 /** Routine quotidienne : days = jours de la semaine (0 = lundi) ; done = dates faites ; stepsDone = étapes cochées par date. */
 export interface Habit { id: ID; name: string; emoji: string; cat: HabitCat; time?: string; days: number[]; done: string[]; steps?: Step[]; stepsDone?: Record<string, ID[]>; note?: string; since: string }
-/** Tâche perso ponctuelle : due = jour prévu (facultatif), time = heure (facultatif). */
-export interface Todo { id: ID; text: string; done: boolean; due?: string; time?: string; doneAt?: string; createdAt: string }
+export type TodoKind = "admin" | "rdv" | "appel" | "achat" | "santé" | "perso" | "autre";
+/** Tâche perso ponctuelle : due = jour prévu ; start/end = horaire précis (« HH:MM ») ; priority 1 basse → 3 haute. */
+export interface Todo { id: ID; text: string; done: boolean; due?: string; start?: string; end?: string; priority?: Priority; kind?: TodoKind; note?: string; steps?: Step[]; doneAt?: string; createdAt: string }
 export interface SleepLog { date: string; bed: string; wake: string; quality: 1 | 2 | 3 | 4 | 5; bedOk?: boolean; wakeOk?: boolean }
 /** id = identifiant de session : un même id n'est jamais enregistré deux fois. */
 export interface FocusEntry { id?: ID; date: string; minutes: number; taskId: ID | null; courseId?: ID | null; interrupted?: boolean }
@@ -463,7 +464,11 @@ export function validateState(x: unknown): { ok: true; state: AppState; repaired
     }),
     todos: keep<Todo>("tâches perso", Array.isArray(p.todos) ? p.todos : [], (t) => isStr(t.id) && isStr(t.text) && t.text.trim() !== "").map((t) => ({
       id: t.id, text: t.text.slice(0, 200), done: !!t.done, createdAt: isDate(t.createdAt) ? t.createdAt : todayISO(),
-      ...(isDate(t.due) ? { due: t.due } : {}), ...(isTime(t.time) ? { time: t.time } : {}), ...(t.done && isDate(t.doneAt) ? { doneAt: t.doneAt } : {}) })),
+      ...(isDate(t.due) ? { due: t.due } : {}), ...(t.done && isDate(t.doneAt) ? { doneAt: t.doneAt } : {}),
+      // « time » (ancienne version) devient l'heure de début.
+      ...((() => { const st = isTime(t.start) ? t.start : isTime((t as { time?: unknown }).time) ? (t as unknown as { time: string }).time : undefined; return st ? { start: st, ...(isTime(t.end) && toMin(t.end) > toMin(st) ? { end: t.end } : {}) } : {}; })()),
+      ...([1, 2, 3].includes(t.priority as number) ? { priority: t.priority } : {}), ...(TODO_KINDS.some((k) => k.k === t.kind) ? { kind: t.kind } : {}),
+      ...(isStr(t.note) && t.note.trim() ? { note: t.note.slice(0, 300) } : {}), ...((() => { const st = cleanSteps(t.steps, true); return st.length ? { steps: st } : {}; })()) })),
     habits: keep<Habit>("routines", Array.isArray(p.habits) ? p.habits : [], (h) => isStr(h.id) && isStr(h.name) && Array.isArray(h.done)).map((h) => {
       const st = cleanSteps(h.steps, false);
       const days = Array.isArray(h.days) ? [...new Set(h.days.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))].sort() : [];
@@ -792,6 +797,9 @@ export function planDay(state: AppState, date: string, remaining?: Map<ID, numbe
     ...(settings.unavailable ?? []).filter((u) => u.day === wd && toMin(u.end) > toMin(u.start)).map((u): Block => ({ start: toMin(u.start), end: toMin(u.end), kind: "busy", label: u.label || "Indisponible", refId: u.id })),
     ...dayFeed.map((e): Block => ({ start: toMin(e.start), end: toMin(e.end), kind: "class", label: e.room ? `${e.title} · ${e.room}` : e.title, color: settings.feedColors?.[norm(e.title)] ?? feedColor.get(e.feedId), refId: e.uid, feedId: e.feedId })),
     ...dayEvents.map((e): Block => ({ start: toMin(e.start), end: toMin(e.end), kind: "event", label: e.title, color: e.color, refId: e.id })),
+    // Tâches perso avec horaire précis : bloc fixe (comme un rendez-vous).
+    ...(state.todos ?? []).filter((t) => !t.done && t.due === date && t.start && t.end && toMin(t.end) > toMin(t.start))
+      .map((t): Block => ({ start: toMin(t.start!), end: toMin(t.end!), kind: "event", label: `✓ ${t.text}`, color: "#7a5af5" })),
   ];
   const hardSpans = fixed.filter((b) => isHard(b.kind)).map((b) => [b.start, b.end]);
   for (let i = fixed.length - 1; i >= 0; i--) if (fixed[i].kind === "meal" && hardSpans.some(([s0, e0]) => s0 < fixed[i].end && e0 > fixed[i].start)) fixed.splice(i, 1);
@@ -999,3 +1007,8 @@ export function todoOnTimeStats(todos: Todo[], today: string, days?: number): On
   }
   return { ok, late };
 }
+
+export const TODO_KINDS: { k: TodoKind; label: string; emoji: string }[] = [
+  { k: "admin", label: "Administratif", emoji: "📄" }, { k: "rdv", label: "Rendez-vous", emoji: "📅" }, { k: "appel", label: "Appel / message", emoji: "📞" },
+  { k: "achat", label: "Achat / course", emoji: "🛍️" }, { k: "santé", label: "Santé", emoji: "🩺" }, { k: "perso", label: "Perso", emoji: "⭐" }, { k: "autre", label: "Autre", emoji: "📌" },
+];

@@ -396,3 +396,11 @@ test("corvée ponctuelle (une seule fois)", () => {
   const v = C.validateState(JSON.parse(JSON.stringify({ ...base(), chores: [c, { ...c, id: "bad", date: undefined }] })));
   assert.ok(v.ok && v.state.chores.length === 1 && v.state.chores[0].date === "2026-10-16");
 });
+
+test("tâches perso : horaire précis dans le planning, migration de « time »", () => {
+  const s = { ...base(), todos: [{ id: "a", text: "Dentiste", done: false, due: TODAY, start: "15:00", end: "16:00", createdAt: TODAY, priority: 3 as C.Priority, kind: "rdv" as C.TodoKind }, { id: "b", text: "Fait", done: true, due: TODAY, start: "10:00", end: "11:00", createdAt: TODAY }] };
+  const blocks = C.planFor(s, TODAY).blocks.filter((b) => b.label.includes("Dentiste") || b.label.includes("Fait"));
+  assert.equal(blocks.length, 1); assert.equal(blocks[0].start, 900); assert.equal(blocks[0].kind, "event");
+  const v = C.validateState(JSON.parse(JSON.stringify({ ...base(), todos: [{ id: "x", text: "Old", done: false, due: TODAY, time: "09:00", createdAt: TODAY, priority: 7, kind: "zz" }] })));
+  assert.ok(v.ok); if (v.ok) { const t = v.state.todos![0]; assert.equal(t.start, "09:00"); assert.ok(!("priority" in t) && !("kind" in t)); }
+});

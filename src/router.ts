@@ -15,7 +15,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Segment d'URL ↔ module de l'application. */
 export const VIEW_SLUGS: Record<ViewKey, string> = {
   dashboard: "", planning: "planning", academic: "academique", focus: "focus", groceries: "courses",
-  budget: "budget", chores: "menage", routines: "routines", sleep: "sommeil", settings: "settings",
+  budget: "budget", chores: "menage", todos: "perso", routines: "routines", sleep: "sommeil", settings: "settings",
 };
 const SLUG_VIEW = Object.fromEntries(Object.entries(VIEW_SLUGS).map(([v, s]) => [s, v])) as Record<string, ViewKey>;
 export const PUBLIC_PATHS: Record<string, Route["name"]> = {
