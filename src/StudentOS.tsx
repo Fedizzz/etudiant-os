@@ -2130,7 +2130,7 @@ const CHORE_PRESETS: { name: string; recurrence: Recurrence; day: number; minute
 ];
 /** Personne d'autre que « Moi » : pas de colocataire et aucune corvée partagée. */
 const isSolo = (s: AppState) => !s.settings.roommates.length && s.chores.every((c) => c.assignees.every((a) => a === "Moi"));
-const REC_LABEL: Record<Recurrence, string> = { daily: "Quotidienne", weekly: "Hebdomadaire", biweekly: "Bimensuelle" };
+const REC_LABEL: Record<Recurrence, string> = { daily: "Quotidienne", weekly: "Hebdomadaire", biweekly: "Bimensuelle", once: "Une seule fois" };
 const Chores: React.FC = () => {
   const { state, dispatch, toast, undoable } = useStore();
   const [offset, setOffset] = useState(0);
@@ -2143,7 +2143,7 @@ const Chores: React.FC = () => {
   const [newSteps, setNewSteps] = useState<Step[]>([]);
   const [editSteps, setEditSteps] = useState<ID | null>(null);
   const editing = state.chores.find((c) => c.id === editSteps);
-  const [f, setF] = useState({ name: "", recurrence: "weekly" as Recurrence, day: 5, minutes: 20, time: "18:00", end: "18:30", assignees: ["Moi", ...state.settings.roommates].join(", ") });
+  const [f, setF] = useState({ name: "", recurrence: "weekly" as Recurrence, day: 5, date: todayISO(), minutes: 20, time: "18:00", end: "18:30", assignees: ["Moi", ...state.settings.roommates].join(", ") });
   const people = Array.from(new Set(state.chores.flatMap((c) => c.assignees)));
   const minutesBy = people.map((p) => ({ p, min: state.chores.reduce((n, c) => n + days.filter((d) => choreScheduledOn(c, d) && choreAssignee(c, d) === p).length * c.minutes, 0) }));
   const maxMin = Math.max(1, ...minutesBy.map((x) => x.min));
@@ -2162,7 +2162,7 @@ const Chores: React.FC = () => {
                 {state.chores.map((c) => (
                   <tr key={c.id} className="group">
                     <td className="pr-2"><p className="font-medium text-fg">{c.name}</p>
-                      <button className="text-[11px] text-accent hover:underline" onClick={() => setEditSteps(c.id)} aria-label={`Checklist de ${c.name}`}>{c.steps?.length ? `☑ Checklist · ${c.steps.length} étape${c.steps.length > 1 ? "s" : ""}` : "+ Checklist"}</button><p className="text-[11px] text-muted">{REC_LABEL[c.recurrence]}{c.time ? ` · ${c.time}–${toHHMM(toMin(c.time) + c.minutes)}` : ` · ${c.minutes} min`}</p></td>
+                      <button className="text-[11px] text-accent hover:underline" onClick={() => setEditSteps(c.id)} aria-label={`Checklist de ${c.name}`}>{c.steps?.length ? `☑ Checklist · ${c.steps.length} étape${c.steps.length > 1 ? "s" : ""}` : "+ Checklist"}</button><p className="text-[11px] text-muted">{REC_LABEL[c.recurrence]}{c.recurrence === "once" && c.date ? ` · ${fmtDate(c.date)}` : ""}{c.time ? ` · ${c.time}–${toHHMM(toMin(c.time) + c.minutes)}` : ` · ${c.minutes} min`}</p></td>
                     {days.map((d) => { const on = choreScheduledOn(c, d); const k = iso(d); const done = c.done.includes(k); const skipped = (c.skipped ?? []).includes(k); const who = choreAssignee(c, d); const by = c.doneBy?.[k] ?? who; return (
                       <td key={k} className="relative text-center">{on ? (<>
                         {skipped ? (
@@ -2203,7 +2203,8 @@ const Chores: React.FC = () => {
             if (!f.name.trim() || !assignees.length) { toast("Nom et au moins une personne requis.", "bad"); return; }
             if (cmode === "slot" && toMin(f.end) <= toMin(f.time)) { toast("L'heure de fin doit suivre l'heure de début.", "bad"); return; }
             const minutes = cmode === "slot" ? toMin(f.end) - toMin(f.time) : f.minutes;
-            dispatch({ type: "chore/add", chore: { id: uid(), name: f.name.trim(), recurrence: f.recurrence, day: f.day, minutes, assignees, done: [], ...(cmode === "slot" ? { time: f.time } : {}), ...(newSteps.some((x) => x.text.trim()) ? { steps: newSteps.filter((x) => x.text.trim()).map(({ id, text }) => ({ id, text: text.trim() })), stepsDone: {} } : {}) } }); setF({ ...f, name: "" }); setNewSteps([]); toast(state.settings.roommates.length ? "Corvée ajoutée à la rotation" : "Corvée ajoutée"); }}>
+            if (f.recurrence === "once" && !/^\d{4}-\d{2}-\d{2}$/.test(f.date)) { toast("Choisissez la date de la corvée.", "bad"); return; }
+            dispatch({ type: "chore/add", chore: { id: uid(), name: f.name.trim(), recurrence: f.recurrence, day: f.recurrence === "once" ? weekday(parseISO(f.date)) : f.day, ...(f.recurrence === "once" ? { date: f.date } : {}), minutes, assignees, done: [], ...(cmode === "slot" ? { time: f.time } : {}), ...(newSteps.some((x) => x.text.trim()) ? { steps: newSteps.filter((x) => x.text.trim()).map(({ id, text }) => ({ id, text: text.trim() })), stepsDone: {} } : {}) } }); setF({ ...f, name: "" }); setNewSteps([]); toast(state.settings.roommates.length ? "Corvée ajoutée à la rotation" : "Corvée ajoutée"); }}>
             <div className="col-span-2">
               <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">Suggestions</p>
               <div className="relative">
@@ -2222,7 +2223,8 @@ const Chores: React.FC = () => {
             </div>
             <Field label="Corvée" htmlFor="ch-name" className="col-span-2"><Input id="ch-name" placeholder="Ex. Nettoyer la plaque" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
             <Field label="Récurrence" htmlFor="ch-rec"><Select id="ch-rec" value={f.recurrence} onChange={(e) => setF({ ...f, recurrence: e.target.value as Recurrence })}>{(Object.keys(REC_LABEL) as Recurrence[]).map((r) => <option key={r} value={r}>{REC_LABEL[r]}</option>)}</Select></Field>
-            <Field label="Jour" htmlFor="ch-day"><Select id="ch-day" value={f.day} disabled={f.recurrence === "daily"} onChange={(e) => setF({ ...f, day: Number(e.target.value) })}>{DAYS_LONG.map((d, i) => <option key={d} value={i}>{d}</option>)}</Select></Field>
+            {f.recurrence === "once" ? <Field label="Date" htmlFor="ch-date"><Input id="ch-date" type="date" value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} /></Field> :
+            <Field label="Jour" htmlFor="ch-day"><Select id="ch-day" value={f.day} disabled={f.recurrence === "daily"} onChange={(e) => setF({ ...f, day: Number(e.target.value) })}>{DAYS_LONG.map((d, i) => <option key={d} value={i}>{d}</option>)}</Select></Field>}
             <TimeMode id="ch-mode" value={cmode} onChange={setCmode} className="col-span-2" />
             {cmode === "duration"
               ? <Field label="Durée (min)" htmlFor="ch-min" className="col-span-2"><Input id="ch-min" type="number" min={5} step={5} value={f.minutes} onChange={(e) => setF({ ...f, minutes: Number(e.target.value) })} /></Field>

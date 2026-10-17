@@ -7,7 +7,7 @@ export type ID = string;
 export type TaskStatus = "todo" | "doing" | "review" | "done";
 export type TaskKind = "devoir" | "examen" | "projet";
 export type Priority = 1 | 2 | 3;
-export type Recurrence = "daily" | "weekly" | "biweekly";
+export type Recurrence = "daily" | "weekly" | "biweekly" | "once";
 export type Aisle = "Frais" | "Fruits & légumes" | "Épicerie" | "Boissons" | "Surgelés" | "Hygiène" | "Entretien";
 export type ViewKey = "dashboard" | "planning" | "academic" | "focus" | "groceries" | "budget" | "chores" | "routines" | "sleep" | "settings";
 /** Catégories intégrées ; l'utilisateur peut en ajouter (settings.customCats). */
@@ -43,7 +43,8 @@ export interface Budget {
   incomes?: Income[]; savings?: SavingMove[]; savingsGoal?: { name: string; target: number } | null;
 }
 /** done : dates faites · doneBy : qui l'a faite ce jour-là · skipped : dates reportées. */
-export interface Chore { id: ID; name: string; recurrence: Recurrence; day: number; minutes: number; assignees: string[]; done: string[]; doneBy?: Record<string, string>; skipped?: string[]; /** Heure fixe « HH:MM » (sinon placée automatiquement dans un créneau libre). */ time?: string; /** Checklist, et étapes cochées par date. */ steps?: Step[]; stepsDone?: Record<string, ID[]> }
+/** recurrence « once » : une seule fois, le jour `date`. */
+export interface Chore { id: ID; name: string; recurrence: Recurrence; date?: string; day: number; minutes: number; assignees: string[]; done: string[]; doneBy?: Record<string, string>; skipped?: string[]; /** Heure fixe « HH:MM » (sinon placée automatiquement dans un créneau libre). */ time?: string; /** Checklist, et étapes cochées par date. */ steps?: Step[]; stepsDone?: Record<string, ID[]> }
 /** Calendrier externe abonné (lien .ics Celcat, iCloud, Google…). */
 export interface CalFeed { id: ID; name: string; url: string; color: string; lastSync: string | null; lastError: string | null; count?: number }
 /** Occurrence importée d'un calendrier abonné (remplacée à chaque actualisation). */
@@ -454,7 +455,7 @@ export function validateState(x: unknown): { ok: true; state: AppState; repaired
     }),
     tasks: keep<Task>("tâches", p.tasks, (t) => isStr(t.id) && isStr(t.title) && isDate(t.deadline)).map((t) => ({ ...t, estimate: isNum(t.estimate) && t.estimate > 0 ? t.estimate : 60, spent: isNum(t.spent) && t.spent >= 0 ? t.spent : 0, priority: ([1, 2, 3].includes(t.priority) ? t.priority : 2) as Priority, status: (["todo", "doing", "review", "done"].includes(t.status) ? t.status : "todo") as TaskStatus, slot: t.slot && isDate(t.slot.date) && isTime(t.slot.start) && isTime(t.slot.end) && toMin(t.slot.end) > toMin(t.slot.start) ? t.slot : undefined })).map(({ slot, steps, ...t }) => { const st = cleanSteps(steps, true); return { ...t, ...(slot ? { slot } : {}), ...(st.length ? { steps: st } : {}) }; }),
     groceries: keep<GroceryItem>("articles", p.groceries, (g) => isStr(g.id) && isStr(g.name)).map((g) => ({ ...g, price: isNum(g.price) && g.price >= 0 ? g.price : 0, checked: !!g.checked, qty: isStr(g.qty) ? g.qty : "" })),
-    chores: keep<Chore>("corvées", p.chores, (c) => isStr(c.id) && isStr(c.name) && Array.isArray(c.assignees)).map((c) => {
+    chores: keep<Chore>("corvées", p.chores, (c) => isStr(c.id) && isStr(c.name) && Array.isArray(c.assignees) && (c.recurrence !== "once" || isDate(c.date))).map((c) => {
       const { time, steps, stepsDone, ...rest } = c;
       const st = cleanSteps(steps, false);
       const sd = stepsDone && typeof stepsDone === "object" ? Object.fromEntries(Object.entries(stepsDone).filter(([k, v]) => isDate(k) && Array.isArray(v)).map(([k, v]) => [k, (v as unknown[]).filter(isStr)]).slice(-120)) : {};
@@ -745,12 +746,14 @@ export function eventOn(e: PlanEvent, date: string): boolean {
   }
 }
 export function choreScheduledOn(c: Chore, d: Date): boolean {
+  if (c.recurrence === "once") return iso(d) === c.date;
   if (c.recurrence === "daily") return true;
   if (weekday(d) !== c.day) return false;
   return c.recurrence === "weekly" || isoWeek(d) % 2 === 0;
 }
 export function choreAssignee(c: Chore, d: Date): string {
   if (!c.assignees.length) return "—";
+  if (c.recurrence === "once") return c.assignees[0];
   // Index de jour calculé sur la date locale (indépendant du fuseau et de l'heure d'été).
   const dayIdx = Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000);
   const idx = c.recurrence === "daily" ? dayIdx : c.recurrence === "weekly" ? isoWeek(d) : Math.floor(isoWeek(d) / 2);

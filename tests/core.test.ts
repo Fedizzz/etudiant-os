@@ -387,3 +387,12 @@ test("tâches perso : ajout, fait/rouvrir, compteur à l'heure, nettoyage", () =
   const v = C.validateState(JSON.parse(JSON.stringify({ ...s, todos: [...s.todos!, { id: "x", text: "  " }, { id: "y", text: "ok", due: "bad" }] })));
   assert.ok(v.ok && v.state.todos!.length === 3 && !("due" in v.state.todos![2]));
 });
+
+test("corvée ponctuelle (une seule fois)", () => {
+  const c: C.Chore = { id: "o", name: "Nettoyer le four", recurrence: "once", date: "2026-10-16", day: 4, minutes: 30, assignees: ["Moi", "Inès"], done: [] };
+  assert.equal(C.choreScheduledOn(c, C.parseISO("2026-10-16")), true);
+  assert.equal(C.choreScheduledOn(c, C.parseISO("2026-10-23")), false);
+  assert.equal(C.choreAssignee(c, C.parseISO("2026-10-16")), "Moi");
+  const v = C.validateState(JSON.parse(JSON.stringify({ ...base(), chores: [c, { ...c, id: "bad", date: undefined }] })));
+  assert.ok(v.ok && v.state.chores.length === 1 && v.state.chores[0].date === "2026-10-16");
+});
