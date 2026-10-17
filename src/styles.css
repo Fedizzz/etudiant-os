@@ -27,6 +27,9 @@
   --chalk: 243 236 220; --lamp: 255 196 120;
 }
 html, body, #root { height: 100%; }
+/* Pas d'effet « élastique » qui fait bouger l'en-tête et laisse voir du vide en haut / en bas (iPhone). */
+html, body { overscroll-behavior: none; }
+html { background: rgb(var(--bg)); }
 /* En-têtes : fond plein, jamais transparent, au-dessus du contenu qui défile. */
 header.fixed, header.sticky { background-color: rgb(var(--bg)); }
 body { background: rgb(var(--bg)); color: rgb(var(--fg)); font-family: var(--font-ui); -webkit-font-smoothing: antialiased; }

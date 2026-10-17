@@ -1,7 +1,7 @@
 /* Étudiant.OS — hôtes de l'interface : mode local (navigateur seul) ou compte synchronisé. */
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
-import { reducer, loadState, validateState, blank, STORAGE_KEY, type Action, type AppState, type ViewKey } from "./core.ts";
+import { cx, reducer, loadState, validateState, blank, STORAGE_KEY, type Action, type AppState, type ViewKey } from "./core.ts";
 import { SyncEngine, mergeStates, summarize, isEmptyState, type ImportSummary } from "./sync.ts";
 import { cloudTransport, localCache, watchRemote, cloudFiles, deleteAccount, displayNameOf, frError, appUrl } from "./supabase.ts";
 import type { AppEnv, AccountApi } from "./env.ts";
@@ -142,7 +142,9 @@ export function CloudHost({ sb, session, view, onView, onSignedOut, support, nav
   const badge = (
     <>
       <span role="status" aria-live="polite" title={snap.error ?? undefined} data-testid="sync-status">
-        <Pill tone={syncTone(st)}>{SYNC_LABEL[st]}{snap.pending && st !== "saved" && st !== "saving" ? ` · ${snap.pending}` : ""}</Pill>
+        <span className="hidden sm:inline-flex"><Pill tone={syncTone(st)}>{SYNC_LABEL[st]}{snap.pending && st !== "saved" && st !== "saving" ? ` · ${snap.pending}` : ""}</Pill></span>
+        {/* Téléphone : un simple point de couleur pour laisser la place au titre. */}
+        <span className={cx("inline-block h-2.5 w-2.5 rounded-full sm:hidden", st === "saved" ? "bg-ok" : st === "error" || st === "offline" ? "bg-bad" : "bg-warn animate-pulse")} aria-label={SYNC_LABEL[st]} />
       </span>
       {unread > 0 && (
         <button onClick={() => nav({ name: "support", page: "requests" })} data-testid="notif-badge" aria-label={`${unread} réponse${unread > 1 ? "s" : ""} non lue${unread > 1 ? "s" : ""} dans Mes demandes`}

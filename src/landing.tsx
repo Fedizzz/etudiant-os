@@ -27,7 +27,7 @@ export function ThemeToggle() {
 function Nav({ go, signedIn }: { go: Go; signedIn: boolean }) {
   const [open, setOpen] = useState(false);
   const [headerRef, headerH] = useFixedHeader();
-  const hidden = useHideOnScroll(headerH, open);
+  const hidden = false; // en-tête fixe, sans masquage au défilement
   const links: [string, string][] = [["#fonctionnalites", "Fonctionnalités"], ["#comment", "Comment ça marche"], ["#nouveautes", "Nouveautés"], ["#avantages", "Avantages"], ["#faq", "FAQ"]];
   useEffect(() => { const k = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false); window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, []);
   return (

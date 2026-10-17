@@ -3466,7 +3466,8 @@ export default function StudentOS({ state, dispatch, env, view, onView, notice, 
   const greet = hour < 6 ? "Bonne nuit" : hour < 18 ? "Bonjour" : "Bonsoir";
   const current = NAV.find((n) => n.key === view)!;
   const [headerRef, headerH] = useFixedHeader();
-  const headerHidden = useHideOnScroll(headerH, menu || palette);
+  // En-tête toujours visible et immobile (plus de masquage au défilement : plus stable sur iPhone).
+  const headerHidden = false;
   // Tirer pour actualiser : données du compte, calendriers abonnés, notifications — sans recharger la page.
   const pullRefresh = useCallback(async () => {
     const jobs: Promise<unknown>[] = [env.refresh?.() ?? Promise.resolve()];
@@ -3506,14 +3507,14 @@ export default function StudentOS({ state, dispatch, env, view, onView, notice, 
         <div className="flex min-w-0 flex-1 flex-col">
           <div aria-hidden className="md:hidden" style={{ height: headerH }} />
           <header ref={headerRef} className={cx("fixed inset-x-0 top-0 z-30 border-b-2 border-dashed border-line bg-bg transition-transform duration-300 [transition-timing-function:var(--ease)] md:sticky md:inset-x-auto md:z-20 md:!translate-y-0", headerHidden && "-translate-y-full")} style={{ paddingTop: "var(--safe-top)", backgroundColor: "rgb(var(--bg))" }}>
-            <div className="mx-auto flex max-w-6xl 2xl:max-w-[1560px] min-[2200px]:max-w-[1880px] items-center gap-3 py-3 px-4 sm:px-6">
-              <div className="min-w-0 flex-1"><p className="truncate text-xs text-muted">{greet} {state.settings.name}<span className="hidden min-[400px]:inline"> · {new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}</span></p>
-                <h1 className="truncate pb-0.5 font-display text-[19px] min-[400px]:text-[21px] sm:text-[26px] font-extrabold leading-tight tracking-tight"><span key={override?.key ?? view} className="marker">{override?.title ?? current.label}<svg viewBox="0 0 200 20" preserveAspectRatio="none" aria-hidden><path d="M2 12 C 40 6, 80 16, 120 9 S 180 6, 198 11" /></svg></span></h1></div>
+            <div className="mx-auto flex max-w-6xl 2xl:max-w-[1560px] min-[2200px]:max-w-[1880px] items-center gap-1.5 py-3 px-4 sm:gap-3 sm:px-6">
+              <div className="min-w-0 flex-1 basis-0"><p className="truncate text-xs text-muted">{greet} {state.settings.name}<span className="hidden min-[400px]:inline"> · {new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}</span></p>
+                <h1 className="truncate pb-0.5 font-display text-[18px] min-[400px]:text-[20px] sm:text-[26px] font-extrabold leading-tight tracking-tight"><span key={override?.key ?? view} className="marker">{override?.title ?? current.label}<svg viewBox="0 0 200 20" preserveAspectRatio="none" aria-hidden><path d="M2 12 C 40 6, 80 16, 120 9 S 180 6, 198 11" /></svg></span></h1></div>
               {headerExtra}
               <span className="hidden lg:inline-flex"><Pill tone={levelTone(plan.level)}>Journée {plan.level}</Pill></span>
               <Btn variant="ghost" size="sm" className="hidden lg:inline-flex" onClick={() => setHelp(true)} aria-label="Raccourcis"><Keyboard size={15} /></Btn>
-              <LangSwitch />
-              <Btn variant="ghost" size="sm" onClick={toggleTheme} aria-label="Changer de thème" className="hidden min-[400px]:inline-flex">{isDark ? <Sun size={15} /> : <Moon size={15} />}</Btn>
+              <LangSwitch className="px-1.5 sm:px-2" />
+              <Btn variant="ghost" size="sm" onClick={toggleTheme} aria-label="Changer de thème" className="hidden sm:inline-flex">{isDark ? <Sun size={15} /> : <Moon size={15} />}</Btn>
               <Btn variant="primary" size="sm" onClick={() => setNewTask(true)} aria-label="Nouvelle tâche"><Plus size={14} /><span className="hidden sm:inline">Tâche</span></Btn>
               <div className="relative md:hidden">
                 <Btn variant="soft" size="sm" aria-label="Menu" aria-expanded={menu} aria-haspopup="menu" onClick={() => setMenu(!menu)} className={cx(menu && "bg-hi/60")}><MoreVertical size={18} strokeWidth={3} /></Btn>
