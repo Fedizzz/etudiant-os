@@ -7,6 +7,7 @@ Onglet **Colocation** (compte requis) :
 - **Courses communes** : tout le monde ajoute, coche, supprime. « Valider les achats » crée la dépense partagée et retire les articles cochés (une seule opération côté base).
 - **Dépenses partagées** : qui a payé, partagé entre qui (parts égales en centimes, le reste va aux premiers), historique, **« qui doit combien à qui »** (virements minimaux) et « Marquer remboursé ».
 - **Ménage partagé** (onglet Ménage de la colocation) : corvées communes (chaque jour, chaque semaine, une semaine sur deux, une fois) avec **rotation entre les colocataires** ; tout le monde voit la semaine, coche, et on voit « fait par X ». Le propriétaire (ou l'auteur) supprime. Un ancien membre est retiré de la rotation.
+- **Planning et tableau de bord** : si vous êtes dans un appartement, vos tours de corvée commune apparaissent dans votre planning du jour et dans « Ménage du jour » (cochables : la base est mise à jour, tout le monde le voit). Sans appartement (ou sans compte), rien ne change. Ces corvées sont fusionnées à l'affichage seulement : jamais enregistrées dans vos données personnelles, jamais exportées, jamais comptées dans vos points ni vos statistiques. Les modifier (reporter, étapes, suppression) se fait dans Colocation → Ménage.
 - Le ménage personnel (onglet Ménage) reste individuel, sur votre planning. L'ancienne liste de « colocataires » (simples noms) n'est plus proposée à l'inscription ni dans les réglages ; si elle existait, un lien « La retirer » permet de l'effacer (les anciennes corvées ne sont pas supprimées).
 - Les données sont relues toutes les 15 s, au retour sur l'onglet et après chaque action (pas de temps réel pour l'instant).
 
@@ -28,6 +29,6 @@ Une migration **non appliquée** sur votre Supabase fait afficher ce message. Ta
   Ce test ne remplace pas `npm run test:db` (vraie pile Supabase, non lancé ici).
 
 ## Limites et suite
-- Les corvées communes n'apparaissent pas encore dans le planning personnel ni le tableau de bord ; pas de dépenses à parts inégales ni de scan de ticket vers la dépense commune : prochaines étapes.
+- Pas de dépenses à parts inégales ni de scan de ticket vers la dépense commune : prochaines étapes.
 - Pas de notifications ni de temps réel.
 - Un propriétaire ne peut pas encore renommer l'appartement.

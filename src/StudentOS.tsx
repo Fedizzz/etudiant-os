@@ -5,12 +5,14 @@ import { MiniPdf } from "./pdf.ts";
 import { layoutLanes } from "./core.ts";
 import { DAY_WORDS, dayOf, pageGeometry, parseGrid } from "./timetable.ts";
 import { parseIcs, normalizeFeedUrl, isFeedUrl } from "./ical.ts";
-import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, choreStepsDone, choreDoneLate, choreSlotEnd, freeStart, setOnTimeMode, todoDoneLate, taskDoneLate, habitDoneLate, habitTimePassed, nowMinutes, NO_DEADLINE, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, onTimeGuess, onTimeStats, taskOnTimeStats, choreOnTimeStats, HABIT_CATS, habitOn, habitStats, habitStepsDone, habitStreak, todoOnTimeStats, TODO_KINDS, activeDays, xpOf, levelOf, globalStreak, LEVELS, applyReceiptToGroceries, pad, pantryItems, parseAmount, parseISO, parseReceipt, parseReceiptItems, receiptFingerprint, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
+import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, choreStepsDone, choreDoneLate, choreSlotEnd, freeStart, setOnTimeMode, todoDoneLate, taskDoneLate, habitDoneLate, habitTimePassed, nowMinutes, NO_DEADLINE, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, onTimeGuess, onTimeStats, taskOnTimeStats, choreOnTimeStats, HABIT_CATS, habitOn, habitStats, habitStepsDone, habitStreak, todoOnTimeStats, TODO_KINDS, activeDays, withoutShared, xpOf, levelOf, globalStreak, LEVELS, applyReceiptToGroceries, pad, pantryItems, parseAmount, parseISO, parseReceipt, parseReceiptItems, receiptFingerprint, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
 import type { Action, Aisle, PlanEvent, Chore, Habit, HabitCat, Todo, TodoKind, AppState, Block, Budget, Course, DayPlan, Expense, ExpenseCat, GroceryTemplate, ID, Phase, PomodoroCfg, Priority, ReceiptItem, ReceiptResult, Recurrence, EventRecurrence, CalFeed, FeedEvent, SettingsState, SleepLog, Step, Task, TaskKind, TaskStatus, TemplateItem, ViewKey } from "./core.ts";
 import type { AppEnv } from "./env.ts";
 import { LangSwitch } from "./i18n.tsx";
 import { OcrError, scanReceipt } from "./ocr.ts";
 import { FlatView } from "./flatView.tsx";
+import { useFlatChores } from "./useFlatChores.ts";
+import type { FlatChoresApi } from "./useFlatChores.ts";
 import type { OcrOutput, OcrProgress } from "./ocr.ts";
 
 /* ============================================================================
@@ -1126,7 +1128,7 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
                   <span className={cx("min-w-0 flex-1 truncate", (done || skipped) && "text-muted line-through")}>{c.name}</span>
                   {c.time && <span className="font-mono text-[11px] text-muted">{c.time}</span>}
                   {!solo && <Pill tone={who === "Moi" ? "info" : "muted"}>{who}</Pill>}
-                  {!done && !skipped && <Btn size="sm" variant="ghost" title="Reporter" aria-label={`Reporter ${c.name}`} onClick={() => { dispatch({ type: "chore/skip", id: c.id, date: today }); toast(`${c.name} reportée`, "info"); }}>↷</Btn>}
+                  {!done && !skipped && !c.shared && <Btn size="sm" variant="ghost" title="Reporter" aria-label={`Reporter ${c.name}`} onClick={() => { dispatch({ type: "chore/skip", id: c.id, date: today }); toast(`${c.name} reportée`, "info"); }}>↷</Btn>}
                   {skipped && <span className="text-[11px] text-muted">reportée</span>}
                   {!!c.steps?.length && !skipped && <div className="basis-full pl-7"><StepsCheck small steps={c.steps} done={(id) => choreStepsDone(c, today).includes(id)} onToggle={(id) => choreStep(c, today, id, who)} label={`Checklist de ${c.name}`} /></div>}
                 </li>))}
@@ -2832,7 +2834,9 @@ const ChoreDragCell: React.FC<{ chore: Chore; date: string; children: (drag: { o
 };
 
 const Chores: React.FC = () => {
-  const { state, dispatch, toast, undoable } = useStore();
+  const { state: fullState, dispatch, toast, undoable } = useStore();
+  // Ménage personnel : sans les corvées de la colocation (elles sont dans Colocation → Ménage).
+  const state = useMemo(() => withoutShared(fullState), [fullState]);
   const [offset, setOffset] = useState(0);
   const monday = addDays(new Date(), offset * 7 - weekday(new Date()));
   const days = Array.from({ length: 7 }, (_, i) => addDays(monday, i));
@@ -3558,7 +3562,7 @@ const SettingsView: React.FC = () => {
   const [json, setJson] = useState("");
   const [confirmReset, setConfirmReset] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-  const exportJson = () => { const text = JSON.stringify(state, null, 2); setJson(text);
+  const exportJson = () => { const text = JSON.stringify(withoutShared(state), null, 2); setJson(text);
     navigator.clipboard?.writeText(text).then(() => toast("Sauvegarde JSON copiée dans le presse-papiers"), () => toast("Sauvegarde générée ci-dessous : sélectionnez et copiez", "info")); };
   const [pending, setPending] = useState<{ state: AppState; repaired: string | null } | null>(null);
   const readStore = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
@@ -3587,7 +3591,7 @@ const SettingsView: React.FC = () => {
     if (!backup) return;
     const r = (() => { try { return validateState(JSON.parse(backup)); } catch { return null; } })();
     if (!r || !r.ok) { toast("La copie de sécurité est illisible.", "bad"); return; }
-    const current = JSON.stringify(state);
+    const current = JSON.stringify(withoutShared(state));
     dispatch({ type: "replace", state: r.state });
     try { localStorage.setItem(BKEY, current); setBackup(current); } catch { /* ignore */ }
     toast("Copie de sécurité restaurée. L'état précédent devient la nouvelle copie (échange possible).");
@@ -3622,7 +3626,7 @@ const SettingsView: React.FC = () => {
       <Card title="Sauvegarde">
         <div className="flex flex-wrap gap-2">
           <Btn onClick={exportJson}><Download size={14} />Exporter en JSON</Btn>
-          <Btn onClick={() => download(JSON.stringify(state, null, 2), `etudiant-os-${todayISO()}.json`)}><Download size={14} />Télécharger le fichier</Btn>
+          <Btn onClick={() => download(JSON.stringify(withoutShared(state), null, 2), `etudiant-os-${todayISO()}.json`)}><Download size={14} />Télécharger le fichier</Btn>
           <Btn onClick={() => fileRef.current?.click()}><Upload size={14} />Importer un fichier</Btn>
           <input ref={fileRef} id="st-file" type="file" accept="application/json,.json" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) f.text().then(importJson); e.target.value = ""; }} />
         </div>
@@ -3782,7 +3786,21 @@ export interface StudentOSProps {
   /** Page affichée à la place du module courant (pages de support), dans le même cadre. */
   override?: { key: string; title: string; node: React.ReactNode } | null;
 }
-export default function StudentOS({ state, dispatch, env, view, onView, notice, headerExtra, menuExtra, override }: StudentOSProps) {
+export default function StudentOS({ state: ownState, dispatch: ownDispatch, env, view, onView, notice, headerExtra, menuExtra, override }: StudentOSProps) {
+  // Corvées de la colocation (seulement avec un compte et un appartement) : fusionnées dans l'AFFICHAGE (planning, tableau de bord), jamais enregistrées dans l'état personnel.
+  const flatChores = useFlatChores(env);
+  const state = useMemo(() => (flatChores.chores.length ? { ...ownState, chores: [...ownState.chores, ...flatChores.chores] } : ownState), [ownState, flatChores.chores]);
+  const dispatchRef = useRef<{ toggle: FlatChoresApi["toggle"]; toast?: (t: string, tone?: "ok" | "bad" | "info") => void }>({ toggle: flatChores.toggle });
+  dispatchRef.current.toggle = flatChores.toggle;
+  const dispatch = useCallback((a: Action) => {
+    if (a.type.startsWith("chore/") && "id" in a && typeof a.id === "string" && a.id.startsWith("flat:")) {
+      // Action sur une corvée commune : cocher/décocher passe par la base ; le reste se fait dans Colocation → Ménage.
+      if (a.type === "chore/toggle") void dispatchRef.current.toggle(a.id, a.date).then((err) => { if (err) dispatchRef.current.toast?.(err, "bad"); });
+      else if (a.type !== "chore/pin") dispatchRef.current.toast?.("Cette corvée est commune : modifiez-la dans Colocation → Ménage.", "info");
+      return;
+    }
+    ownDispatch(a);
+  }, [ownDispatch]);
   const stateRef = useRef(state); stateRef.current = state;
   setOnTimeMode(state.settings.onTimeMode); // avant tout affichage des compteurs « à l'heure »
   useFeedAutoSync(state, dispatch, env.fetchCalendar);
@@ -3845,6 +3863,7 @@ export default function StudentOS({ state, dispatch, env, view, onView, notice, 
     setToasts((t) => [...t.slice(-3), { id, text, tone, action: act }]);
     window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), action ? 6500 : 3200);
   }, []);
+  dispatchRef.current.toast = toast;
   const undoable = useCallback((a: Action, text: string) => {
     const prev = stateRef.current;
     dispatch(a);

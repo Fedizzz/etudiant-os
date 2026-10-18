@@ -61,6 +61,27 @@ try {
   await A.reload(); await sleep(1200); await A.click("[data-testid=flat-tab-menage]"); await sleep(400);
   const aRow = A.locator("[data-testid=flat-chore-row]", { hasText: "Vaisselle" }).nth(await A.evaluate(() => (new Date().getDay() + 6) % 7));
   ok((await aRow.innerText()).includes("fait par Bob"), "Alice voit « fait par Bob »");
+  // Tableau de bord : la corvée commune (tour d'Alice seule) apparaît chez elle seulement ; elle la coche, Bob voit « fait par Alice »
+  await A.locator("[data-testid=flat-tab-menage]").click(); await A.locator("summary", { hasText: "Gérer les corvées" }).click(); A.once("dialog", (d) => d.accept());
+  await A.locator("button[aria-label='Supprimer la corvée']").click(); await sleep(700);
+  await A.click("[data-testid=flat-add-chore]"); await A.selectOption("#fc-rec", "daily"); await A.fill("#fc-name", "Balai");
+  await A.locator("label", { hasText: "Bob" }).click(); await A.click("[data-testid=fc-submit]"); await sleep(900);   // rotation : Alice seule
+  await A.locator("nav >> text=Tableau de bord").click(); await sleep(800);
+  ok(await A.locator("text=Balai").count() >= 1, "tableau de bord d'Alice : « Balai » (corvée commune) affichée");
+  await B.locator("nav >> text=Tableau de bord").click(); await sleep(800);
+  ok(await B.locator("text=Balai").count() === 0, "tableau de bord de Bob : pas la corvée d'Alice");
+  await A.locator("nav >> text=Planning").click(); await sleep(800);
+  ok(await A.locator("text=Balai").count() >= 1, "planning d'Alice : « Balai » placée dans la journée");
+  await A.locator("nav >> text=Ménage").first().click(); await sleep(500);
+  ok(await A.locator("text=Balai").count() === 0, "ménage personnel : la corvée commune n'y est pas");
+  await A.locator("nav >> text=Tableau de bord").click(); await sleep(600);
+  await A.locator("button[aria-label='Marquer Balai comme faite']").click(); await sleep(1200);
+  ok(await A.locator("button[aria-label='Annuler Balai']").count() === 1, "cochée tout de suite sur le tableau de bord (sans attendre la base)");
+  await B.locator("nav >> text=Colocation").click(); await sleep(300); await B.click("[data-testid=flat-tab-menage]"); await sleep(500);
+  await B.reload(); await sleep(1200); await B.click("[data-testid=flat-tab-menage]"); await sleep(500);
+  const bRow = B.locator("[data-testid=flat-chore-row]", { hasText: "Balai" }).nth(await B.evaluate(() => (new Date().getDay() + 6) % 7));
+  ok((await bRow.innerText()).includes("fait par Alice"), "coché depuis le tableau de bord d'Alice : Bob voit « fait par Alice »");
+  await A.click("nav >> text=Colocation"); await sleep(300); await A.click("[data-testid=flat-tab-menage]");
   // Alice (propriétaire) supprime la corvée
   await A.locator("summary", { hasText: "Gérer les corvées" }).click(); A.once("dialog", (d) => d.accept());
   await A.locator("button[aria-label='Supprimer la corvée']").click(); await sleep(900);

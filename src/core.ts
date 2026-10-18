@@ -51,7 +51,7 @@ export interface Budget {
 }
 /** done : dates faites · doneBy : qui l'a faite ce jour-là · skipped : dates reportées. */
 /** recurrence « once » : une seule fois, le jour `date`. */
-export interface Chore { id: ID; name: string; recurrence: Recurrence; date?: string; day: number; minutes: number; assignees: string[]; done: string[]; doneBy?: Record<string, string>; skipped?: string[]; /** Heure fixe « HH:MM » (sinon placée automatiquement dans un créneau libre). */ time?: string; /** Checklist, et étapes cochées par date. */ steps?: Step[]; stepsDone?: Record<string, ID[]>; /** Jour où chaque occurrence a été cochée. */ doneOn?: Record<string, string>; /** Heure fixée par le planning pour une date (le bloc ne bouge plus ensuite). */ pinned?: Record<string, string>; /** Heure où chaque occurrence a été cochée. */ doneTime?: Record<string, string> }
+export interface Chore { id: ID; name: string; /** Corvée de la colocation (base de données) fusionnée dans l'affichage ; jamais enregistrée dans l'état personnel ni comptée dans vos statistiques. */ shared?: boolean; recurrence: Recurrence; date?: string; day: number; minutes: number; assignees: string[]; done: string[]; doneBy?: Record<string, string>; skipped?: string[]; /** Heure fixe « HH:MM » (sinon placée automatiquement dans un créneau libre). */ time?: string; /** Checklist, et étapes cochées par date. */ steps?: Step[]; stepsDone?: Record<string, ID[]>; /** Jour où chaque occurrence a été cochée. */ doneOn?: Record<string, string>; /** Heure fixée par le planning pour une date (le bloc ne bouge plus ensuite). */ pinned?: Record<string, string>; /** Heure où chaque occurrence a été cochée. */ doneTime?: Record<string, string> }
 /** Calendrier externe abonné (lien .ics Celcat, iCloud, Google…). */
 export interface CalFeed { id: ID; name: string; url: string; color: string; lastSync: string | null; lastError: string | null; count?: number }
 /** Occurrence importée d'un calendrier abonné (remplacée à chaque actualisation). */
@@ -265,6 +265,8 @@ export type Action =
   | { type: "timer/finish"; now: number; secondsDone?: number; date: string }
   | { type: "timer/sync"; cfg: PomodoroCfg };
 
+/** Retire les corvées de la colocation (affichage seulement) avant d'enregistrer ou d'exporter l'état personnel. */
+export const withoutShared = (s: AppState): AppState => (s.chores.some((c) => c.shared) ? { ...s, chores: s.chores.filter((c) => !c.shared) } : s);
 export const norm = (x: string) => x.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 export function learnProduct(list: Product[], p: Omit<Product, "count" | "last">, bought = false): Product[] {
   const k = norm(p.name); if (!k) return list;
@@ -276,7 +278,7 @@ export function learnProduct(list: Product[], p: Omit<Product, "count" | "last">
 
 export function reducer(s: AppState, a: Action): AppState {
   switch (a.type) {
-    case "replace": return a.state;
+    case "replace": return withoutShared(a.state);
     case "task/add": return { ...s, tasks: [a.task, ...s.tasks] };
     case "task/update": return {
       ...s, tasks: s.tasks.map((t) => {
@@ -1035,6 +1037,7 @@ export function choreOnTimeStats(chores: Chore[], today: string, days = 365, me 
   let ok = 0, late = 0;
   const t0 = parseISO(today);
   for (const c of chores) {
+    if (c.shared) continue; // corvées de la colocation : pas dans vos statistiques personnelles
     const known = [...c.done, ...(c.skipped ?? [])].sort()[0];
     for (let i = 0; i < days; i++) {
       const d = addDays(t0, -i), k = iso(d);
@@ -1137,7 +1140,7 @@ export function activeDays(state: AppState): Set<string> {
   const days = new Set<string>();
   for (const t of state.tasks) if (t.status === "done" && t.doneAt) days.add(t.doneAt);
   for (const t of state.todos ?? []) if (t.done && t.doneAt) days.add(t.doneAt);
-  for (const c of state.chores) for (const d of c.done) days.add(c.doneOn?.[d] ?? d);
+  for (const c of state.chores) if (!c.shared) for (const d of c.done) days.add(c.doneOn?.[d] ?? d);
   for (const h of state.habits ?? []) for (const d of h.done) days.add(d);
   return days;
 }
@@ -1145,7 +1148,7 @@ export function activeDays(state: AppState): Set<string> {
 export function xpOf(state: AppState): number {
   const today = todayISO();
   const n = state.tasks.filter((t) => t.status === "done").length + (state.todos ?? []).filter((t) => t.done).length
-    + state.chores.reduce((k, c) => k + c.done.length, 0) + (state.habits ?? []).reduce((k, h) => k + h.done.length, 0);
+    + state.chores.reduce((k, c) => k + (c.shared ? 0 : c.done.length), 0) + (state.habits ?? []).reduce((k, h) => k + h.done.length, 0);
   const onTime = taskOnTimeStats(state.tasks, today).ok + todoOnTimeStats(state.todos ?? [], today).ok + choreOnTimeStats(state.chores, today).ok;
   return n * 10 + onTime * 5;
 }

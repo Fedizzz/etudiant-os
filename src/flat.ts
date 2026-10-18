@@ -75,3 +75,16 @@ export function flatChoreAssignee(c: FlatChore, d: Date, activeIds: string[]): s
   const l = asLocal(c, activeIds);
   return l.assignees.length ? choreAssignee(l, d) : null;
 }
+
+/** Corvées communes sous la forme des corvées personnelles (assignees = prénoms, « Moi » pour soi) : le planning et le tableau de bord les traitent comme les autres.
+ *  `shared: true` les exclut des statistiques personnelles ; elles ne sont jamais enregistrées dans l'état de l'utilisateur. */
+export function virtualChores(flat: Pick<Flat, "me" | "members">, chores: FlatChore[], done: FlatChoreDone[]): Chore[] {
+  const active = flat.members.filter((m) => !m.left);
+  const label = (id: string) => id === flat.me ? "Moi" : (() => { const n = active.find((m) => m.user_id === id)?.display_name ?? "?"; return n === "Moi" ? "Moi (colocataire)" : n; })();
+  return chores.map((c) => {
+    const l = asLocal(c, active.map((m) => m.user_id));
+    const mine = done.filter((d) => d.chore_id === c.id);
+    return { ...l, id: `flat:${c.id}`, shared: true, assignees: l.assignees.map(label),
+      done: mine.map((d) => d.done_on), doneBy: Object.fromEntries(mine.map((d) => [d.done_on, label(d.done_by)])), doneOn: Object.fromEntries(mine.map((d) => [d.done_on, d.done_on])) };
+  });
+}

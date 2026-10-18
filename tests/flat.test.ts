@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { balances, centsFromInput, flatChoreAssignee, flatChoreOn, settleUp, splitEqual } from "../src/flat.ts";
+import { balances, centsFromInput, flatChoreAssignee, flatChoreOn, settleUp, splitEqual, virtualChores } from "../src/flat.ts";
+import { choreAssignee, choreOnTimeStats, planFor, blank, xpOf, activeDays, reducer, withoutShared } from "../src/core.ts";
 import type { FlatChore } from "../src/flat.ts";
 
 const sum = (o: Record<string, number>) => Object.values(o).reduce((a, b) => a + b, 0);
@@ -84,4 +85,54 @@ test("corvée commune : un ancien membre est retiré de la rotation ; sans perso
   for (let d = 1; d <= 6; d++) assert.equal(flatChoreAssignee(c, new Date(2026, 9, d), ["a"]), "a");
   assert.equal(flatChoreAssignee(chore({ rotation: [] }), new Date(2026, 9, 14), ["a", "b"]), null);
   assert.equal(flatChoreAssignee(chore({ rotation: ["gone"] }), new Date(2026, 9, 14), ["a"]), null);
+});
+
+const FLAT = { me: "a", members: [{ user_id: "a", display_name: "Alice", role: "owner" as const, left: false }, { user_id: "b", display_name: "Bob", role: "member" as const, left: false }] };
+test("virtualChores : « Moi » pour soi, prénom pour les autres, fait par visible", () => {
+  const v = virtualChores(FLAT, [chore({ recurrence: "daily" })], [{ chore_id: "c", flat_id: "f", done_on: "2026-10-14", done_by: "b" }]);
+  assert.equal(v.length, 1);
+  assert.equal(v[0].id, "flat:c"); assert.equal(v[0].shared, true);
+  assert.deepEqual(v[0].assignees, ["Moi", "Bob"]);
+  assert.deepEqual(v[0].done, ["2026-10-14"]);
+  assert.equal(v[0].doneBy?.["2026-10-14"], "Bob");
+  const who = new Set([0, 1, 2, 3].map((i) => choreAssignee(v[0], new Date(2026, 9, 10 + i))));
+  assert.deepEqual([...who].sort(), ["Bob", "Moi"]);
+});
+test("virtualChores : l'ancien membre disparaît de la rotation ; le nom « Moi » d'un colocataire ne prête pas à confusion", () => {
+  const f = { me: "a", members: [...FLAT.members, { user_id: "x", display_name: "Moi", role: "member" as const, left: false }, { user_id: "gone", display_name: "Zoé", role: "member" as const, left: true }] };
+  const v = virtualChores(f, [chore({ rotation: ["a", "gone", "x"] })], []);
+  assert.deepEqual(v[0].assignees, ["Moi", "Moi (colocataire)"]);
+});
+test("planning : la corvée commune apparaît à son tour, pas quand c'est le tour d'un autre ni quand elle est faite", () => {
+  const base0 = blank({ name: "T" }, 600);
+  const today = "2026-10-14";   // mercredi
+  const v = virtualChores(FLAT, [chore({ recurrence: "daily", rotation: ["a"], minutes: 20 })], []);
+  const has = (st: typeof base0, date: string) => planFor(st, date, today).blocks.some((b) => b.kind === "chore" && b.refId === "flat:c");
+  assert.equal(has({ ...base0, chores: v }, today), true, "à faire aujourd'hui, pour moi");
+  const other = virtualChores(FLAT, [chore({ recurrence: "daily", rotation: ["b"] })], []);
+  assert.equal(has({ ...base0, chores: other }, today), false, "tour de Bob");
+  const doneV = virtualChores(FLAT, [chore({ recurrence: "daily", rotation: ["a"] })], [{ chore_id: "c", flat_id: "f", done_on: today, done_by: "b" }]);
+  assert.equal(has({ ...base0, chores: doneV }, today), false, "déjà faite par Bob");
+});
+test("statistiques personnelles : les corvées communes ne comptent pas", () => {
+  const base0 = blank({ name: "T" }, 600);
+  const v = virtualChores(FLAT, [chore({ recurrence: "daily", rotation: ["a"] })], [{ chore_id: "c", flat_id: "f", done_on: "2026-10-13", done_by: "a" }]);
+  const st = { ...base0, chores: v };
+  assert.equal(xpOf(st), xpOf(base0));
+  assert.equal(activeDays(st).size, activeDays(base0).size);
+  assert.deepEqual(choreOnTimeStats(v, "2026-10-14"), { ok: 0, late: 0 });
+});
+
+test("les corvées communes ne sont jamais enregistrées dans l'état personnel (replace / export)", () => {
+  const base0 = blank({ name: "T" }, 600);
+  const v = virtualChores(FLAT, [chore({ recurrence: "daily", rotation: ["a"] })], []);
+  const merged = { ...base0, chores: [...base0.chores, ...v] };
+  assert.equal(withoutShared(merged).chores.length, base0.chores.length);
+  assert.equal(reducer(base0, { type: "replace", state: merged }).chores.some((c) => c.shared), false);
+  assert.equal(withoutShared(base0), base0, "sans corvée commune : même objet, rien ne change");
+});
+test("sans appartement : aucune corvée ajoutée au planning ni aux statistiques", () => {
+  const base0 = blank({ name: "T" }, 600);
+  assert.deepEqual(virtualChores(FLAT, [], []), []);
+  assert.equal(xpOf(base0), xpOf({ ...base0, chores: [...base0.chores, ...virtualChores(FLAT, [], [])] }));
 });

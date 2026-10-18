@@ -7,6 +7,7 @@ import { supabase } from "./supabase.ts";
 import { balances, centsFromInput, eurosOf, flatChoreAssignee, flatChoreOn, nameOf, settleUp, sharesFor } from "./flat.ts";
 import type { Flat, FlatChore, FlatChoreDone, FlatExpense, FlatGrocery } from "./flat.ts";
 import * as api from "./flatApi.ts";
+import { FLAT_CHANGED } from "./useFlatChores.ts";
 import { DAYS, DAYS_LONG, addDays, cx, fmtDate, iso, todayISO, weekday } from "./core.ts";
 
 type Tab = "courses" | "depenses" | "menage" | "membres";
@@ -77,11 +78,12 @@ export const FlatView: React.FC = () => {
   const act = async (fn: () => Promise<unknown>, ok?: string) => {
     try { await fn(); if (ok) toast(ok, "ok"); } catch (e) { toast(api.flatError(e), "bad"); }
     busy.current = false; await refresh();
+    window.dispatchEvent(new Event(FLAT_CHANGED));
   };
 
   if (!sb || env.mode !== "cloud") return <Card><Empty icon={<Users size={18} />} title="Colocation : compte nécessaire" hint="Créez un compte (Réglages) pour partager une liste de courses et des dépenses avec vos colocataires. En mode local, les données restent sur cet appareil seulement." /></Card>;
   if (flat === undefined) return <Card><p className="py-8 text-center text-sm text-muted">Chargement…</p></Card>;
-  if (flat === null) return <NoFlat err={err} defaultName={env.account?.displayName ?? ""} onCreate={(n, d) => act(() => api.createFlat(sb, n, d), "Appartement créé")} onJoin={async (c, d) => { try { const okj = await api.joinFlat(sb, c, d); if (!okj) { toast("Code d'invitation invalide.", "bad"); return; } toast("Vous avez rejoint l'appartement", "ok"); } catch (e) { toast(api.flatError(e), "bad"); } busy.current = false; await refresh(); }} />;
+  if (flat === null) return <NoFlat err={err} defaultName={env.account?.displayName ?? ""} onCreate={(n, d) => act(() => api.createFlat(sb, n, d), "Appartement créé")} onJoin={async (c, d) => { try { const okj = await api.joinFlat(sb, c, d); if (!okj) { toast("Code d'invitation invalide.", "bad"); return; } toast("Vous avez rejoint l'appartement", "ok"); } catch (e) { toast(api.flatError(e), "bad"); } busy.current = false; await refresh(); window.dispatchEvent(new Event(FLAT_CHANGED)); }} />;
 
   const active = flat.members.filter((m) => !m.left);
   const iAmOwner = flat.members.find((m) => m.user_id === flat.me)?.role === "owner";
