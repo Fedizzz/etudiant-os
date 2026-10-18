@@ -65,6 +65,16 @@ try {
   await reload(B); await nav(B, "Budget"); await scope(B, "budget", "flat");
   ok(await B.locator("[data-testid=flat-expenses] li", { hasText: "Internet" }).locator("button[aria-label='Supprimer la dépense']").count() === 0, "Bob (membre) n'a pas de bouton supprimer sur la dépense d'Alice");
 
+  // ---- Budget personnel : MA part des dépenses communes (courses incluses), pas les remboursements
+  await nav(A, "Budget"); await scope(A, "budget", "perso");
+  const liA = A.locator("li", { hasText: "colocation (ma part)" });
+  ok(await liA.count() === 2, "budget perso d'Alice : 2 lignes « colocation (ma part) » (courses + internet), pas le remboursement");
+  ok((await liA.filter({ hasText: "Courses" }).first().innerText()).includes("5,00"), "courses partagées payées par Bob : ma part 5,00 € dans mon budget");
+  ok((await liA.filter({ hasText: "Internet" }).first().innerText()).includes("3,51"), "internet payé par moi (7,01 €) : ma part 3,51 € seulement");
+  ok(await liA.first().locator("button[aria-label='Supprimer la dépense']").count() === 0 && await liA.first().locator("button[aria-label='Modifier la dépense']").count() === 0, "ces lignes ne se modifient pas ici (elles viennent de la colocation)");
+  await nav(B, "Budget"); await scope(B, "budget", "perso");
+  ok(await B.locator("li", { hasText: "colocation (ma part)" }).filter({ hasText: "3,50" }).count() === 1 && await B.locator("li", { hasText: "colocation (ma part)" }).filter({ hasText: "5,00" }).count() === 1, "budget perso de Bob : 5,00 € et 3,50 €");
+
   // ---- Ménage : même écran que le ménage personnel (suggestions, rotation, checklist, report…)
   await nav(A, "Ménage"); await scope(A, "chores", "flat");
   ok(await A.locator("text=Aucune corvée définie").count() === 1, "ménage commun : vide au départ");

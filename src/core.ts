@@ -38,7 +38,7 @@ export interface Task {
 export interface Step { id: ID; text: string; done?: boolean }
 export interface GroceryItem { id: ID; name: string; aisle: Aisle; qty: string; checked: boolean; price: number }
 /** source et recurringId permettent de savoir d'où vient une dépense et d'éviter les doublons. */
-export interface Expense { id: ID; date: string; amount: number; category: ExpenseCat; label: string; source?: "manuel" | "courses" | "recurrente" | "ticket"; recurringId?: ID; items?: string[]; /** Empreinte « date|centimes » d'un ticket lu par le scanner (détecte un ticket déjà enregistré). */ ticket?: string }
+export interface Expense { id: ID; date: string; amount: number; category: ExpenseCat; label: string; source?: "manuel" | "courses" | "recurrente" | "ticket" | "colocation"; recurringId?: ID; /** Ma part d'une dépense de la colocation, ajoutée à l'affichage seulement (jamais enregistrée dans l'état personnel). */ shared?: boolean; items?: string[]; /** Empreinte « date|centimes » d'un ticket lu par le scanner (détecte un ticket déjà enregistré). */ ticket?: string }
 /** Dépense récurrente mensuelle (loyer, abonnement…) : ajoutée une seule fois par mois, au jour indiqué. */
 export interface RecurringExpense { id: ID; label: string; amount: number; category: ExpenseCat; day: number; active: boolean; since: string; skipMonths?: string[] }
 /** Argent reçu (paye, bourse, famille, ami…). */
@@ -266,7 +266,11 @@ export type Action =
   | { type: "timer/sync"; cfg: PomodoroCfg };
 
 /** Retire les corvées de la colocation (affichage seulement) avant d'enregistrer ou d'exporter l'état personnel. */
-export const withoutShared = (s: AppState): AppState => (s.chores.some((c) => c.shared) ? { ...s, chores: s.chores.filter((c) => !c.shared) } : s);
+export const withoutShared = (s: AppState): AppState => {
+  const ch = s.chores.some((c) => c.shared), ex = s.budget.expenses.some((e) => e.shared);
+  if (!ch && !ex) return s;
+  return { ...s, ...(ch ? { chores: s.chores.filter((c) => !c.shared) } : {}), ...(ex ? { budget: { ...s.budget, expenses: s.budget.expenses.filter((e) => !e.shared) } } : {}) };
+};
 export const norm = (x: string) => x.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 export function learnProduct(list: Product[], p: Omit<Product, "count" | "last">, bought = false): Product[] {
   const k = norm(p.name); if (!k) return list;

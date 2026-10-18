@@ -198,6 +198,7 @@ const FlatExpenses: React.FC<{ flat: Flat; expenses: FlatExpense[]; act: Act; sb
         <p className="text-sm" data-testid="flat-my-balance">{myBal === 0 ? "Vous êtes à l'équilibre." : myBal > 0 ? <>On vous doit <b className="font-mono text-ok">{eurosOf(myBal)}</b> au total.</> : <>Vous devez <b className="font-mono text-bad">{eurosOf(-myBal)}</b> au total.</>}</p>
         <Btn variant="primary" onClick={() => setAdd(true)} data-testid="flat-add-expense"><Plus size={14} />Ajouter une dépense</Btn>
       </div>
+      <p className="mb-3 rounded-lg bg-sunken px-3 py-2 text-xs text-muted" data-testid="flat-budget-note">Votre <b className="text-fg">part</b> de chaque dépense commune (courses comprises) est comptée automatiquement dans votre budget personnel, que ce soit vous ou un colocataire qui ait payé. Rembourser un colocataire ne la recompte pas.</p>
       <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted">Qui doit combien à qui</p>
       {!transfers.length ? <p className="mb-3 rounded-lg bg-sunken px-3 py-2 text-xs text-muted" data-testid="flat-settled">Tout est réglé : personne ne doit rien.</p> : (
         <ul className="mb-3 flex flex-col gap-1.5" data-testid="flat-transfers">

@@ -3,11 +3,11 @@
  * Sert : l'onglet Colocation (membres, code), les onglets Courses / Budget / Ménage (version colocation) et le planning (corvées). */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { choreStepsDone } from "./core.ts";
-import type { Action, Chore } from "./core.ts";
+import type { Action, Chore, Expense } from "./core.ts";
 import type { AppEnv } from "./env.ts";
 import { supabase } from "./supabase.ts";
 import * as api from "./flatApi.ts";
-import { choreToRpc, virtualChores } from "./flat.ts";
+import { choreToRpc, virtualChores, virtualExpenses } from "./flat.ts";
 import type { Flat, FlatChore, FlatChoreDone, FlatExpense, FlatGrocery } from "./flat.ts";
 
 export interface FlatData {
@@ -22,12 +22,14 @@ export interface FlatData {
   act(fn: () => Promise<unknown>, ok?: string): Promise<void>;
   /** Corvées communes sous la forme des corvées personnelles (planning, tableau de bord). Vide hors appartement. */
   virtual: Chore[];
+  /** Ma part des dépenses communes, sous la forme de dépenses du budget personnel (affichage seulement). Vide hors appartement. */
+  virtualExpenses: Expense[];
   /** Action sur une corvée commune (ajout, coche, report, étape, modification, suppression) : même vocabulaire que le ménage personnel. Affichage immédiat quand c'est possible, puis relecture. Renvoie un message d'erreur ou null. */
   choreAction(a: Action): Promise<string | null>;
   /** Fonction d'affichage des messages, branchée par l'application. */
   notify: { current: ((text: string, tone?: "ok" | "bad" | "info") => void) | null };
 }
-const OFF: FlatData = { status: "off", flat: null, groceries: [], expenses: [], chores: [], done: [], choresOk: true, err: null, refresh: async () => {}, act: async () => {}, virtual: [], choreAction: async () => null, notify: { current: null } };
+const OFF: FlatData = { status: "off", flat: null, groceries: [], expenses: [], chores: [], done: [], choresOk: true, err: null, refresh: async () => {}, act: async () => {}, virtual: [], virtualExpenses: [], choreAction: async () => null, notify: { current: null } };
 
 const todayLocal = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 export function useFlatData(env: AppEnv): FlatData {
@@ -70,6 +72,7 @@ export function useFlatData(env: AppEnv): FlatData {
     try { await fn(); if (ok) notify.current?.(ok, "ok"); } catch (e) { notify.current?.(api.flatError(e), "bad"); }
     busy.current = false; await refresh();
   }, [refresh]);
+  const vexp = useMemo(() => (flat && status === "in" ? virtualExpenses(flat.me, expenses) : []), [flat, status, expenses]);
   const virtual = useMemo(() => (flat && status === "in" ? virtualChores(flat, chores, done) : []), [flat, status, chores, done]);
   /** Modifie localement l'état d'un jour (affichage immédiat avant la réponse de la base). */
   const patchDay = useCallback((cid: string, date: string, fn: (r: FlatChoreDone) => FlatChoreDone) => {
@@ -116,8 +119,8 @@ export function useFlatData(env: AppEnv): FlatData {
     } catch (e) { return await refreshAfter(e); }
   }, [flat, virtual, done, refresh, patchDay]);
 
-  return useMemo(() => (!live ? OFF : { status, flat, groceries, expenses, chores, done, choresOk, err, refresh, act, virtual, choreAction, notify }),
-    [live, status, flat, groceries, expenses, chores, done, choresOk, err, refresh, act, virtual, choreAction]);
+  return useMemo(() => (!live ? OFF : { status, flat, groceries, expenses, chores, done, choresOk, err, refresh, act, virtual, virtualExpenses: vexp, choreAction, notify }),
+    [live, status, flat, groceries, expenses, chores, done, choresOk, err, refresh, act, virtual, vexp, choreAction]);
 }
 
 export const FlatCtx = createContext<FlatData>(OFF);

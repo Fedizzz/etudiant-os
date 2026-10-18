@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { balances, centsFromInput, choreToRpc, flatChoreAssignee, flatChoreOn, settleUp, splitEqual, virtualChores } from "../src/flat.ts";
-import { choreAssignee, choreDoneLate, choreOnTimeStats, planFor, blank, xpOf, activeDays, reducer, withoutShared } from "../src/core.ts";
+import { balances, centsFromInput, choreToRpc, flatChoreAssignee, flatChoreOn, flatExpenseCategory, settleUp, splitEqual, virtualChores, virtualExpenses } from "../src/flat.ts";
+import type { FlatExpense } from "../src/flat.ts";
+import { budgetStats, choreAssignee, choreDoneLate, choreOnTimeStats, planFor, blank, xpOf, activeDays, reducer, withoutShared } from "../src/core.ts";
 import type { FlatChore } from "../src/flat.ts";
 
 const sum = (o: Record<string, number>) => Object.values(o).reduce((a, b) => a + b, 0);
@@ -158,4 +159,34 @@ test("choreToRpc : « Moi » = soi, prénoms rapprochés des membres, étapes ne
   assert.deepEqual(r, { name: "Frigo", recurrence: "weekly", day: 6, due: null, minutes: 20, time: "18:00", steps: [{ id: "1", text: "Vider" }], rotation: ["a", "b"] });
   const once = choreToRpc(FLAT, { name: "Grand ménage", recurrence: "once", day: 1, minutes: 9999, assignees: ["Bob"], date: "2026-10-20" });
   assert.equal(once.due, "2026-10-20"); assert.equal(once.minutes, 600); assert.deepEqual(once.rotation, ["b"]); assert.equal(once.time, null);
+});
+
+const fe = (p: Partial<FlatExpense>): FlatExpense => ({ id: "e", flat_id: "f", kind: "expense", paid_by: "b", amount_cents: 1000, label: "Courses", spent_on: "2026-10-14", shares: { a: 500, b: 500 }, items: [], created_by: "b", created_at: "", ...p });
+test("budget personnel : ma part de chaque dépense commune (que j'aie payé ou non), jamais les remboursements", () => {
+  const v = virtualExpenses("a", [
+    fe({ id: "1", paid_by: "b", amount_cents: 1000, shares: { a: 500, b: 500 }, items: ["Lait"] }),             // Bob a payé : ma part 5 €
+    fe({ id: "2", paid_by: "a", amount_cents: 701, label: "Internet", shares: { a: 351, b: 350 } }),             // j'ai payé : ma part 3,51 € (pas 7,01)
+    fe({ id: "3", kind: "payment", paid_by: "a", amount_cents: 500, label: "Remboursement", shares: { b: 500 } }), // remboursement : ignoré
+    fe({ id: "4", paid_by: "b", amount_cents: 900, shares: { b: 900 } }),                                         // ne me concerne pas
+  ]);
+  assert.deepEqual(v.map((e) => [e.id, e.amount, e.category]), [["flat:1", 5, "Courses"], ["flat:2", 3.51, "Logement"]]);
+  assert.ok(v.every((e) => e.shared === true && e.source === "colocation"));
+});
+test("budget personnel : les parts communes comptent dans les totaux du mois (Courses comprises), sans rien enregistrer", () => {
+  const base0 = blank({ name: "T" }, 600);
+  const v = virtualExpenses("a", [fe({ items: ["Lait"] })]);
+  const merged = { ...base0, budget: { ...base0.budget, expenses: [...base0.budget.expenses, ...v] } };
+  const cats = ["Courses", "Logement", "Autre"];
+  const before = budgetStats(base0.budget, "2026-10", "2026-10-18", cats), after = budgetStats(merged.budget, "2026-10", "2026-10-18", cats);
+  assert.equal(Math.round((after.spent - before.spent) * 100), 500);
+  assert.equal(Math.round(((after.byCat.find((c) => c.cat === "Courses")?.spent ?? 0) - (before.byCat.find((c) => c.cat === "Courses")?.spent ?? 0)) * 100), 500);
+  assert.equal(withoutShared(merged).budget.expenses.length, base0.budget.expenses.length);
+  assert.equal(reducer(base0, { type: "replace", state: merged }).budget.expenses.some((e) => e.shared), false);
+});
+test("catégorie d'une dépense commune", () => {
+  assert.equal(flatExpenseCategory({ label: "Loyer octobre", items: [] }), "Logement");
+  assert.equal(flatExpenseCategory({ label: "Facture électricité", items: [] }), "Logement");
+  assert.equal(flatExpenseCategory({ label: "Carrefour", items: [] }), "Courses");
+  assert.equal(flatExpenseCategory({ label: "Pizza", items: [] }), "Autre");
+  assert.equal(flatExpenseCategory({ label: "x", items: ["Lait"] }), "Courses");
 });

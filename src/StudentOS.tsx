@@ -2580,11 +2580,11 @@ const PersonalBudget: React.FC = () => {
                 {exp.map((e) => (
                   <li key={e.id} className="group flex items-center gap-3 py-2 text-[13px]">
                     <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl text-[11px] font-semibold text-white" style={{ background: CAT_COLOR[e.category] }}>{e.category.slice(0, 2)}</span>
-                    <div className="min-w-0 flex-1"><p className="truncate font-medium">{e.label}</p><p className="text-[11px] text-muted">{fmtDate(e.date)} · {e.category}{e.source === "courses" ? ` · liste de courses${e.items?.length ? ` (${e.items.length})` : ""}` : e.source === "recurrente" ? " · récurrente" : e.source === "ticket" ? " · ticket scanné" : ""}</p></div>
+                    <div className="min-w-0 flex-1"><p className="truncate font-medium">{e.label}</p><p className="text-[11px] text-muted">{fmtDate(e.date)} · {e.category}{e.source === "courses" ? ` · liste de courses${e.items?.length ? ` (${e.items.length})` : ""}` : e.source === "recurrente" ? " · récurrente" : e.source === "ticket" ? " · ticket scanné" : e.source === "colocation" ? " · colocation (ma part)" : ""}</p></div>
                     <span className="font-mono tabular-nums">−{money(e.amount, cur)}</span>
                     {e.items?.length ? <button className="text-muted opacity-60 hover:text-accent group-hover:opacity-100" aria-label="Remettre ces articles dans la liste de courses" title="Racheter ces articles" onClick={() => rebuy(e)}><Repeat size={13} /></button> : null}
-                    <button className="text-muted opacity-60 hover:text-accent group-hover:opacity-100" aria-label="Modifier la dépense" onClick={() => setEditing(e)}><Pencil size={13} /></button>
-                    <button className="text-muted opacity-60 hover:text-bad group-hover:opacity-100" aria-label="Supprimer la dépense" onClick={() => undoable({ type: "expense/remove", id: e.id }, `Dépense « ${e.label} » supprimée`)}><Trash2 size={13} /></button>
+                    {!e.shared && <button className="text-muted opacity-60 hover:text-accent group-hover:opacity-100" aria-label="Modifier la dépense" onClick={() => setEditing(e)}><Pencil size={13} /></button>}
+                    {!e.shared && <button className="text-muted opacity-60 hover:text-bad group-hover:opacity-100" aria-label="Supprimer la dépense" onClick={() => undoable({ type: "expense/remove", id: e.id }, `Dépense « ${e.label} » supprimée`)}><Trash2 size={13} /></button>}
                   </li>))}
               </ul>) : <Empty icon={<Receipt size={18} />} title="Aucune dépense ce mois-ci" hint="Ajoutez une dépense à droite, ou validez vos achats depuis la liste de courses." />}
           </Card>
@@ -3809,7 +3809,9 @@ export interface StudentOSProps {
 export default function StudentOS({ state: ownState, dispatch: ownDispatch, env, view, onView, notice, headerExtra, menuExtra, override }: StudentOSProps) {
   // Colocation (seulement avec un compte) : données partagées par toute l'application ; ses corvées sont fusionnées dans l'AFFICHAGE (planning, tableau de bord), jamais enregistrées dans l'état personnel.
   const flatData = useFlatData(env);
-  const state = useMemo(() => (flatData.virtual.length ? { ...ownState, chores: [...ownState.chores, ...flatData.virtual] } : ownState), [ownState, flatData.virtual]);
+  const state = useMemo(() => (flatData.virtual.length || flatData.virtualExpenses.length
+    ? { ...ownState, chores: [...ownState.chores, ...flatData.virtual], budget: flatData.virtualExpenses.length ? { ...ownState.budget, expenses: [...ownState.budget.expenses, ...flatData.virtualExpenses] } : ownState.budget }
+    : ownState), [ownState, flatData.virtual, flatData.virtualExpenses]);
   const flatRef = useRef(flatData); flatRef.current = flatData;
   const dispatch = useCallback((a: Action) => {
     // Corvée commune (id « flat:… », ou ajout marqué « shared ») : tout passe par la base ; l'heure figée par le planning (chore/pin) n'est pas enregistrée.
@@ -3817,6 +3819,8 @@ export default function StudentOS({ state: ownState, dispatch: ownDispatch, env,
       void flatRef.current.choreAction(a).then((err) => { if (err) flatRef.current.notify.current?.(err, "bad"); });
       return;
     }
+    // Ma part d'une dépense commune (id « flat:… ») : elle se modifie dans Budget → Colocation.
+    if ((a.type === "expense/remove" || a.type === "expense/update") && a.id.startsWith("flat:")) { flatRef.current.notify.current?.("Dépense partagée : modifiez-la dans Budget, en mode Colocation.", "info"); return; }
     ownDispatch(a);
   }, [ownDispatch]);
   const stateRef = useRef(state); stateRef.current = state;

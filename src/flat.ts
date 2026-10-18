@@ -58,7 +58,7 @@ export const nameOf = (flat: Pick<Flat, "members">, id: string) => flat.members.
 
 // ---------------------------------------------------------------- Ménage partagé
 import { choreAssignee, choreScheduledOn } from "./core.ts";
-import type { Chore } from "./core.ts";
+import type { Chore, Expense, ExpenseCat } from "./core.ts";
 
 export interface FlatChore { id: string; flat_id: string; name: string; recurrence: "daily" | "weekly" | "biweekly" | "once"; day: number; due_on: string | null; minutes: number; time: string | null; steps: { id: string; text: string }[]; rotation: string[]; created_by: string }
 /** État d'un jour d'une corvée : fait (done_by renseigné), reporté et/ou étapes cochées. ticked_on = jour réel du coche (null pour d'anciennes lignes). */
@@ -100,4 +100,23 @@ export function choreToRpc(flat: Pick<Flat, "me" | "members">, c: Pick<Chore, "n
   const ids = c.assignees.map((n) => n === "Moi" ? flat.me : (active.find((m) => m.display_name === n || (n === "Moi (colocataire)" && m.display_name === "Moi"))?.user_id ?? null)).filter((x): x is string => !!x);
   return { name: c.name.trim(), recurrence: c.recurrence, day: c.day, due: c.recurrence === "once" ? (c.date ?? null) : null, minutes: Math.max(1, Math.min(600, Math.round(c.minutes) || 20)),
     time: c.time ?? null, steps: (c.steps ?? []).map((x) => ({ id: x.id, text: x.text.trim() })).filter((x) => x.text).slice(0, 40), rotation: [...new Set(ids)] };
+}
+
+// ---------------------------------------------------------------- Budget personnel : ma part des dépenses communes
+/** Catégorie du budget personnel pour une dépense commune : achats de la liste commune → Courses ; charges connues → Logement ; sinon Autre. */
+export function flatExpenseCategory(e: Pick<FlatExpense, "label" | "items">): ExpenseCat {
+  if (e.items?.length) return "Courses";
+  if (/(?<!\p{L})(loyer|internet|wifi|box|fibre|[ée]lectricit[ée]|[ée]nergie|eau|gaz|charges|assurance|syndic)(?!\p{L})/iu.test(e.label)) return "Logement";
+  if (/(?<!\p{L})(courses?|supermarch[ée]|carrefour|lidl|aldi|auchan|leclerc|intermarch[ée]|monoprix|franprix)(?!\p{L})/iu.test(e.label)) return "Courses";
+  return "Autre";
+}
+/** MA part de chaque dépense commune (en euros), sous la forme des dépenses du budget personnel, pour l'affichage seulement.
+ *  Modèle « consommation » : on compte ce que coûte chaque dépense à CHACUN (sa part), que ce soit lui ou un colocataire qui ait payé ;
+ *  les remboursements entre colocataires ne sont donc PAS recomptés (sinon la même dépense compterait deux fois). */
+export function virtualExpenses(me: string, expenses: FlatExpense[]): Expense[] {
+  return expenses.filter((e) => e.kind === "expense" && (e.shares[me] ?? 0) > 0).map((e) => ({
+    id: `flat:${e.id}`, date: e.spent_on, amount: e.shares[me] / 100, category: flatExpenseCategory(e),
+    label: e.label || "Dépense partagée", source: "colocation" as const, shared: true,
+    ...(e.items?.length ? { items: e.items } : {}),
+  }));
 }
