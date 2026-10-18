@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { MiniPdf } from "./pdf.ts";
@@ -535,13 +536,15 @@ const TaskForm: React.FC<{ onDone: () => void; task?: Task }> = ({ onDone, task 
 
 export const Modal: React.FC<{ title: string; onClose: () => void; children: React.ReactNode }> = ({ title, onClose, children }) => {
   useEffect(() => { const k = (e: KeyboardEvent) => e.key === "Escape" && onClose(); window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, [onClose]);
-  return (
-    <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/40 backdrop-blur-[2px] animate-fade sm:items-start sm:px-4 sm:pt-[12vh]" onMouseDown={onClose}>
+  // Affichée à la racine de la page (portail) : couvre aussi l'en-tête et le menu, quel que soit l'endroit d'où elle est ouverte.
+  return createPortal(
+    <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/40 backdrop-blur-[2px] animate-fade sm:items-start sm:px-4 sm:pt-[12vh]" onMouseDown={onClose}>
       <div className="inked sheet max-h-[88vh] w-full max-w-xl overflow-y-auto rounded-t-[22px] bg-panel animate-pop sm:max-h-[80vh] sm:rounded-[22px]" onMouseDown={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={title}>
         <header className="flex items-center justify-between border-b border-line px-5 py-3"><h2 className="font-display text-lg font-bold">{title}</h2><Btn variant="ghost" size="sm" onClick={onClose} aria-label="Fermer"><X size={14} /></Btn></header>
         <div className="p-5">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 
