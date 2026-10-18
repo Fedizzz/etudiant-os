@@ -109,6 +109,8 @@ export interface AppState {
   todos?: Todo[];
   /** Bloc-notes de l'onglet Académique : texte libre et dessin (PNG, Apple Pencil / doigt). */
   notes?: { text: string; ink?: string };
+  /** Achats (clé « idDépense|n° ») marqués comme consommés dans « À la maison ». */
+  pantryUsed?: string[];
   templates: GroceryTemplate[]; products: Product[]; timer: TimerState;
 }
 
@@ -234,7 +236,7 @@ export type Action =
   | { type: "task/add"; task: Task } | { type: "task/update"; id: ID; patch: Partial<Task> } | { type: "task/remove"; id: ID }
   | { type: "course/add"; course: Course } | { type: "course/update"; id: ID; patch: Partial<Course> } | { type: "course/remove"; id: ID }
   | { type: "class/add"; session: ClassSession } | { type: "class/remove"; id: ID }
-  | { type: "grocery/add"; item: GroceryItem } | { type: "grocery/update"; id: ID; patch: Partial<GroceryItem> } | { type: "grocery/checkout"; amount: number; date: string; ticket?: string } | { type: "grocery/fromReceipt"; lines: ReceiptLine[] } | { type: "grocery/toggle"; id: ID } | { type: "grocery/remove"; id: ID } | { type: "grocery/clearChecked" }
+  | { type: "grocery/add"; item: GroceryItem } | { type: "grocery/update"; id: ID; patch: Partial<GroceryItem> } | { type: "grocery/checkout"; amount: number; date: string; ticket?: string } | { type: "grocery/fromReceipt"; lines: ReceiptLine[] } | { type: "pantry/use"; key: string } | { type: "pantry/restore"; key: string } | { type: "grocery/toggle"; id: ID } | { type: "grocery/remove"; id: ID } | { type: "grocery/clearChecked" }
   | { type: "chore/add"; chore: Chore } | { type: "chore/toggle"; id: ID; date: string; who?: string } | { type: "chore/remove"; id: ID }
   | { type: "sleep/upsert"; log: SleepLog } | { type: "sleep/remove"; date: string }
   | { type: "focus/log"; entry: FocusEntry }
@@ -299,6 +301,8 @@ export function reducer(s: AppState, a: Action): AppState {
       products: a.item.price > 0 ? learnProduct(s.products, { name: a.item.name, aisle: a.item.aisle, price: a.item.price }) : s.products,
     };
     case "grocery/fromReceipt": return { ...s, groceries: applyReceiptToGroceries(s.groceries, a.lines, uid).groceries };
+    case "pantry/use": return (s.pantryUsed ?? []).includes(a.key) ? s : { ...s, pantryUsed: [...(s.pantryUsed ?? []), a.key].slice(-2000) };
+    case "pantry/restore": return { ...s, pantryUsed: (s.pantryUsed ?? []).filter((k) => k !== a.key) };
     case "grocery/toggle": return { ...s, groceries: s.groceries.map((g) => (g.id === a.id ? { ...g, checked: !g.checked } : g)) };
     case "grocery/remove": return { ...s, groceries: s.groceries.filter((g) => g.id !== a.id) };
     case "grocery/update": return { ...s, groceries: s.groceries.map((g) => (g.id === a.id ? { ...g, ...a.patch } : g)) };
@@ -515,6 +519,7 @@ export function validateState(x: unknown): { ok: true; state: AppState; repaired
         days: days.length ? days : [0, 1, 2, 3, 4, 5, 6], done: h.done.filter(isDate), since: isDate(h.since) ? h.since : todayISO(),
         ...(isTime(h.time) ? { time: h.time } : {}), ...(st.length ? { steps: st, stepsDone: sd } : {}), ...(isStr(h.note) && h.note.trim() ? { note: h.note.slice(0, 200) } : {}) };
     }),
+    pantryUsed: Array.isArray(p.pantryUsed) ? (p.pantryUsed as unknown[]).filter(isStr).slice(-2000) : [],
     feedEvents: Array.isArray(p.feedEvents) ? (p.feedEvents as FeedEvent[]).filter((e) => e && isStr(e.feedId) && isDate(e.date) && isTime(e.start) && isTime(e.end)).slice(0, 5000) : [],
     events: keep<PlanEvent>("événements", Array.isArray(p.events) ? p.events : [], (e) => isStr(e.id) && isStr(e.title) && isDate(e.date) && isTime(e.start) && isTime(e.end))
       .map((e) => ({ ...e, recurrence: (["none", "daily", "weekly", "biweekly", "monthly"].includes(e.recurrence) ? e.recurrence : "none") as EventRecurrence, until: isDate(e.until) ? e.until : null, skipped: Array.isArray(e.skipped) ? e.skipped.filter(isDate) : [] })),
@@ -951,6 +956,18 @@ export function bedtimeOptions(wakeMin: number, fallAsleep: number) {
 }
 
 
+export interface PantryItem { key: string; name: string; date: string; expenseId: ID }
+/** Ce qu'il y a probablement à la maison : articles des achats « Courses » / tickets des `days` derniers jours, non marqués comme finis.
+ *  Estimation d'après les achats enregistrés : l'application ne sait pas ce qui a été consommé tant qu'on ne le lui dit pas. */
+export function pantryItems(state: AppState, today: string, days = 21): PantryItem[] {
+  const used = new Set(state.pantryUsed ?? []);
+  const from = iso(addDays(parseISO(today), -days));
+  return state.budget.expenses
+    .filter((e) => e.items?.length && e.date >= from && e.date <= today && (e.source === "courses" || e.source === "ticket"))
+    .flatMap((e) => e.items!.map((name, i) => ({ key: `${e.id}|${i}`, name, date: e.date, expenseId: e.id })))
+    .filter((x) => !used.has(x.key))
+    .sort((a, b) => b.date.localeCompare(a.date));
+}
 /** Ligne de ticket confirmée par l'utilisateur, prête à être rapprochée de la liste de courses. */
 export interface ReceiptLine { name: string; price: number; qty: number; aisle: Aisle }
 /** Rapproche un ticket de la liste : un article déjà présent (même produit, comparaison prudente) est coché sans changer

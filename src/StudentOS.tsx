@@ -5,7 +5,7 @@ import { MiniPdf } from "./pdf.ts";
 import { layoutLanes } from "./core.ts";
 import { DAY_WORDS, dayOf, pageGeometry, parseGrid } from "./timetable.ts";
 import { parseIcs, normalizeFeedUrl, isFeedUrl } from "./ical.ts";
-import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, choreStepsDone, choreDoneLate, choreSlotEnd, freeStart, setOnTimeMode, todoDoneLate, taskDoneLate, habitDoneLate, habitTimePassed, nowMinutes, NO_DEADLINE, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, onTimeGuess, onTimeStats, taskOnTimeStats, choreOnTimeStats, HABIT_CATS, habitOn, habitStats, habitStepsDone, habitStreak, todoOnTimeStats, TODO_KINDS, activeDays, xpOf, levelOf, globalStreak, LEVELS, pad, parseAmount, parseISO, parseReceipt, parseReceiptItems, receiptFingerprint, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
+import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, choreStepsDone, choreDoneLate, choreSlotEnd, freeStart, setOnTimeMode, todoDoneLate, taskDoneLate, habitDoneLate, habitTimePassed, nowMinutes, NO_DEADLINE, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, onTimeGuess, onTimeStats, taskOnTimeStats, choreOnTimeStats, HABIT_CATS, habitOn, habitStats, habitStepsDone, habitStreak, todoOnTimeStats, TODO_KINDS, activeDays, xpOf, levelOf, globalStreak, LEVELS, pad, pantryItems, parseAmount, parseISO, parseReceipt, parseReceiptItems, receiptFingerprint, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
 import type { Action, Aisle, PlanEvent, Chore, Habit, HabitCat, Todo, TodoKind, AppState, Block, Budget, Course, DayPlan, Expense, ExpenseCat, GroceryTemplate, ID, Phase, PomodoroCfg, Priority, ReceiptItem, ReceiptResult, Recurrence, EventRecurrence, CalFeed, FeedEvent, SettingsState, SleepLog, Step, Task, TaskKind, TaskStatus, TemplateItem, ViewKey } from "./core.ts";
 import type { AppEnv } from "./env.ts";
 import { LangSwitch } from "./i18n.tsx";
@@ -2306,6 +2306,10 @@ const Groceries: React.FC = () => {
   const grocerySpent = monthExp.filter((e) => e.category === "Courses").reduce((n, e) => n + e.amount, 0);
   const remainingAll = state.budget.monthly - monthExp.reduce((n, e) => n + e.amount, 0);
   const [ticketFp, setTicketFp] = useState("");
+  const home = pantryItems(state, todayISO()).map((x) => {
+    const a = state.products.find((p) => norm(p.name) === norm(x.name))?.aisle ?? guessAisle(x.name);
+    return { ...x, place: a === "Frais" || a === "Surgelés" || a === "Fruits & légumes" ? "Frigo et congélateur" as const : a === "Hygiène" || a === "Entretien" ? "Salle de bain et entretien" as const : "Placards" as const };
+  });
   const knownTickets = state.budget.expenses.flatMap((e) => (e.ticket ? [e.ticket] : []));
   /** Ticket relu et confirmé : coche/ajoute les articles (sans doublon), pré-remplit le montant payé. Rien n'est enregistré avant « Valider les achats ». */
   const onTicket = (c: ReceiptConfirm) => {
@@ -2376,6 +2380,16 @@ const Groceries: React.FC = () => {
             <div className="mt-2 h-2 rounded-full bg-sunken"><div className={cx("h-full rounded-full transition-all", grocerySpent > groceryLimit ? "bg-bad" : grocerySpent + estTotal > groceryLimit ? "bg-warn" : "bg-ok")} style={{ width: `${Math.min(100, (grocerySpent / groceryLimit) * 100)}%` }} /></div>
             <p className="mt-2 text-xs text-muted">{grocerySpent + estTotal > groceryLimit ? `Attention : cette liste (${money(estTotal, cur)}) dépasserait le budget de ${money(grocerySpent + estTotal - groceryLimit, cur)}.` : `Après cette liste, il resterait ${money(groceryLimit - grocerySpent - estTotal, cur)}.`}</p>
           </>) : <p className="text-xs text-muted">Pas de plafond « Courses » défini. Reste global du mois : <b className="font-mono text-fg">{money(remainingAll, cur)}</b>. Fixez un plafond dans l'onglet Budget.</p>}
+        </Card>
+        <Card title={<span className="flex items-center gap-2"><Home size={15} />À la maison</span>}>
+          {home.length ? (<>
+            <p className="mb-2 text-[11px] text-muted">Estimation d'après vos achats des 3 dernières semaines. Touchez « Fini » quand quelque chose est consommé.</p>
+            {(["Frigo et congélateur", "Placards", "Salle de bain et entretien"] as const).map((place) => { const xs = home.filter((x) => x.place === place); if (!xs.length) return null; return (
+              <div key={place} className="mb-2"><p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted">{place}</p>
+                <ul className="flex flex-col">{xs.map((x) => (
+                  <li key={x.key} className="flex items-center gap-2 py-0.5 text-[13px]"><span className="min-w-0 flex-1 truncate">{x.name}</span><span className="font-mono text-[10px] text-muted">{fmtDate(x.date)}</span>
+                    <button className="rounded-full border-2 border-line px-2 text-[11px] font-semibold hover:border-fg/60" onClick={() => dispatch({ type: "pantry/use", key: x.key })}>Fini</button></li>))}</ul></div>); })}
+          </>) : <p className="text-xs text-muted">Rien à afficher : validez des achats (ou scannez un ticket) et ils apparaîtront ici.</p>}
         </Card>
         {frequent.length > 0 && (
           <Card title="Articles fréquents">

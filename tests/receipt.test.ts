@@ -389,3 +389,21 @@ test("toGray : luminance", () => {
   const px = new Uint8ClampedArray([255, 255, 255, 255, 0, 0, 0, 255]);
   assert.deepEqual([...toGray(px, 2, 1)], [255, 0]);
 });
+
+// ---------------------------------------------------------------- « À la maison »
+import { pantryItems } from "../src/core.ts";
+test("À la maison : articles des achats récents, moins ceux marqués finis", () => {
+  let s = base();
+  const ex = (id: string, date: string, items: string[], source: "courses" | "ticket" | "manuel" = "courses") => ({ id, date, amount: 10, category: "Courses" as const, label: "x", source, items });
+  s = reducer(s, { type: "expense/add", expense: ex("a", "2026-10-14", ["Lait", "Pâtes"]) });
+  s = reducer(s, { type: "expense/add", expense: ex("b", "2026-10-16", ["Yaourt"], "ticket") });
+  s = reducer(s, { type: "expense/add", expense: ex("c", "2026-08-01", ["Vieux riz"]) });          // trop ancien
+  s = reducer(s, { type: "expense/add", expense: ex("d", "2026-10-15", ["Stylo"], "manuel") });    // pas un achat de courses
+  assert.deepEqual(pantryItems(s, "2026-10-18").map((x) => x.name), ["Yaourt", "Lait", "Pâtes"]);
+  s = reducer(s, { type: "pantry/use", key: "a|0" });
+  s = reducer(s, { type: "pantry/use", key: "a|0" });
+  assert.deepEqual(pantryItems(s, "2026-10-18").map((x) => x.name), ["Yaourt", "Pâtes"]);
+  assert.equal(s.pantryUsed?.length, 1, "pas de doublon de clé");
+  s = reducer(s, { type: "pantry/restore", key: "a|0" });
+  assert.equal(pantryItems(s, "2026-10-18").length, 3);
+});
