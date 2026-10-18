@@ -757,8 +757,8 @@ const StreakHero: React.FC = () => {
   const week = Array.from({ length: 7 }, (_, i) => iso(addDays(monday, i)));
   const big = st.current >= 7;
   return (
-    <section className="inked relative overflow-hidden rounded-[22px] p-4 sm:p-5" data-testid="streak-hero"
-      style={{ background: "linear-gradient(135deg, rgb(255 214 102 / .55), rgb(255 138 76 / .35) 55%, rgb(var(--panel)))" }}>
+    <section className="relative overflow-hidden rounded-[22px] border-2 border-[rgb(24_22_46)] p-4 shadow-[3px_3px_0_0_rgb(24_22_46)] sm:p-5" data-testid="streak-hero"
+      style={{ background: "linear-gradient(135deg, #ffe7a3, #ffc796 60%, #ffd9c2)" }}>
       {party && <div className="confetti pointer-events-none absolute inset-x-0 top-0 h-0" aria-hidden>{Array.from({ length: 18 }, (_, i) => <i key={i} style={{ left: `${(i * 37) % 100}%`, background: ["#3448f0", "#e0453a", "#0f9d76", "#f5b301", "#c2417a"][i % 5], animationDelay: `${(i % 6) * 0.08}s` }} />)}</div>}
       <div className="flex items-center gap-4">
         <div className="relative grid h-20 w-20 shrink-0 place-items-center">
@@ -766,28 +766,45 @@ const StreakHero: React.FC = () => {
           <span className={cx("relative text-[52px] leading-none", st.current ? "flame-bob" : "grayscale opacity-60")} aria-hidden>🔥</span>
         </div>
         <div className="min-w-0 flex-1">
-          <p className="text-[11px] font-bold uppercase tracking-wider text-[rgb(24_22_46)]/70">Série</p>
+          <p className="text-[11px] font-bold uppercase tracking-wider text-[rgb(24_22_46)]/90">Série</p>
           <p key={st.current} className="pop-in font-display text-[34px] font-extrabold leading-none tracking-tight text-[rgb(24_22_46)]">{st.current} <span className="text-[16px] font-bold">jour{st.current > 1 ? "s" : ""}</span></p>
-          <p className="mt-1 text-[12.5px] font-medium text-[rgb(24_22_46)]/80">{st.todayDone ? (big ? "Incroyable, continue comme ça ! 🌟" : "Série validée aujourd'hui ✓") : st.current ? "Fais une chose aujourd'hui pour garder ta série !" : "Coche une tâche, une corvée ou une routine pour lancer ta série."}</p>
+          <p className="mt-1 text-[12.5px] font-medium text-[rgb(24_22_46)]">{st.todayDone ? (big ? "Incroyable, continue comme ça ! 🌟" : "Série validée aujourd'hui ✓") : st.current ? "Fais une chose aujourd'hui pour garder ta série !" : "Coche une tâche, une corvée ou une routine pour lancer ta série."}</p>
         </div>
-        <div className="hidden shrink-0 text-right sm:block"><p className="text-[11px] font-semibold text-[rgb(24_22_46)]/70">Record</p><p className="font-display text-xl font-extrabold text-[rgb(24_22_46)]">{st.best} j</p></div>
+        <div className="hidden shrink-0 text-right sm:block"><p className="text-[11px] font-semibold text-[rgb(24_22_46)]/90">Record</p><p className="font-display text-xl font-extrabold text-[rgb(24_22_46)]">{st.best} j</p></div>
       </div>
       <div className="mt-3 grid grid-cols-7 gap-1.5">
         {week.map((d) => { const on = days.has(d), isT = d === today, future = d > today; return (
           <div key={d} className="flex flex-col items-center gap-1">
             <span className={cx("grid h-8 w-8 place-items-center rounded-full border-2 text-[13px] font-bold transition", on ? "border-[rgb(24_22_46)] bg-[#ff8a3d] text-white shadow-[2px_2px_0_0_rgb(24_22_46)]" : isT ? "border-dashed border-[rgb(24_22_46)] bg-white/60" : future ? "border-[rgb(24_22_46)]/20 bg-white/30" : "border-[rgb(24_22_46)]/30 bg-white/50")}>{on ? "🔥" : ""}</span>
-            <span className={cx("text-[10px] font-semibold", isT ? "text-[rgb(24_22_46)]" : "text-[rgb(24_22_46)]/60")}>{DAYS[weekday(parseISO(d))]}</span>
+            <span className={cx("text-[10px] font-semibold", isT ? "text-[rgb(24_22_46)]" : "text-[rgb(24_22_46)]/85")}>{DAYS[weekday(parseISO(d))]}</span>
           </div>); })}
       </div>
       <div className="mt-3 rounded-xl border-2 border-[rgb(24_22_46)] bg-white/70 p-2.5">
         <div className="mb-1.5 flex items-center gap-2 text-[12px] font-semibold text-[rgb(24_22_46)]">
           <span className="rounded-full bg-[rgb(24_22_46)] px-2 py-0.5 text-[11px] font-bold text-white">Niv. {lv.level}</span>{lv.name}
-          <span className="ml-auto font-mono text-[11px] tabular-nums text-[rgb(24_22_46)]/70">{xp} / {lv.to} pts</span>
+          <span className="ml-auto font-mono text-[11px] tabular-nums text-[rgb(24_22_46)]/90">{xp} / {lv.to} pts</span>
         </div>
         <div className="h-3 overflow-hidden rounded-full border-2 border-[rgb(24_22_46)] bg-white"><div key={lv.level} className="xp-fill h-full rounded-full" style={{ width: `${Math.max(3, lv.progress * 100)}%`, background: "linear-gradient(90deg, #f5b301, #ff6b3d)" }} /></div>
-        <p className="mt-1 text-[10.5px] text-[rgb(24_22_46)]/70">+10 pts par chose faite, +5 si c'est à l'heure. Prochain niveau : {LEVELS[Math.min(lv.level, LEVELS.length - 1)]}.</p>
+        <p className="mt-1 text-[10.5px] text-[rgb(24_22_46)]/90">+10 pts par chose faite, +5 si c'est à l'heure. Prochain niveau : {LEVELS[Math.min(lv.level, LEVELS.length - 1)]}.</p>
       </div>
     </section>
+  );
+};
+
+/** Pastille 🔥 dans l'en-tête : ouvre le détail de la série et du niveau. */
+const StreakChip: React.FC = () => {
+  const { state } = useStore();
+  const [open, setOpen] = useState(false);
+  const days = useMemo(() => activeDays(state), [state.tasks, state.todos, state.chores, state.habits]);
+  const st = globalStreak(days, todayISO());
+  return (
+    <>
+      <button onClick={() => setOpen(true)} aria-label={`Série : ${st.current} jours`} title="Voir ma série" data-testid="streak-chip"
+        className={cx("flex shrink-0 items-center gap-1 rounded-full border-2 px-2 py-1 text-[13px] font-extrabold transition active:scale-95", st.current ? "border-[#ff8a3d] bg-[#ff8a3d]/15 text-[#ff8a3d]" : "border-line bg-sunken text-muted")}>
+        <span className={cx("text-[15px] leading-none", st.current ? "flame-bob" : "grayscale opacity-60")} aria-hidden>🔥</span>{st.current}
+      </button>
+      {open && <Modal title="Ma série" onClose={() => setOpen(false)}><StreakHero /></Modal>}
+    </>
   );
 };
 
@@ -879,7 +896,6 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
   const stepsLeft = steps.filter((x) => !x.done).length;
   const debtTone = ss.nights7 === 0 ? undefined : ss.debt7 > 240 ? "bad" : ss.debt7 > 60 ? "warn" : "ok";
   const blocks: DashBlock[] = [
-    { id: "streak", label: "Série & niveau", span: "md:col-span-2 xl:col-span-3", show: true, el: <StreakHero /> },
     { id: "todos", label: "Mes tâches perso", span: "md:col-span-2 xl:col-span-3", show: true, el: <TodoDashCard go={go} /> },
     { id: "start", label: "Pour bien démarrer", span: "md:col-span-2 xl:col-span-3", show: stepsLeft > 0, el: (<>
         <Card title={<span className="flex items-center gap-2"><Sparkles size={15} className="text-accent" />Pour bien démarrer · {steps.length - stepsLeft}/{steps.length}</span>}>
@@ -3749,7 +3765,7 @@ export default function StudentOS({ state, dispatch, env, view, onView, notice, 
               {headerExtra}
               <span className="hidden lg:inline-flex"><Pill tone={levelTone(plan.level)}>Journée {plan.level}</Pill></span>
               <Btn variant="ghost" size="sm" className="hidden lg:inline-flex" onClick={() => setHelp(true)} aria-label="Raccourcis"><Keyboard size={15} /></Btn>
-              <span className="mr-auto sm:mr-0"><CartoonClock /></span>
+              <span className="mr-auto flex items-center gap-1.5 sm:mr-0"><CartoonClock /><StreakChip /></span>
               <LangSwitch className="px-1.5 sm:px-2" />
               <Btn variant="ghost" size="sm" onClick={toggleTheme} aria-label="Changer de thème" className="hidden sm:inline-flex">{isDark ? <Sun size={15} /> : <Moon size={15} />}</Btn>
               <Btn variant="primary" size="sm" onClick={() => setNewTask(true)} aria-label="Nouvelle tâche"><Plus size={14} /><span className="hidden sm:inline">Tâche</span></Btn>
