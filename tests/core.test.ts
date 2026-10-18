@@ -489,3 +489,12 @@ test("freeStart : pas de chevauchement, décalage avant/après", () => {
   const bl = C.planFor({ ...base(), chores: [c1, c2] }, C.todayISO(), C.todayISO()).blocks.filter((b) => b.kind === "chore").sort((x, y) => x.start - y.start);
   assert.ok(bl[0].end <= bl[1].start, "corvées sans chevauchement");
 });
+
+test("réglage « à l'heure » : selon l'heure du créneau ou selon le jour", () => {
+  const today = C.todayISO();
+  if (C.nowMinutes() < 10) return;
+  const c: C.Chore = { id: "c", name: "P", recurrence: "daily", day: 0, minutes: 5, assignees: ["Moi"], done: [], skipped: [C.iso(C.addDays(new Date(), -1))], pinned: { [today]: "00:01" } };
+  C.setOnTimeMode("time"); assert.deepEqual(C.choreOnTimeStats([c], today), { ok: 0, late: 1 });
+  C.setOnTimeMode("day");  assert.deepEqual(C.choreOnTimeStats([c], today), { ok: 0, late: 0 }); // jugé seulement le lendemain
+  C.setOnTimeMode(undefined); assert.deepEqual(C.choreOnTimeStats([c], today), { ok: 0, late: 1 });
+});

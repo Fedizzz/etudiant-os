@@ -78,6 +78,8 @@ export interface SettingsState {
   fallAsleep: number; maxBlock: number; theme: "system" | "light" | "dark"; pomodoro: PomodoroCfg;
   onboarded: boolean; roommates: string[]; currency: string;
   accent: string; hiddenViews: ViewKey[]; quickExpenses: QuickExpense[];
+  /** « À l'heure » : jugé sur l'heure du créneau (« time », défaut) ou seulement sur le jour prévu (« day »). */
+  onTimeMode?: "time" | "day";
   /** Tableau de bord personnalisé : ordre des cartes et cartes masquées (identifiants). */
   dashLayout?: { order: string[]; hidden: string[] };
   /** Objectif de moyenne générale, objectif de focus quotidien (min), indisponibilités hebdomadaires. */
@@ -453,6 +455,7 @@ export function validateState(x: unknown): { ok: true; state: AppState; repaired
   if (!isTime(settings.wakeDefault)) settings.wakeDefault = DEFAULT_SETTINGS.wakeDefault;
   if (!isTime(settings.bedDefault)) settings.bedDefault = DEFAULT_SETTINGS.bedDefault;
   settings.roommates = Array.isArray(settings.roommates) ? settings.roommates.filter(isStr) : [];
+  if (settings.onTimeMode !== "day") delete settings.onTimeMode;
   settings.hiddenViews = Array.isArray(settings.hiddenViews) ? settings.hiddenViews : [];
   { const dl = settings.dashLayout as unknown as { order?: unknown; hidden?: unknown } | undefined; const ids = (v: unknown) => (Array.isArray(v) ? [...new Set(v.filter(isStr))].slice(0, 40) : []);
     if (dl && typeof dl === "object") settings.dashLayout = { order: ids(dl.order), hidden: ids(dl.hidden) }; else delete settings.dashLayout; }
@@ -988,7 +991,7 @@ export function taskOnTimeStats(tasks: Task[], today: string, days?: number): On
     if (t.deadline === NO_DEADLINE) continue;
     // Tâche avec un créneau précis : jugée sur l'heure de fin du créneau (pas seulement sur le jour).
     if (t.slot) {
-      const endM = toMin(t.slot.end), d = t.slot.date;
+      const endM = ON_TIME_BY_TIME ? toMin(t.slot.end) : 24 * 60, d = t.slot.date;
       if (t.status === "done" && t.doneAt) { if (inWin(t.doneAt)) { if (t.doneAt < d || (t.doneAt === d && !(t.doneTime && toMin(t.doneTime) > endM))) ok++; else late++; } }
       else if (inWin(d) && (d < today || (d === today && nowMinutes() > endM))) late++;
       continue;
@@ -1060,7 +1063,7 @@ export function todoOnTimeStats(todos: Todo[], today: string, days?: number): On
   const inWin = (d: string) => days === undefined || daysBetween(d, today) < days;
   for (const t of todos) {
     if (!t.due) continue;
-    const endM = t.end ? toMin(t.end) : t.start ? toMin(t.start) : null; // heure limite si un horaire est fixé
+    const endM = !ON_TIME_BY_TIME ? null : t.end ? toMin(t.end) : t.start ? toMin(t.start) : null; // heure limite si un horaire est fixé
     if (t.done && t.doneAt) { if (inWin(t.doneAt)) { const lateTime = t.doneAt === t.due && endM !== null && !!t.doneTime && toMin(t.doneTime) > endM; if (t.doneAt <= t.due && !lateTime) ok++; else late++; } }
     else if (!t.done && inWin(t.due) && (t.due < today || (t.due === today && endM !== null && nowMinutes() > endM))) late++;
   }
@@ -1080,7 +1083,10 @@ export function choreDoneLate(c: Chore, date: string): boolean {
   return c.doneOn[date] === date && end !== null && !!t && toMin(t) > end;
 }
 /** Fin du créneau prévu d'une corvée ce jour-là (heure fixe ou créneau figé), en minutes ; null si aucun. */
-export function choreSlotEnd(c: Chore, date: string): number | null { const s = c.pinned?.[date] ?? c.time; return s ? toMin(s) + c.minutes : null; }
+let ON_TIME_BY_TIME = true;
+/** Mode de jugement « à l'heure » (réglage de l'utilisateur) : appelé par l'application avant d'afficher les compteurs. */
+export const setOnTimeMode = (m: "time" | "day" | undefined) => { ON_TIME_BY_TIME = m !== "day"; };
+export function choreSlotEnd(c: Chore, date: string): number | null { if (!ON_TIME_BY_TIME) return null; const s = c.pinned?.[date] ?? c.time; return s ? toMin(s) + c.minutes : null; }
 export const nowMinutes = () => { const n = new Date(); return n.getHours() * 60 + n.getMinutes(); };
 export const nowHHMM = () => { const n = new Date(); return `${pad(n.getHours())}:${pad(n.getMinutes())}`; };
 

@@ -5,7 +5,7 @@ import { MiniPdf } from "./pdf.ts";
 import { layoutLanes } from "./core.ts";
 import { DAY_WORDS, dayOf, pageGeometry, parseGrid } from "./timetable.ts";
 import { parseIcs, normalizeFeedUrl, isFeedUrl } from "./ical.ts";
-import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, choreStepsDone, choreDoneLate, choreSlotEnd, freeStart, nowMinutes, NO_DEADLINE, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, onTimeGuess, onTimeStats, taskOnTimeStats, choreOnTimeStats, HABIT_CATS, habitOn, habitStats, habitStepsDone, habitStreak, todoOnTimeStats, TODO_KINDS, activeDays, xpOf, levelOf, globalStreak, LEVELS, pad, parseAmount, parseISO, parseReceipt, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
+import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, choreStepsDone, choreDoneLate, choreSlotEnd, freeStart, setOnTimeMode, nowMinutes, NO_DEADLINE, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, onTimeGuess, onTimeStats, taskOnTimeStats, choreOnTimeStats, HABIT_CATS, habitOn, habitStats, habitStepsDone, habitStreak, todoOnTimeStats, TODO_KINDS, activeDays, xpOf, levelOf, globalStreak, LEVELS, pad, parseAmount, parseISO, parseReceipt, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
 import type { Action, Aisle, PlanEvent, Chore, Habit, HabitCat, Todo, TodoKind, AppState, Block, Budget, Course, DayPlan, Expense, ExpenseCat, GroceryTemplate, ID, Phase, PomodoroCfg, Priority, ReceiptResult, Recurrence, EventRecurrence, CalFeed, FeedEvent, SettingsState, SleepLog, Step, Task, TaskKind, TaskStatus, TemplateItem, ViewKey } from "./core.ts";
 import type { AppEnv } from "./env.ts";
 import { LangSwitch } from "./i18n.tsx";
@@ -725,9 +725,9 @@ const UpcomingCard: React.FC<{ days: DayPlan[]; kind: "class" | "event"; go: (v:
 const StreakHero: React.FC = () => {
   const { state, toast } = useStore();
   const today = todayISO();
-  const days = useMemo(() => activeDays(state), [state.tasks, state.todos, state.chores, state.habits]);
+  const days = useMemo(() => activeDays(state), [state.tasks, state.todos, state.chores, state.habits, state.settings.onTimeMode]);
   const st = globalStreak(days, today);
-  const xp = useMemo(() => xpOf(state), [state.tasks, state.todos, state.chores, state.habits]);
+  const xp = useMemo(() => xpOf(state), [state.tasks, state.todos, state.chores, state.habits, state.settings.onTimeMode]);
   const lv = levelOf(xp);
   const [party, setParty] = useState(false);
   // Passage de niveau : petite fête (mémorisée sur l'appareil pour ne pas la rejouer).
@@ -778,7 +778,7 @@ const StreakHero: React.FC = () => {
 const StreakChip: React.FC = () => {
   const { state } = useStore();
   const [open, setOpen] = useState(false);
-  const days = useMemo(() => activeDays(state), [state.tasks, state.todos, state.chores, state.habits]);
+  const days = useMemo(() => activeDays(state), [state.tasks, state.todos, state.chores, state.habits, state.settings.onTimeMode]);
   const st = globalStreak(days, todayISO());
   return (
     <>
@@ -837,7 +837,7 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
   const ot = useMemo(() => ({ all: onTimeStats(state.sleep, today), d30: onTimeStats(state.sleep, today, 30) }), [state.sleep, today]);
   const ht = useMemo(() => ({ all: habitStats(state.habits ?? [], today), d30: habitStats(state.habits ?? [], today, 30) }), [state.habits, today]);
   const habitsToday = (state.habits ?? []).filter((h) => habitOn(h, today));
-  const tt = useMemo(() => ({ all: taskOnTimeStats(state.tasks, today), d30: taskOnTimeStats(state.tasks, today, 30), call: choreOnTimeStats(state.chores, today), c30: choreOnTimeStats(state.chores, today, 30) }), [state.tasks, state.chores, today]);
+  const tt = useMemo(() => ({ all: taskOnTimeStats(state.tasks, today), d30: taskOnTimeStats(state.tasks, today, 30), call: choreOnTimeStats(state.chores, today), c30: choreOnTimeStats(state.chores, today, 30) }), [state.tasks, state.chores, today, state.settings.onTimeMode]);
   // Toutes les valeurs viennent des mêmes fonctions que les modules (une seule source de vérité).
   const days7 = useMemo(() => planRange(state, today, 7, today), [state, today]);
   const plan = days7[0];
@@ -2680,7 +2680,7 @@ const Chores: React.FC = () => {
   const maxMin = Math.max(1, ...minutesBy.map((x) => x.min));
   const today = todayISO();
   const history = useMemo(() => choreHistory(state.chores, people, today, 4), [state.chores, today, people.join("|")]);
-  const onTime = useMemo(() => ({ all: choreOnTimeStats(state.chores, today), d30: choreOnTimeStats(state.chores, today, 30), d7: choreOnTimeStats(state.chores, today, 7) }), [state.chores, today]);
+  const onTime = useMemo(() => ({ all: choreOnTimeStats(state.chores, today), d30: choreOnTimeStats(state.chores, today, 30), d7: choreOnTimeStats(state.chores, today, 7) }), [state.chores, today, state.settings.onTimeMode]);
   return (
     <div className="flex flex-col gap-4">
       <Card title={<span className="flex items-center gap-2"><Repeat size={15} />Semaine {isoWeek(monday)} · {monday.toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}</span>}
@@ -3435,6 +3435,11 @@ const SettingsView: React.FC = () => {
           <Field label="Endormissement (min)" htmlFor="st-fall"><Input id="st-fall" type="number" min={0} max={60} value={s.fallAsleep} onChange={(e) => set({ fallAsleep: Number(e.target.value) })} /></Field>
           <Field label="Colocataires" htmlFor="st-room"><Input id="st-room" defaultValue={s.roommates.join(", ")} placeholder="Sami, Lina" onBlur={(e) => set({ roommates: e.target.value.split(",").map((x) => x.trim()).filter(Boolean) })} /></Field>
           <Field label="Devise" htmlFor="st-cur"><Select id="st-cur" value={s.currency} onChange={(e) => set({ currency: e.target.value })}>{["€", "$", "£", "CHF", "DT", "MAD", "FCFA"].map((c) => <option key={c} value={c}>{c}</option>)}</Select></Field>
+          <Field label="« À l'heure » compté selon" htmlFor="st-ontime" className="col-span-2">
+            <Select id="st-ontime" value={s.onTimeMode ?? "time"} onChange={(e) => dispatch({ type: "settings", patch: { onTimeMode: e.target.value === "day" ? "day" : undefined } })}>
+              <option value="time">L'heure du créneau (en retard dès que l'heure est passée)</option>
+              <option value="day">Le jour prévu seulement (en retard le lendemain)</option>
+            </Select></Field>
           <Field label="Objectif de focus / jour (min)" htmlFor="st-focus"><Input id="st-focus" type="number" min={0} max={720} step={15} value={s.focusGoal} onChange={(e) => { const v = Number(e.target.value); if (v >= 0 && v <= 720) set({ focusGoal: v }); }} /></Field>
           <Field label="Bloc de travail max (min)" htmlFor="st-block"><Input id="st-block" type="number" min={25} max={180} step={5} value={s.maxBlock} onChange={(e) => set({ maxBlock: Math.max(25, Number(e.target.value)) })} /></Field>
         </div>
@@ -3605,6 +3610,7 @@ export interface StudentOSProps {
 }
 export default function StudentOS({ state, dispatch, env, view, onView, notice, headerExtra, menuExtra, override }: StudentOSProps) {
   const stateRef = useRef(state); stateRef.current = state;
+  setOnTimeMode(state.settings.onTimeMode); // avant tout affichage des compteurs « à l'heure »
   useFeedAutoSync(state, dispatch, env.fetchCalendar);
   // Corvées sans heure placées aujourd'hui : on fige leur créneau (placé après l'heure actuelle) pour qu'il ne bouge plus.
   useEffect(() => {
