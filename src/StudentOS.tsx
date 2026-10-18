@@ -2306,6 +2306,13 @@ const Groceries: React.FC = () => {
   const grocerySpent = monthExp.filter((e) => e.category === "Courses").reduce((n, e) => n + e.amount, 0);
   const remainingAll = state.budget.monthly - monthExp.reduce((n, e) => n + e.amount, 0);
   const [ticketFp, setTicketFp] = useState("");
+  /** « Fini » : retire de la maison, puis propose de remettre l'article sur la liste de courses. */
+  const finish = (x: { key: string; name: string }) => {
+    dispatch({ type: "pantry/use", key: x.key });
+    if (state.groceries.some((g) => norm(g.name) === norm(x.name))) { toast(`${x.name} : déjà sur votre liste de courses`, "info"); return; }
+    const p = state.products.find((q) => norm(q.name) === norm(x.name));
+    toast(`${x.name} terminé. Le remettre sur la liste ?`, "info", { label: "Remettre sur la liste", run: () => { dispatch({ type: "grocery/add", item: { id: uid(), name: x.name, aisle: p?.aisle ?? guessAisle(x.name), qty: "", checked: false, price: p?.price ?? 0 } }); toast(`${x.name} remis sur la liste`, "ok"); } });
+  };
   const home = pantryItems(state, todayISO()).map((x) => {
     const a = state.products.find((p) => norm(p.name) === norm(x.name))?.aisle ?? guessAisle(x.name);
     return { ...x, place: a === "Frais" || a === "Surgelés" || a === "Fruits & légumes" ? "Frigo et congélateur" as const : a === "Hygiène" || a === "Entretien" ? "Salle de bain et entretien" as const : "Placards" as const };
@@ -2390,7 +2397,7 @@ const Groceries: React.FC = () => {
               <div key={place} className="mb-2"><p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted">{place}</p>
                 <ul className="flex flex-col">{xs.map((x) => (
                   <li key={x.key} className="flex items-center gap-2 py-0.5 text-[13px]"><span className="min-w-0 flex-1 truncate">{x.name}</span><span className="font-mono text-[10px] text-muted">{fmtDate(x.date)}</span>
-                    <button className="rounded-full border-2 border-line px-2 text-[11px] font-semibold hover:border-fg/60" onClick={() => dispatch({ type: "pantry/use", key: x.key })}>Fini</button></li>))}</ul></div>); })}
+                    <button className="rounded-full border-2 border-line px-2 text-[11px] font-semibold hover:border-fg/60" onClick={() => finish(x)}>Fini</button></li>))}</ul></div>); })}
           </>) : <p className="text-xs text-muted">Rien à afficher : validez des achats (ou scannez un ticket) et ils apparaîtront ici.</p>}
         </Card>
         {frequent.length > 0 && (
