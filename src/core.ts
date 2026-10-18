@@ -1,6 +1,7 @@
 /* Étudiant OS — logique métier partagée (sans React).
  * Types, calculs, reducer, stockage : une seule source de vérité, testée dans tests/.
  */
+import { sameProduct } from "./receipt.ts";
 
 // ---------------------------------------------------------------- Types
 export type ID = string;
@@ -37,7 +38,7 @@ export interface Task {
 export interface Step { id: ID; text: string; done?: boolean }
 export interface GroceryItem { id: ID; name: string; aisle: Aisle; qty: string; checked: boolean; price: number }
 /** source et recurringId permettent de savoir d'où vient une dépense et d'éviter les doublons. */
-export interface Expense { id: ID; date: string; amount: number; category: ExpenseCat; label: string; source?: "manuel" | "courses" | "recurrente" | "ticket"; recurringId?: ID; items?: string[] }
+export interface Expense { id: ID; date: string; amount: number; category: ExpenseCat; label: string; source?: "manuel" | "courses" | "recurrente" | "ticket"; recurringId?: ID; items?: string[]; /** Empreinte « date|centimes » d'un ticket lu par le scanner (détecte un ticket déjà enregistré). */ ticket?: string }
 /** Dépense récurrente mensuelle (loyer, abonnement…) : ajoutée une seule fois par mois, au jour indiqué. */
 export interface RecurringExpense { id: ID; label: string; amount: number; category: ExpenseCat; day: number; active: boolean; since: string; skipMonths?: string[] }
 /** Argent reçu (paye, bourse, famille, ami…). */
@@ -233,7 +234,7 @@ export type Action =
   | { type: "task/add"; task: Task } | { type: "task/update"; id: ID; patch: Partial<Task> } | { type: "task/remove"; id: ID }
   | { type: "course/add"; course: Course } | { type: "course/update"; id: ID; patch: Partial<Course> } | { type: "course/remove"; id: ID }
   | { type: "class/add"; session: ClassSession } | { type: "class/remove"; id: ID }
-  | { type: "grocery/add"; item: GroceryItem } | { type: "grocery/update"; id: ID; patch: Partial<GroceryItem> } | { type: "grocery/checkout"; amount: number; date: string } | { type: "grocery/toggle"; id: ID } | { type: "grocery/remove"; id: ID } | { type: "grocery/clearChecked" }
+  | { type: "grocery/add"; item: GroceryItem } | { type: "grocery/update"; id: ID; patch: Partial<GroceryItem> } | { type: "grocery/checkout"; amount: number; date: string; ticket?: string } | { type: "grocery/fromReceipt"; lines: ReceiptLine[] } | { type: "grocery/toggle"; id: ID } | { type: "grocery/remove"; id: ID } | { type: "grocery/clearChecked" }
   | { type: "chore/add"; chore: Chore } | { type: "chore/toggle"; id: ID; date: string; who?: string } | { type: "chore/remove"; id: ID }
   | { type: "sleep/upsert"; log: SleepLog } | { type: "sleep/remove"; date: string }
   | { type: "focus/log"; entry: FocusEntry }
@@ -297,6 +298,7 @@ export function reducer(s: AppState, a: Action): AppState {
       ...s, groceries: [...s.groceries, a.item],
       products: a.item.price > 0 ? learnProduct(s.products, { name: a.item.name, aisle: a.item.aisle, price: a.item.price }) : s.products,
     };
+    case "grocery/fromReceipt": return { ...s, groceries: applyReceiptToGroceries(s.groceries, a.lines, uid).groceries };
     case "grocery/toggle": return { ...s, groceries: s.groceries.map((g) => (g.id === a.id ? { ...g, checked: !g.checked } : g)) };
     case "grocery/remove": return { ...s, groceries: s.groceries.filter((g) => g.id !== a.id) };
     case "grocery/update": return { ...s, groceries: s.groceries.map((g) => (g.id === a.id ? { ...g, ...a.patch } : g)) };
@@ -304,7 +306,7 @@ export function reducer(s: AppState, a: Action): AppState {
       const n = s.groceries.filter((g) => g.checked).length;
       if (!n || !(a.amount > 0)) return s; // rien de coché ou montant invalide : aucune dépense (évite les doublons)
       const bought = s.groceries.filter((g) => g.checked);
-      const expense: Expense = { id: uid(), date: a.date, amount: Math.round(a.amount * 100) / 100, category: "Courses", label: `Courses (${n} article${n > 1 ? "s" : ""})`, source: "courses", items: bought.map((g) => g.name) };
+      const expense: Expense = { id: uid(), date: a.date, amount: Math.round(a.amount * 100) / 100, category: "Courses", label: `Courses (${n} article${n > 1 ? "s" : ""})`, source: "courses", items: bought.map((g) => g.name), ...(a.ticket ? { ticket: a.ticket } : {}) };
       const products = bought.reduce((ps, g) => learnProduct(ps, { name: g.name, aisle: g.aisle, price: g.price }, true), s.products);
       return { ...s, groceries: s.groceries.filter((g) => !g.checked), budget: { ...s.budget, expenses: [...s.budget.expenses, expense] }, products };
     }
@@ -949,20 +951,24 @@ export function bedtimeOptions(wakeMin: number, fallAsleep: number) {
 }
 
 
-export interface ReceiptResult { amount: number | null; date: string | null; store: string; text: string }
-export function parseReceipt(text: string): ReceiptResult {
-  const lines = text.split(/\n/).map((l) => l.trim()).filter(Boolean);
-  const amountsIn = (l: string) => [...l.matchAll(/(\d{1,4})[.,](\d{2})(?!\d)/g)].map((m) => Number(m[1] + "." + m[2]));
-  let amount: number | null = null;
-  const totalLine = [...lines].reverse().find((l) => /(total|a\s*payer|à\s*payer|net\s*a|montant|ttc|carte|cb\b|esp[eè]ces)/i.test(l) && !/sous[-\s]?total|tva|remise|rendu/i.test(l) && amountsIn(l).length);
-  if (totalLine) amount = amountsIn(totalLine).pop() ?? null;
-  if (amount === null) { const all = lines.flatMap(amountsIn).filter((v) => v < 2000); amount = all.length ? Math.max(...all) : null; }
-  const dm = text.match(/(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2,4})/);
-  let date: string | null = null;
-  if (dm) { const y = dm[3].length === 2 ? 2000 + Number(dm[3]) : Number(dm[3]); const d = new Date(y, Number(dm[2]) - 1, Number(dm[1])); if (!isNaN(d.getTime()) && y > 2000) date = iso(d); }
-  const store = (lines.find((l) => /[a-z]{3,}/i.test(l) && !/\d{2}[/.]\d{2}/.test(l)) ?? "").replace(/[^\p{L}\d '&-]/gu, "").trim().slice(0, 32);
-  return { amount, date, store, text };
+/** Ligne de ticket confirmée par l'utilisateur, prête à être rapprochée de la liste de courses. */
+export interface ReceiptLine { name: string; price: number; qty: number; aisle: Aisle }
+/** Rapproche un ticket de la liste : un article déjà présent (même produit, comparaison prudente) est coché sans changer
+ *  son prix habituel (sauf s'il n'en avait pas) ; un article inconnu est ajouté, coché. Idempotent : rejouer le même
+ *  ticket ne crée aucun doublon (chaque ligne du ticket n'utilise qu'un article de la liste). */
+export function applyReceiptToGroceries(list: GroceryItem[], lines: ReceiptLine[], newId: () => ID): { groceries: GroceryItem[]; matched: number; added: number } {
+  let groceries = [...list]; const used = new Set<ID>(); let matched = 0, added = 0;
+  for (const l of lines) {
+    const name = l.name.trim(); if (!name) continue;
+    const price = l.price > 0 ? Math.round(l.price * 100) / 100 : 0;
+    const hit = groceries.find((g) => !used.has(g.id) && sameProduct(g.name, name));
+    if (hit) { used.add(hit.id); matched++; groceries = groceries.map((g) => (g.id === hit.id ? { ...g, checked: true, price: g.price > 0 ? g.price : price } : g)); }
+    else { const g: GroceryItem = { id: newId(), name, aisle: l.aisle, qty: l.qty > 1 ? `x${l.qty}` : "", checked: true, price }; used.add(g.id); groceries.push(g); added++; }
+  }
+  return { groceries, matched, added };
 }
+export { parseReceipt, parseReceiptItems, toCents, toAmount, itemsTotalCents, totalDivergence, productKey, sameProduct, receiptFingerprint } from "./receipt.ts";
+export type { ReceiptResult, ReceiptItem, TotalStatus, DateStatus, StoreConfidence } from "./receipt.ts";
 
 /** Checklist nettoyée (texte non vide, 40 étapes max). */
 export function cleanSteps(v: unknown, withDone: boolean): Step[] {

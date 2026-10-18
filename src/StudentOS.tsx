@@ -5,10 +5,12 @@ import { MiniPdf } from "./pdf.ts";
 import { layoutLanes } from "./core.ts";
 import { DAY_WORDS, dayOf, pageGeometry, parseGrid } from "./timetable.ts";
 import { parseIcs, normalizeFeedUrl, isFeedUrl } from "./ical.ts";
-import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, choreStepsDone, choreDoneLate, choreSlotEnd, freeStart, setOnTimeMode, todoDoneLate, taskDoneLate, habitDoneLate, habitTimePassed, nowMinutes, NO_DEADLINE, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, onTimeGuess, onTimeStats, taskOnTimeStats, choreOnTimeStats, HABIT_CATS, habitOn, habitStats, habitStepsDone, habitStreak, todoOnTimeStats, TODO_KINDS, activeDays, xpOf, levelOf, globalStreak, LEVELS, pad, parseAmount, parseISO, parseReceipt, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
-import type { Action, Aisle, PlanEvent, Chore, Habit, HabitCat, Todo, TodoKind, AppState, Block, Budget, Course, DayPlan, Expense, ExpenseCat, GroceryTemplate, ID, Phase, PomodoroCfg, Priority, ReceiptResult, Recurrence, EventRecurrence, CalFeed, FeedEvent, SettingsState, SleepLog, Step, Task, TaskKind, TaskStatus, TemplateItem, ViewKey } from "./core.ts";
+import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, choreStepsDone, choreDoneLate, choreSlotEnd, freeStart, setOnTimeMode, todoDoneLate, taskDoneLate, habitDoneLate, habitTimePassed, nowMinutes, NO_DEADLINE, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, onTimeGuess, onTimeStats, taskOnTimeStats, choreOnTimeStats, HABIT_CATS, habitOn, habitStats, habitStepsDone, habitStreak, todoOnTimeStats, TODO_KINDS, activeDays, xpOf, levelOf, globalStreak, LEVELS, pad, parseAmount, parseISO, parseReceipt, parseReceiptItems, receiptFingerprint, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
+import type { Action, Aisle, PlanEvent, Chore, Habit, HabitCat, Todo, TodoKind, AppState, Block, Budget, Course, DayPlan, Expense, ExpenseCat, GroceryTemplate, ID, Phase, PomodoroCfg, Priority, ReceiptItem, ReceiptResult, Recurrence, EventRecurrence, CalFeed, FeedEvent, SettingsState, SleepLog, Step, Task, TaskKind, TaskStatus, TemplateItem, ViewKey } from "./core.ts";
 import type { AppEnv } from "./env.ts";
 import { LangSwitch } from "./i18n.tsx";
+import { OcrError, scanReceipt } from "./ocr.ts";
+import type { OcrOutput, OcrProgress } from "./ocr.ts";
 
 /* ============================================================================
  * Étudiant.OS — interface de l'application. La logique métier est dans core.ts ;
@@ -619,12 +621,6 @@ async function pdfjs(): Promise<PdfJs> {
   lib.GlobalWorkerOptions.workerSrc = PDFJS + "pdf.worker.min.js";
   return lib;
 }
-type Tess = { recognize: (img: File, lang: string, o?: { logger?: (m: { status: string; progress: number }) => void }) => Promise<{ data: { text: string } }> };
-async function tesseract(): Promise<Tess> {
-  await loadScript("https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/tesseract.min.js");
-  return (window as unknown as { Tesseract: Tess }).Tesseract;
-}
-
 // Petit stockage de fichiers (PDF de l'emploi du temps) dans IndexedDB : trop gros pour localStorage.
 function idb<T>(mode: IDBTransactionMode, run: (st: IDBObjectStore) => IDBRequest): Promise<T> {
   return new Promise((ok, ko) => {
@@ -639,31 +635,148 @@ export const fileLoad = (k: string) => idb<Blob | undefined>("readonly", (st) =>
 export const fileDelete = (k: string) => idb<void>("readwrite", (st) => st.delete(k));
 
 // ---------------------------------------------------------------- Lecture de ticket de caisse
-const ReceiptScanner: React.FC<{ onResult: (r: ReceiptResult) => void; label?: string; className?: string }> = ({ onResult, label = "Scanner un ticket", className }) => {
-  const { toast } = useStore();
-  const ref = useRef<HTMLInputElement>(null);
-  const [busy, setBusy] = useState<number | null>(null);
-  const run = async (file: File) => {
-    setBusy(0);
-    try {
-      const T = await tesseract();
-      const { data } = await T.recognize(file, "fra", { logger: (m) => m.status === "recognizing text" && setBusy(Math.round(m.progress * 100)) });
-      const r = parseReceipt(data.text);
-      onResult(r);
-      toast(r.amount ? `Ticket lu : ${r.amount.toFixed(2).replace(".", ",")}${r.store ? ` · ${r.store}` : ""}. Vérifiez puis validez.` : "Montant introuvable sur la photo. Saisissez-le à la main.", r.amount ? "ok" : "info");
-    } catch {
-      toast("Lecture impossible ici. Elle fonctionne sur le site en ligne (connexion requise la première fois).", "bad");
-    } finally { setBusy(null); }
-  };
-  return (
-    <>
-      <Btn type="button" className={className} disabled={busy !== null} onClick={() => ref.current?.click()}>
-        <Camera size={15} />{busy !== null ? `Lecture du ticket… ${busy} %` : label}
-      </Btn>
-      <input ref={ref} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) run(f); e.target.value = ""; }} />
-    </>
-  );
+/** Ce que l'utilisateur a confirmé après relecture (rien n'est enregistré avant). */
+export interface ReceiptConfirm {
+  amount: number | null; date: string | null; store: string;
+  items: { name: string; price: number; qty: number; kind: "item" | "discount" }[];
+  /** Empreinte date|centimes du ticket (vide si date ou total inconnus). */
+  fingerprint: string;
+  /** L'utilisateur a accepté d'ajouter un ticket qui semble déjà enregistré. */
+  allowDuplicate: boolean;
+}
+const FLAG_TEXT: Record<string, string> = {
+  price_next_line: "Prix lu sur la ligne suivante", price_repaired: "Prix corrigé (caractère confondu avec un chiffre)", price_partial: "Prix à un seul chiffre après la virgule",
+  price_ambiguous: "Prix illisible ou ambigu", price_high: "Prix très élevé", qty_computed: "Total de la ligne calculé", qty_incoherent: "Quantité × prix ne correspond pas au total de la ligne",
+  name_unclear: "Nom peu lisible", name_missing: "Nom illisible", negative_price: "Montant négatif : traité comme une remise",
 };
+const eur = (c: number) => (c / 100).toFixed(2).replace(".", ",");
+type Row = { id: string; name: string; qty: string; price: string; kind: "item" | "discount"; conf: "high" | "medium" | "low"; flags: string[] };
+
+/** Fenêtre de relecture : tout est modifiable ; rien n'est enregistré avant « Utiliser ces données ». */
+const ReceiptReview: React.FC<{ result: ReceiptResult; items: ReceiptItem[]; info: OcrOutput["info"]; meanConfidence: number | null; withDate: boolean; withItems: boolean; today: string; known: string[]; onConfirm: (c: ReceiptConfirm) => void; onCancel: () => void }> =
+  ({ result, items, info, meanConfidence, withDate, withItems, today, known, onConfirm, onCancel }) => {
+    const [amount, setAmount] = useState(result.amount !== null ? result.amount.toFixed(2).replace(".", ",") : "");
+    const [date, setDate] = useState(result.dateStatus === "ok" && result.date && result.date <= today ? result.date : "");
+    const [store, setStore] = useState(result.storeConfidence === "high" ? result.store : "");
+    const [rows, setRows] = useState<Row[]>(() => items.map((it) => ({ id: uid(), name: it.name, qty: String(it.qty), price: it.price === null ? "" : it.price.toFixed(2).replace(".", ","), kind: it.kind, conf: it.confidence, flags: it.flags })));
+    const [dup, setDup] = useState(false);
+    useEffect(() => { const k = (e: KeyboardEvent) => e.key === "Escape" && onCancel(); window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, [onCancel]);
+    const amt = amount.trim() ? parseAmount(amount) : NaN;
+    const amtOk = amt > 0 && amt < 100000;
+    // une ligne corrigée par l'utilisateur n'est plus « incertaine »
+    const upd = (id: string, patch: Partial<Row>) => setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch, ...(patch.name !== undefined || patch.price !== undefined ? { conf: "high" as const, flags: [] } : {}) } : r)));
+    const cents = rows.reduce((n, r) => { const v = r.price.trim() ? parseAmount(r.price) : NaN; return isNaN(v) ? n : n + Math.round(v * 100); }, 0);
+    const unknown = rows.filter((r) => !r.price.trim() || isNaN(parseAmount(r.price))).length;
+    const gap = amtOk && rows.length ? cents - Math.round(amt * 100) : null;
+    const diverge = gap !== null && (Math.abs(gap) >= 1 || unknown > 0);
+    const fp = receiptFingerprint(date || null, amtOk ? amt : null);
+    const isDup = !!fp && known.includes(fp);
+    const missingDate = withDate && !date;
+    const submit = () => {
+      if (!amtOk || (isDup && !dup)) return;
+      onConfirm({
+        amount: amt, date: date || null, store: store.trim(), fingerprint: fp, allowDuplicate: isDup && dup,
+        items: rows.map((r) => ({ name: r.name.trim(), price: r.price.trim() ? parseAmount(r.price) : NaN, qty: Math.max(1, parseInt(r.qty, 10) || 1), kind: r.kind })).filter((r) => !isNaN(r.price) && (r.kind === "discount" || r.name)),
+      });
+    };
+    return createPortal(
+      <div className="fixed inset-0 z-[95] flex items-end justify-center bg-black/40 backdrop-blur-[2px] animate-fade sm:items-start sm:px-4 sm:pt-[6vh]">
+        <div className="inked sheet max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-t-[22px] bg-panel animate-pop sm:max-h-[86vh] sm:rounded-[22px]" role="dialog" aria-modal="true" aria-label="Relire le ticket" data-testid="receipt-review">
+          <header className="flex items-center justify-between border-b border-line px-5 py-3"><h2 className="font-display text-lg font-bold">Relire le ticket</h2><Btn variant="ghost" size="sm" onClick={onCancel} aria-label="Fermer"><X size={14} /></Btn></header>
+          <div className="flex flex-col gap-3 p-5">
+            <p className="text-xs text-muted">La lecture automatique peut se tromper. Vérifiez, corrigez, puis validez : rien n'est enregistré avant.</p>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Total du ticket" htmlFor="rv-amount"><Input id="rv-amount" inputMode="decimal" placeholder="0,00" value={amount} onChange={(e) => setAmount(e.target.value)} /></Field>
+              {withDate && <Field label="Date" htmlFor="rv-date"><Input id="rv-date" type="date" max={today} value={date} onChange={(e) => setDate(e.target.value)} /></Field>}
+              <Field label="Magasin" htmlFor="rv-store" className="col-span-2"><Input id="rv-store" placeholder="Non détecté" value={store} onChange={(e) => setStore(e.target.value)} /></Field>
+            </div>
+            {result.storeConfidence === "low" && !store && <p className="text-xs text-muted">{`Magasin incertain : « ${result.store} ».`} <button type="button" className="font-semibold underline" onClick={() => setStore(result.store)}>Utiliser</button></p>}
+            <div className="flex flex-col gap-1.5" data-testid="receipt-warnings">
+              {result.totalStatus === "conflict" && <p className="rounded-lg bg-warn/15 px-3 py-2 text-xs"><AlertTriangle size={12} className="mr-1 inline" />Plusieurs totaux différents lus sur le ticket. Choisissez le bon : {result.totalCandidates.map((c) => <button key={c} type="button" className="mx-0.5 rounded-full border-2 border-line px-2 font-mono font-semibold hover:border-fg/60" onClick={() => setAmount(c.toFixed(2).replace(".", ","))}>{money(c)}</button>)}</p>}
+              {result.totalStatus === "absent" && <p className="rounded-lg bg-warn/15 px-3 py-2 text-xs"><AlertTriangle size={12} className="mr-1 inline" />Aucun total fiable détecté. Saisissez-le à la main.</p>}
+              {result.totalStatus === "derived" && <p className="rounded-lg bg-sunken px-3 py-2 text-xs">Aucun total imprimé lu : le montant est calculé à partir de « espèces » moins « rendu ». Vérifiez-le.</p>}
+              {missingDate && <p className="rounded-lg bg-sunken px-3 py-2 text-xs">{result.dateStatus === "ambiguous" ? "Plusieurs dates différentes lues : choisissez la bonne." : result.dateStatus === "invalid" ? "Une date a été lue mais elle n'est pas valide : saisissez-la." : "Date non détectée : saisissez-la (sinon la date du jour est conservée)."}</p>}
+              {isDup && <label className="flex items-start gap-2 rounded-lg bg-bad/10 px-3 py-2 text-xs"><input type="checkbox" checked={dup} onChange={(e) => setDup(e.target.checked)} className="mt-0.5" /><span>Un ticket de même date et de même total est déjà enregistré. Cochez pour l'ajouter quand même.</span></label>}
+            </div>
+            <div>
+              <div className="mb-1 flex items-center justify-between"><p className="text-[11px] font-semibold uppercase tracking-wider text-muted">{`Articles lus (${rows.length})`}</p>
+                <Btn type="button" size="sm" variant="soft" onClick={() => setRows((rs) => [...rs, { id: uid(), name: "", qty: "1", price: "", kind: "item", conf: "high", flags: [] }])}><Plus size={12} />Ajouter une ligne</Btn></div>
+              {!rows.length && <p className="rounded-lg bg-sunken px-3 py-2 text-xs text-muted">Aucun article reconnu.{withItems ? " La liste de courses ne sera pas modifiée." : ""} Vous pouvez en ajouter à la main ou ne garder que le total.</p>}
+              <ul className="flex flex-col gap-1.5">
+                {rows.map((r) => (
+                  <li key={r.id} data-testid="receipt-row" data-conf={r.conf}
+                    className={cx("grid grid-cols-[minmax(0,1fr)_3rem_5rem_auto] items-center gap-1.5 rounded-lg border-2 px-1.5 py-1", r.conf === "low" ? "border-bad/60 bg-bad/5" : r.conf === "medium" ? "border-warn/60 bg-warn/5" : "border-transparent bg-sunken")}>
+                    <Input aria-label="Nom de l'article" placeholder="Nom à compléter" value={r.name} onChange={(e) => upd(r.id, { name: e.target.value })} className="min-w-0" />
+                    <Input aria-label="Quantité" inputMode="numeric" value={r.qty} onChange={(e) => upd(r.id, { qty: e.target.value })} className="px-1 text-center" />
+                    <Input aria-label="Prix de la ligne" inputMode="decimal" placeholder="prix" value={r.price} onChange={(e) => upd(r.id, { price: e.target.value })} className="px-1 text-right font-mono" />
+                    <button type="button" aria-label="Supprimer la ligne" className="p-1 text-muted hover:text-bad" onClick={() => setRows((rs) => rs.filter((x) => x.id !== r.id))}><Trash2 size={13} /></button>
+                    {(r.flags.length > 0 || r.kind === "discount") && <p className="col-span-4 px-1 text-[10px] text-muted">{r.kind === "discount" && <span>Remise</span>}{r.flags.map((f, i) => <React.Fragment key={f}>{(i > 0 || r.kind === "discount") && " · "}<span>{FLAG_TEXT[f] ?? f}</span></React.Fragment>)}</p>}
+                  </li>))}
+              </ul>
+              {rows.length > 0 && (
+                <div className="mt-2 flex flex-wrap items-baseline justify-between gap-2 text-xs" data-testid="receipt-sum">
+                  <span>Somme des lignes : <b className="font-mono">{eur(cents)} €</b>{unknown > 0 && <span className="text-muted">{` (+ ${unknown} sans prix)`}</span>}</span>
+                  {amtOk && <span>Total du ticket : <b className="font-mono">{eur(Math.round(amt * 100))} €</b></span>}
+                </div>)}
+              {diverge && <p className="mt-1 rounded-lg bg-warn/15 px-3 py-2 text-xs" data-testid="receipt-gap"><AlertTriangle size={12} className="mr-1 inline" />{gap !== 0 ? `La somme des lignes diffère du total du ticket de ${eur(Math.abs(gap!))} €. Des articles sont peut-être manquants ou mal lus ; vérifiez, ou validez malgré l'écart.` : "La somme des lignes correspond, mais certaines lignes n'ont pas de prix ; vérifiez, ou validez malgré l'écart."}</p>}
+            </div>
+            <details className="rounded-lg border border-line px-3 py-2 text-xs">
+              <summary className="cursor-pointer font-semibold">Texte reconnu par le scanner</summary>
+              <pre data-testid="receipt-ocr-text" className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap font-mono text-[11px]">{result.text || "(aucun texte reconnu)"}</pre>
+              <p className="mt-2 text-[10px] text-muted"><span>{`${info.width}×${info.height} px`}</span> · <span>{info.preprocessed ? "image préparée" : "image d'origine (préparation impossible)"}</span> · <span>{info.engine === "local" ? "moteur hébergé" : "moteur en ligne (CDN)"}</span>{meanConfidence !== null && <> · <span>{`confiance moyenne des mots (indicatif) : ${Math.round(meanConfidence)} %`}</span></>}</p>
+            </details>
+            <div className="flex flex-wrap justify-end gap-2 border-t border-line pt-3">
+              <Btn type="button" variant="ghost" onClick={onCancel}>Annuler</Btn>
+              <Btn type="button" variant="primary" disabled={!amtOk || (isDup && !dup)} onClick={submit} data-testid="receipt-confirm">{diverge ? "Valider malgré l'écart" : "Utiliser ces données"}</Btn>
+            </div>
+            {!amtOk && <p className="text-right text-[11px] text-muted">Indiquez le total du ticket pour continuer.</p>}
+          </div>
+        </div>
+      </div>,
+      document.body
+    );
+  };
+
+const OCR_PHASE: Record<OcrProgress["phase"], string> = { prepare: "Préparation de l'image…", engine: "Chargement du moteur de lecture…", lang: "Chargement du français…", read: "Lecture du ticket…" };
+const ReceiptScanner: React.FC<{ onConfirm: (c: ReceiptConfirm) => void; label?: string; className?: string; withDate?: boolean; withItems?: boolean; known?: string[] }> =
+  ({ onConfirm, label = "Scanner un ticket", className, withDate = false, withItems = false, known = [] }) => {
+    const ref = useRef<HTMLInputElement>(null);
+    const ctl = useRef<AbortController | null>(null);
+    const [prog, setProg] = useState<OcrProgress | null>(null);
+    const [err, setErr] = useState<OcrError | null>(null);
+    const [review, setReview] = useState<{ result: ReceiptResult; items: ReceiptItem[]; out: OcrOutput } | null>(null);
+    useEffect(() => () => ctl.current?.abort(), []);
+    const run = async (file: File) => {
+      if (ctl.current) return; // une seule lecture à la fois
+      const c = new AbortController(); ctl.current = c; setErr(null); setProg({ phase: "prepare", pct: 0 });
+      try {
+        const out = await scanReceipt(file, { signal: c.signal, onProgress: setProg });
+        setReview({ result: parseReceipt(out.text), items: parseReceiptItems(out.text), out });
+      } catch (e) {
+        if (!(e instanceof OcrError && e.kind === "cancelled")) setErr(e instanceof OcrError ? e : new OcrError("recognize", "La lecture de l'image a échoué.", String((e as Error)?.message ?? e).slice(0, 200)));
+      } finally { ctl.current = null; setProg(null); }
+    };
+    const close = useCallback(() => setReview(null), []);
+    return (
+      <>
+        <div className={cx("flex gap-2", className)}>
+          <Btn type="button" className="flex-1" disabled={prog !== null} onClick={() => ref.current?.click()}>
+            <Camera size={15} />{prog ? <>{OCR_PHASE[prog.phase]}{prog.phase !== "prepare" && prog.pct > 0 ? ` ${prog.pct} %` : ""}</> : label}
+          </Btn>
+          {prog && <Btn type="button" variant="ghost" onClick={() => ctl.current?.abort()}>Annuler</Btn>}
+        </div>
+        <input ref={ref} type="file" accept="image/*" capture="environment" hidden data-testid="receipt-file" onChange={(e) => { const f = e.target.files?.[0]; if (f) void run(f); e.target.value = ""; }} />
+        {err && (
+          <div role="alert" data-testid="receipt-error" className="mt-2 rounded-lg bg-bad/10 px-3 py-2 text-xs">
+            <p className="font-semibold">{err.message}</p>
+            {(err.kind === "engine" || err.kind === "lang") && <p className="mt-0.5">{err.offline ? "L'appareil indique être hors ligne et les fichiers de lecture ne sont pas encore disponibles ici : connectez-vous une première fois." : "Réessayez ; si cela persiste, rechargez la page. Vous pouvez aussi saisir le montant à la main."}</p>}
+            {err.kind === "recognize" && <p className="mt-0.5">Réessayez avec une photo plus nette, ou saisissez le montant à la main.</p>}
+            {err.detail && <details className="mt-1 text-muted"><summary className="cursor-pointer">Détails techniques</summary><p className="mt-1 break-all font-mono text-[10px]">{err.detail}</p></details>}
+          </div>)}
+        {review && <ReceiptReview result={review.result} items={review.items} info={review.out.info} meanConfidence={review.out.meanConfidence} withDate={withDate} withItems={withItems} today={todayISO()} known={known} onCancel={close} onConfirm={(c) => { setReview(null); onConfirm(c); }} />}
+      </>
+    );
+  };
 
 // ---------------------------------------------------------------- Module : Tableau de bord
 type OnTime = ReturnType<typeof onTimeStats>;
@@ -2192,10 +2305,21 @@ const Groceries: React.FC = () => {
   const groceryLimit = state.budget.limits.Courses;
   const grocerySpent = monthExp.filter((e) => e.category === "Courses").reduce((n, e) => n + e.amount, 0);
   const remainingAll = state.budget.monthly - monthExp.reduce((n, e) => n + e.amount, 0);
+  const [ticketFp, setTicketFp] = useState("");
+  const knownTickets = state.budget.expenses.flatMap((e) => (e.ticket ? [e.ticket] : []));
+  /** Ticket relu et confirmé : coche/ajoute les articles (sans doublon), pré-remplit le montant payé. Rien n'est enregistré avant « Valider les achats ». */
+  const onTicket = (c: ReceiptConfirm) => {
+    const lines = c.items.filter((i) => i.kind === "item" && i.name && i.price >= 0).map((i) => ({ name: i.name, price: i.price, qty: i.qty, aisle: guessAisle(i.name) }));
+    if (lines.length) dispatch({ type: "grocery/fromReceipt", lines });
+    if (c.amount) setPaid(c.amount.toFixed(2).replace(".", ","));
+    setTicketFp(c.allowDuplicate ? "" : c.fingerprint);
+    toast(lines.length ? `Ticket lu : ${lines.length} ligne(s) cochée(s) ou ajoutée(s). Vérifiez le montant puis validez les achats.` : "Montant du ticket repris. La liste n'a pas été modifiée.", "ok");
+  };
   const checkout = () => {
     const amount = paid.trim() ? parseAmount(paid) : cartTotal;
     if (!(amount > 0)) { toast("Indiquez le montant payé (ou des prix sur les articles cochés).", "bad"); return; }
-    dispatch({ type: "grocery/checkout", amount, date: todayISO() }); setPaid("");
+    if (ticketFp && knownTickets.includes(ticketFp)) { toast("Ce ticket est déjà enregistré dans le budget.", "bad"); return; }
+    dispatch({ type: "grocery/checkout", amount, date: todayISO(), ...(ticketFp ? { ticket: ticketFp } : {}) }); setPaid(""); setTicketFp("");
     toast(`Dépense de ${money(amount, cur)} ajoutée au budget Courses`);
   };
   const add = (e: React.FormEvent) => {
@@ -2240,7 +2364,7 @@ const Groceries: React.FC = () => {
               <p className="font-mono text-lg font-semibold tabular-nums">{money(cartTotal, cur)} <span className="text-sm font-normal text-muted">/ {money(estTotal, cur)}</span></p></div>
             {state.groceries.some((g) => g.checked) && <>
               <Field label="Montant payé" htmlFor="gr-paid"><Input id="gr-paid" inputMode="decimal" className="w-28" placeholder={cartTotal ? cartTotal.toFixed(2).replace(".", ",") : "0,00"} value={paid} onChange={(e) => setPaid(e.target.value)} /></Field>
-              <ReceiptScanner label="Scanner le ticket" onResult={(r) => r.amount && setPaid(r.amount.toFixed(2).replace(".", ","))} />
+              <ReceiptScanner label="Scanner le ticket" withItems known={knownTickets} onConfirm={onTicket} />
               <Btn variant="primary" onClick={checkout}><Receipt size={14} />Valider les achats</Btn>
               <Btn variant="ghost" onClick={() => undoable({ type: "grocery/clearChecked" }, "Articles cochés retirés sans dépense")}><Trash2 size={13} />Retirer sans dépense</Btn></>}
           </div>)}
@@ -2354,7 +2478,7 @@ const BudgetView: React.FC = () => {
   const bs = budgetStats(state.budget, mk, today, catsOf(state));
   const { spent, remaining, dim, elapsed, projection, perDayLeft, daily } = bs;
   const byCat = bs.byCat.filter((x) => x.spent > 0 || x.limit).map((x) => ({ c: x.cat, v: x.spent, lim: x.limit }));
-  const [f, setF] = useState({ label: "", amount: "", category: "Courses" as ExpenseCat, date: today, source: "manuel" as Expense["source"] });
+  const [f, setF] = useState({ label: "", amount: "", category: "Courses" as ExpenseCat, date: today, source: "manuel" as Expense["source"], items: [] as string[], ticket: "" });
   const [editLimits, setEditLimits] = useState(false);
   const [editing, setEditing] = useState<Expense | null>(null);
   const [rec, setRec] = useState({ label: "", amount: "", category: "Logement" as ExpenseCat, day: "1" });
@@ -2366,13 +2490,14 @@ const BudgetView: React.FC = () => {
     // Anti double envoi : même dépense saisie deux fois en moins de 3 s.
     const key = `${f.date}|${amount}|${f.category}|${f.label.trim()}`;
     if (lastAdd.current && lastAdd.current.key === key && Date.now() - lastAdd.current.at < 3000) return;
+    if (f.ticket && state.budget.expenses.some((x) => x.ticket === f.ticket)) { toast("Ce ticket est déjà enregistré dans le budget.", "bad"); return; }
     lastAdd.current = { key, at: Date.now() };
-    dispatch({ type: "expense/add", expense: { id: uid(), date: f.date, amount, category: f.category, label: f.label.trim() || f.category, source: f.source } });
+    dispatch({ type: "expense/add", expense: { id: uid(), date: f.date, amount, category: f.category, label: f.label.trim() || f.category, source: f.source, ...(f.items.length ? { items: f.items } : {}), ...(f.ticket ? { ticket: f.ticket } : {}) } });
     const lim = state.budget.limits[f.category];
     const catSpent = bs.byCat.find((x) => x.cat === f.category)?.spent ?? 0;
     if (monthKey(f.date) === mk && lim && catSpent <= lim && catSpent + amount > lim) toast(`${money(amount, cur)} ajoutés · plafond ${f.category} dépassé (${money(catSpent + amount, cur)} / ${money(lim, cur)})`, "bad");
     else toast(`${money(amount, cur)} ajoutés en ${f.category}`);
-    setF({ ...f, label: "", amount: "", source: "manuel" });
+    setF({ ...f, label: "", amount: "", source: "manuel", items: [], ticket: "" });
   };
   const rebuy = (e: Expense) => {
     const have = new Set(state.groceries.map((g) => norm(g.name)));
@@ -2425,7 +2550,9 @@ const BudgetView: React.FC = () => {
         <div className="flex min-w-0 flex-col gap-4">
           <MoneyIn mk={mk} cur={cur} />
           <Card title="Nouvelle dépense">
-            <ReceiptScanner className="mb-3 w-full" onResult={(r) => setF({ ...f, amount: r.amount ? r.amount.toFixed(2).replace(".", ",") : f.amount, date: r.date && r.date <= today ? r.date : f.date, label: r.store || "Ticket de caisse", category: "Courses", source: "ticket" })} />
+            <ReceiptScanner className="mb-3" withDate known={state.budget.expenses.flatMap((e) => (e.ticket ? [e.ticket] : []))}
+              onConfirm={(c) => setF({ ...f, amount: c.amount ? c.amount.toFixed(2).replace(".", ",") : f.amount, date: c.date && c.date <= today ? c.date : f.date, label: c.store || "Ticket de caisse", category: "Courses", source: "ticket",
+                items: c.items.filter((i) => i.kind === "item" && i.name).map((i) => i.name), ticket: c.allowDuplicate ? "" : c.fingerprint })} />
             <form onSubmit={add} className="grid grid-cols-2 gap-2">
               <Input id="bd-label" aria-label="Libellé" placeholder="Libellé (ex. Pharmacie)" className="col-span-2" value={f.label} onChange={(e) => setF({ ...f, label: e.target.value })} />
               <Input id="bd-amount" aria-label="Montant" inputMode="decimal" placeholder={`Montant (${cur})`} value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
