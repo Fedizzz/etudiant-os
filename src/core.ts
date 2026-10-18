@@ -1136,3 +1136,17 @@ export function freeStart(start: number, len: number, others: { start: number; e
   while (moved && guard++ < 50) { moved = false; for (const o of [...list].reverse()) if (t < o.end && t + len > o.start) { t = o.start - len; moved = true; } }
   return Math.max(0, t);
 }
+
+/** Tâche perso cochée trop tard (après son jour, ou après son heure de fin selon le réglage). */
+export function todoDoneLate(t: Todo): boolean {
+  if (!t.done || !t.due || !t.doneAt) return false;
+  if (t.doneAt > t.due) return true;
+  const endM = !ON_TIME_BY_TIME ? null : t.end ? toMin(t.end) : t.start ? toMin(t.start) : null;
+  return t.doneAt === t.due && endM !== null && !!t.doneTime && toMin(t.doneTime) > endM;
+}
+/** Tâche académique terminée trop tard (après l'échéance, ou après la fin de son créneau précis selon le réglage). */
+export function taskDoneLate(t: Task): boolean {
+  if (t.status !== "done" || !t.doneAt || t.deadline === NO_DEADLINE) return false;
+  if (t.slot) { const endM = ON_TIME_BY_TIME ? toMin(t.slot.end) : 24 * 60; return t.doneAt > t.slot.date || (t.doneAt === t.slot.date && !!t.doneTime && toMin(t.doneTime) > endM); }
+  return t.doneAt > t.deadline;
+}

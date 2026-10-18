@@ -5,7 +5,7 @@ import { MiniPdf } from "./pdf.ts";
 import { layoutLanes } from "./core.ts";
 import { DAY_WORDS, dayOf, pageGeometry, parseGrid } from "./timetable.ts";
 import { parseIcs, normalizeFeedUrl, isFeedUrl } from "./ical.ts";
-import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, choreStepsDone, choreDoneLate, choreSlotEnd, freeStart, setOnTimeMode, nowMinutes, NO_DEADLINE, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, onTimeGuess, onTimeStats, taskOnTimeStats, choreOnTimeStats, HABIT_CATS, habitOn, habitStats, habitStepsDone, habitStreak, todoOnTimeStats, TODO_KINDS, activeDays, xpOf, levelOf, globalStreak, LEVELS, pad, parseAmount, parseISO, parseReceipt, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
+import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, choreStepsDone, choreDoneLate, choreSlotEnd, freeStart, setOnTimeMode, todoDoneLate, taskDoneLate, nowMinutes, NO_DEADLINE, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, onTimeGuess, onTimeStats, taskOnTimeStats, choreOnTimeStats, HABIT_CATS, habitOn, habitStats, habitStepsDone, habitStreak, todoOnTimeStats, TODO_KINDS, activeDays, xpOf, levelOf, globalStreak, LEVELS, pad, parseAmount, parseISO, parseReceipt, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
 import type { Action, Aisle, PlanEvent, Chore, Habit, HabitCat, Todo, TodoKind, AppState, Block, Budget, Course, DayPlan, Expense, ExpenseCat, GroceryTemplate, ID, Phase, PomodoroCfg, Priority, ReceiptResult, Recurrence, EventRecurrence, CalFeed, FeedEvent, SettingsState, SleepLog, Step, Task, TaskKind, TaskStatus, TemplateItem, ViewKey } from "./core.ts";
 import type { AppEnv } from "./env.ts";
 import { LangSwitch } from "./i18n.tsx";
@@ -1899,6 +1899,7 @@ const Academic: React.FC<{ openNewTask: () => void }> = ({ openNewTask }) => {
                     <button className="text-muted opacity-60 transition hover:text-bad group-hover:opacity-100" aria-label="Supprimer la tâche" onClick={() => undoable({ type: "task/remove", id: t.id }, `Tâche « ${t.title} » supprimée`)}><Trash2 size={12} /></button></span>
                   </div>
                   <p className={cx("text-[13px] font-medium leading-snug", s === "done" && "text-muted line-through")}>{t.title}</p>
+                  {taskDoneLate(t) && <p className="mt-1 text-[11px] font-semibold text-warn">⏰ Terminé en retard</p>}
                   {t.noPlan && s !== "done" && <p className="mt-1 text-[11px] text-muted">🚫 Pas de do date · hors planning</p>}
                   {!!t.doDates?.length && s !== "done" && <p className="mt-1 text-[11px] text-muted">{t.kind === "examen" ? "📖 Révision" : "🛠 Travail"} : {t.doDates.map((d) => fmtDate(d)).join(" · ")}</p>}
                   {!!t.steps?.length && <div className="mt-1.5" onPointerDown={(e) => e.stopPropagation()}><p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted">Checklist · {t.steps.filter((x) => x.done).length}/{t.steps.length}</p>
@@ -2988,6 +2989,7 @@ const TodoRow: React.FC<{ t: Todo; onEdit?: (t: Todo) => void; showDate?: boolea
       {t.start && <span className="font-mono text-[11px] tabular-nums text-muted">{t.start}{t.end ? `–${t.end}` : ""}</span>}
       {showDate && t.due && t.due !== today && !t.done && <Pill tone={late ? "bad" : "muted"}>{fmtDate(t.due)}</Pill>}
       {!t.done && t.priority === 3 && <Pill tone="bad">🔥 Haute</Pill>}
+      {todoDoneLate(t) && <Pill tone="warn">Fait en retard</Pill>}
       {onEdit && <button className="p-1 text-muted opacity-60 hover:text-bad group-hover:opacity-100" aria-label={`Supprimer ${t.text}`} onClick={() => undoable({ type: "todo/remove", id: t.id }, `« ${t.text} » supprimée`)}><Trash2 size={12} /></button>}
       {t.note && !t.done && <p className="basis-full pl-12 text-[11px] text-muted">{t.note}</p>}
     </li>

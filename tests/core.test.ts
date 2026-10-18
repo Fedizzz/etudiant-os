@@ -498,3 +498,11 @@ test("réglage « à l'heure » : selon l'heure du créneau ou selon le jour", (
   C.setOnTimeMode("day");  assert.deepEqual(C.choreOnTimeStats([c], today), { ok: 0, late: 0 }); // jugé seulement le lendemain
   C.setOnTimeMode(undefined); assert.deepEqual(C.choreOnTimeStats([c], today), { ok: 0, late: 1 });
 });
+
+test("coché après coup : marqué en retard (tâche perso, tâche académique)", () => {
+  C.setOnTimeMode("time");
+  assert.equal(C.todoDoneLate({ id: "t", text: "x", done: true, due: "2026-10-14", doneAt: "2026-10-15", createdAt: "2026-10-01" }), true);
+  assert.equal(C.todoDoneLate({ id: "t", text: "x", done: true, due: "2026-10-14", doneAt: "2026-10-14", createdAt: "2026-10-01" }), false);
+  assert.equal(C.taskDoneLate(task({ status: "done", deadline: "2026-10-14", doneAt: "2026-10-15" })), true);
+  assert.equal(C.taskDoneLate(task({ status: "done", deadline: "2026-10-14", doneAt: "2026-10-13" })), false);
+});
