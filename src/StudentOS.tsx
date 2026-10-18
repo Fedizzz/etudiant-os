@@ -2306,12 +2306,18 @@ const Groceries: React.FC = () => {
   const grocerySpent = monthExp.filter((e) => e.category === "Courses").reduce((n, e) => n + e.amount, 0);
   const remainingAll = state.budget.monthly - monthExp.reduce((n, e) => n + e.amount, 0);
   const [ticketFp, setTicketFp] = useState("");
-  /** « Fini » : retire de la maison, puis propose de remettre l'article sur la liste de courses. */
+  const [rebuy, setRebuy] = useState<{ name: string; aisle: Aisle; price: number } | null>(null);
+  /** « Fini » : retire de la maison, puis demande (fenêtre au centre) s'il faut remettre l'article sur la liste de courses. */
   const finish = (x: { key: string; name: string }) => {
     dispatch({ type: "pantry/use", key: x.key });
     if (state.groceries.some((g) => norm(g.name) === norm(x.name))) { toast(`${x.name} : déjà sur votre liste de courses`, "info"); return; }
     const p = state.products.find((q) => norm(q.name) === norm(x.name));
-    toast(`${x.name} terminé. Le remettre sur la liste ?`, "info", { label: "Remettre sur la liste", run: () => { dispatch({ type: "grocery/add", item: { id: uid(), name: x.name, aisle: p?.aisle ?? guessAisle(x.name), qty: "", checked: false, price: p?.price ?? 0 } }); toast(`${x.name} remis sur la liste`, "ok"); } });
+    setRebuy({ name: x.name, aisle: p?.aisle ?? guessAisle(x.name), price: p?.price ?? 0 });
+  };
+  const confirmRebuy = () => {
+    if (!rebuy) return;
+    dispatch({ type: "grocery/add", item: { id: uid(), name: rebuy.name, aisle: rebuy.aisle, qty: "", checked: false, price: rebuy.price } });
+    toast(`${rebuy.name} remis sur la liste`, "ok"); setRebuy(null);
   };
   const home = pantryItems(state, todayISO()).map((x) => {
     const a = state.products.find((p) => norm(p.name) === norm(x.name))?.aisle ?? guessAisle(x.name);
@@ -2390,6 +2396,17 @@ const Groceries: React.FC = () => {
             <p className="mt-2 text-xs text-muted">{grocerySpent + estTotal > groceryLimit ? `Attention : cette liste (${money(estTotal, cur)}) dépasserait le budget de ${money(grocerySpent + estTotal - groceryLimit, cur)}.` : `Après cette liste, il resterait ${money(groceryLimit - grocerySpent - estTotal, cur)}.`}</p>
           </>) : <p className="text-xs text-muted">Pas de plafond « Courses » défini. Reste global du mois : <b className="font-mono text-fg">{money(remainingAll, cur)}</b>. Fixez un plafond dans l'onglet Budget.</p>}
         </Card>
+        {rebuy && createPortal(
+          <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/40 px-4 backdrop-blur-[2px] animate-fade" onMouseDown={() => setRebuy(null)}>
+            <div className="inked sheet w-full max-w-sm rounded-[22px] bg-panel p-6 text-center animate-pop" role="dialog" aria-modal="true" aria-label="Remettre sur la liste" data-testid="rebuy-dialog" onMouseDown={(e) => e.stopPropagation()}>
+              <p className="font-display text-lg font-bold">{rebuy.name}</p>
+              <p className="mt-1 text-sm text-muted">Cet article est terminé. Voulez-vous le remettre sur votre liste de courses ?</p>
+              <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-center">
+                <Btn variant="primary" onClick={confirmRebuy} data-testid="rebuy-yes"><Plus size={14} />Remettre sur la liste</Btn>
+                <Btn variant="ghost" onClick={() => setRebuy(null)}>Non merci</Btn>
+              </div>
+            </div>
+          </div>, document.body)}
         <Card title={<span className="flex items-center gap-2"><Home size={15} />À la maison</span>}>
           {home.length ? (<>
             <p className="mb-2 text-[11px] text-muted">Estimation d'après vos achats des 3 dernières semaines. Touchez « Fini » quand quelque chose est consommé.</p>
