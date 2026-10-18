@@ -4,7 +4,7 @@ import { MiniPdf } from "./pdf.ts";
 import { layoutLanes } from "./core.ts";
 import { DAY_WORDS, dayOf, pageGeometry, parseGrid } from "./timetable.ts";
 import { parseIcs, normalizeFeedUrl, isFeedUrl } from "./ical.ts";
-import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, choreStepsDone, choreDoneLate, choreSlotEnd, nowMinutes, NO_DEADLINE, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, onTimeGuess, onTimeStats, taskOnTimeStats, choreOnTimeStats, HABIT_CATS, habitOn, habitStats, habitStepsDone, habitStreak, todoOnTimeStats, TODO_KINDS, pad, parseAmount, parseISO, parseReceipt, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
+import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, choreStepsDone, choreDoneLate, choreSlotEnd, nowMinutes, NO_DEADLINE, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, onTimeGuess, onTimeStats, taskOnTimeStats, choreOnTimeStats, HABIT_CATS, habitOn, habitStats, habitStepsDone, habitStreak, todoOnTimeStats, TODO_KINDS, activeDays, xpOf, levelOf, globalStreak, LEVELS, pad, parseAmount, parseISO, parseReceipt, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
 import type { Action, Aisle, PlanEvent, Chore, Habit, HabitCat, Todo, TodoKind, AppState, Block, Budget, Course, DayPlan, Expense, ExpenseCat, GroceryTemplate, ID, Phase, PomodoroCfg, Priority, ReceiptResult, Recurrence, EventRecurrence, CalFeed, FeedEvent, SettingsState, SleepLog, Step, Task, TaskKind, TaskStatus, TemplateItem, ViewKey } from "./core.ts";
 import type { AppEnv } from "./env.ts";
 import { LangSwitch } from "./i18n.tsx";
@@ -706,6 +706,79 @@ const UpcomingCard: React.FC<{ days: DayPlan[]; kind: "class" | "event"; go: (v:
     </Card>
   );
 };
+/** Horloge style cartoon (en-tête) : petit cadran qui tourne + chiffres épais. */
+const CartoonClock: React.FC = () => {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => { const id = window.setInterval(() => setNow(new Date()), 10_000); return () => window.clearInterval(id); }, []);
+  const h = now.getHours(), m = now.getMinutes();
+  const ha = ((h % 12) + m / 60) * 30, ma = m * 6;
+  return (
+    <div className="flex shrink-0 items-center gap-1.5 rounded-2xl border-2 border-fg bg-hi px-2 py-1 text-[rgb(24_22_46)] shadow-[2px_2px_0_0_rgb(var(--ink))] -rotate-2" aria-label={`Il est ${pad(h)} h ${pad(m)}`} data-testid="cartoon-clock">
+      <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden className="shrink-0">
+        <circle cx="12" cy="12" r="10" fill="#fff" stroke="rgb(24 22 46)" strokeWidth="2.2" />
+        {[0, 90, 180, 270].map((a) => <line key={a} x1="12" y1="3.6" x2="12" y2="5.4" stroke="rgb(24 22 46)" strokeWidth="1.8" strokeLinecap="round" transform={`rotate(${a} 12 12)`} />)}
+        <line x1="12" y1="12" x2="12" y2="7.4" stroke="rgb(24 22 46)" strokeWidth="2.4" strokeLinecap="round" transform={`rotate(${ha} 12 12)`} />
+        <line x1="12" y1="12" x2="12" y2="5" stroke="#e0453a" strokeWidth="1.8" strokeLinecap="round" transform={`rotate(${ma} 12 12)`} />
+        <circle cx="12" cy="12" r="1.6" fill="rgb(24 22 46)" />
+      </svg>
+      <span className="font-display text-[17px] font-extrabold leading-none tabular-nums tracking-tight">{pad(h)}<span className="colon-blink">:</span>{pad(m)}</span>
+    </div>
+  );
+};
+
+/** Carte « Série » façon appli de streak : flamme animée, semaine, niveau et points. */
+const StreakHero: React.FC = () => {
+  const { state, toast } = useStore();
+  const today = todayISO();
+  const days = useMemo(() => activeDays(state), [state.tasks, state.todos, state.chores, state.habits]);
+  const st = globalStreak(days, today);
+  const xp = useMemo(() => xpOf(state), [state.tasks, state.todos, state.chores, state.habits]);
+  const lv = levelOf(xp);
+  const [party, setParty] = useState(false);
+  // Passage de niveau : petite fête (mémorisée sur l'appareil pour ne pas la rejouer).
+  useEffect(() => {
+    let prev = 0; try { prev = Number(localStorage.getItem("etudiant-os/level") ?? 0); } catch { /* facultatif */ }
+    if (prev && lv.level > prev) { setParty(true); toast(`🎉 Niveau ${lv.level} : ${lv.name} !`); window.setTimeout(() => setParty(false), 1800); }
+    try { localStorage.setItem("etudiant-os/level", String(lv.level)); } catch { /* facultatif */ }
+  }, [lv.level]);
+  const monday = addDays(parseISO(today), -weekday(parseISO(today)));
+  const week = Array.from({ length: 7 }, (_, i) => iso(addDays(monday, i)));
+  const big = st.current >= 7;
+  return (
+    <section className="inked relative overflow-hidden rounded-[22px] p-4 sm:p-5" data-testid="streak-hero"
+      style={{ background: "linear-gradient(135deg, rgb(255 214 102 / .55), rgb(255 138 76 / .35) 55%, rgb(var(--panel)))" }}>
+      {party && <div className="confetti pointer-events-none absolute inset-x-0 top-0 h-0" aria-hidden>{Array.from({ length: 18 }, (_, i) => <i key={i} style={{ left: `${(i * 37) % 100}%`, background: ["#3448f0", "#e0453a", "#0f9d76", "#f5b301", "#c2417a"][i % 5], animationDelay: `${(i % 6) * 0.08}s` }} />)}</div>}
+      <div className="flex items-center gap-4">
+        <div className="relative grid h-20 w-20 shrink-0 place-items-center">
+          <span className="flame-glow absolute inset-1 rounded-full" style={{ background: st.current ? "radial-gradient(circle, rgb(255 170 60 / .8), transparent 70%)" : "radial-gradient(circle, rgb(150 150 170 / .4), transparent 70%)" }} />
+          <span className={cx("relative text-[52px] leading-none", st.current ? "flame-bob" : "grayscale opacity-60")} aria-hidden>🔥</span>
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-[rgb(24_22_46)]/70">Série</p>
+          <p key={st.current} className="pop-in font-display text-[34px] font-extrabold leading-none tracking-tight text-[rgb(24_22_46)]">{st.current} <span className="text-[16px] font-bold">jour{st.current > 1 ? "s" : ""}</span></p>
+          <p className="mt-1 text-[12.5px] font-medium text-[rgb(24_22_46)]/80">{st.todayDone ? (big ? "Incroyable, continue comme ça ! 🌟" : "Série validée aujourd'hui ✓") : st.current ? "Fais une chose aujourd'hui pour garder ta série !" : "Coche une tâche, une corvée ou une routine pour lancer ta série."}</p>
+        </div>
+        <div className="hidden shrink-0 text-right sm:block"><p className="text-[11px] font-semibold text-[rgb(24_22_46)]/70">Record</p><p className="font-display text-xl font-extrabold text-[rgb(24_22_46)]">{st.best} j</p></div>
+      </div>
+      <div className="mt-3 grid grid-cols-7 gap-1.5">
+        {week.map((d) => { const on = days.has(d), isT = d === today, future = d > today; return (
+          <div key={d} className="flex flex-col items-center gap-1">
+            <span className={cx("grid h-8 w-8 place-items-center rounded-full border-2 text-[13px] font-bold transition", on ? "border-[rgb(24_22_46)] bg-[#ff8a3d] text-white shadow-[2px_2px_0_0_rgb(24_22_46)]" : isT ? "border-dashed border-[rgb(24_22_46)] bg-white/60" : future ? "border-[rgb(24_22_46)]/20 bg-white/30" : "border-[rgb(24_22_46)]/30 bg-white/50")}>{on ? "🔥" : ""}</span>
+            <span className={cx("text-[10px] font-semibold", isT ? "text-[rgb(24_22_46)]" : "text-[rgb(24_22_46)]/60")}>{DAYS[weekday(parseISO(d))]}</span>
+          </div>); })}
+      </div>
+      <div className="mt-3 rounded-xl border-2 border-[rgb(24_22_46)] bg-white/70 p-2.5">
+        <div className="mb-1.5 flex items-center gap-2 text-[12px] font-semibold text-[rgb(24_22_46)]">
+          <span className="rounded-full bg-[rgb(24_22_46)] px-2 py-0.5 text-[11px] font-bold text-white">Niv. {lv.level}</span>{lv.name}
+          <span className="ml-auto font-mono text-[11px] tabular-nums text-[rgb(24_22_46)]/70">{xp} / {lv.to} pts</span>
+        </div>
+        <div className="h-3 overflow-hidden rounded-full border-2 border-[rgb(24_22_46)] bg-white"><div key={lv.level} className="xp-fill h-full rounded-full" style={{ width: `${Math.max(3, lv.progress * 100)}%`, background: "linear-gradient(90deg, #f5b301, #ff6b3d)" }} /></div>
+        <p className="mt-1 text-[10.5px] text-[rgb(24_22_46)]/70">+10 pts par chose faite, +5 si c'est à l'heure. Prochain niveau : {LEVELS[Math.min(lv.level, LEVELS.length - 1)]}.</p>
+      </div>
+    </section>
+  );
+};
+
 const DashGrid: React.FC<{ blocks: DashBlock[] }> = ({ blocks }) => {
   const { state, dispatch, toast } = useStore();
   const [edit, setEdit] = useState(false);
@@ -794,6 +867,7 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
   const stepsLeft = steps.filter((x) => !x.done).length;
   const debtTone = ss.nights7 === 0 ? undefined : ss.debt7 > 240 ? "bad" : ss.debt7 > 60 ? "warn" : "ok";
   const blocks: DashBlock[] = [
+    { id: "streak", label: "Série & niveau", span: "md:col-span-2 xl:col-span-3", show: true, el: <StreakHero /> },
     { id: "todos", label: "Mes tâches perso", span: "md:col-span-2 xl:col-span-3", show: true, el: <TodoDashCard go={go} /> },
     { id: "start", label: "Pour bien démarrer", span: "md:col-span-2 xl:col-span-3", show: stepsLeft > 0, el: (<>
         <Card title={<span className="flex items-center gap-2"><Sparkles size={15} className="text-accent" />Pour bien démarrer · {steps.length - stepsLeft}/{steps.length}</span>}>
@@ -3553,12 +3627,13 @@ export default function StudentOS({ state, dispatch, env, view, onView, notice, 
         </aside>
         <div className="flex min-w-0 flex-1 flex-col">
           <header ref={headerRef} className={cx("relative z-30 border-b-2 border-dashed border-line bg-bg md:sticky md:top-0 md:z-20", headerHidden && "-translate-y-full")} style={{ paddingTop: "var(--safe-top)", backgroundColor: "rgb(var(--bg))" }}>
-            <div className="mx-auto flex max-w-6xl 2xl:max-w-[1560px] min-[2200px]:max-w-[1880px] items-center gap-1.5 py-3 px-4 sm:gap-3 sm:px-6">
-              <div className="min-w-0 flex-1 basis-0"><p className="truncate text-xs text-muted">{greet} {state.settings.name}<span className="hidden min-[400px]:inline"> · {new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}</span></p>
+            <div className="mx-auto flex max-w-6xl 2xl:max-w-[1560px] min-[2200px]:max-w-[1880px] flex-wrap items-center gap-x-1.5 gap-y-2 py-3 px-4 sm:flex-nowrap sm:gap-3 sm:px-6">
+              <div className="order-last min-w-0 basis-full sm:order-none sm:flex-1 sm:basis-0"><p className="truncate text-xs text-muted">{greet} {state.settings.name}<span className="hidden min-[400px]:inline"> · {new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}</span></p>
                 <h1 className="truncate pb-0.5 font-display text-[18px] min-[400px]:text-[20px] sm:text-[26px] font-extrabold leading-tight tracking-tight"><span key={override?.key ?? view} className="marker">{override?.title ?? current.label}<svg viewBox="0 0 200 20" preserveAspectRatio="none" aria-hidden><path d="M2 12 C 40 6, 80 16, 120 9 S 180 6, 198 11" /></svg></span></h1></div>
               {headerExtra}
               <span className="hidden lg:inline-flex"><Pill tone={levelTone(plan.level)}>Journée {plan.level}</Pill></span>
               <Btn variant="ghost" size="sm" className="hidden lg:inline-flex" onClick={() => setHelp(true)} aria-label="Raccourcis"><Keyboard size={15} /></Btn>
+              <span className="mr-auto sm:mr-0"><CartoonClock /></span>
               <LangSwitch className="px-1.5 sm:px-2" />
               <Btn variant="ghost" size="sm" onClick={toggleTheme} aria-label="Changer de thème" className="hidden sm:inline-flex">{isDark ? <Sun size={15} /> : <Moon size={15} />}</Btn>
               <Btn variant="primary" size="sm" onClick={() => setNewTask(true)} aria-label="Nouvelle tâche"><Plus size={14} /><span className="hidden sm:inline">Tâche</span></Btn>

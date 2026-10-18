@@ -459,3 +459,15 @@ test("créneau dépassé aujourd'hui = pas fait à temps (corvées et tâches pe
   assert.deepEqual(C.todoOnTimeStats([t], today), { ok: 0, late: 1 });
   assert.deepEqual(C.todoOnTimeStats([{ ...t, start: undefined, end: undefined }], today), { ok: 0, late: 0 }); // sans heure : jugé en fin de journée
 });
+
+test("série globale, niveaux et retard des tâches à créneau", () => {
+  const days = new Set(["2026-10-12", "2026-10-13", "2026-10-14", "2026-10-15"]);
+  assert.deepEqual(C.globalStreak(days, TODAY), { current: 4, best: 4, todayDone: true });
+  assert.equal(C.globalStreak(new Set(["2026-10-13", "2026-10-14"]), TODAY).current, 2); // aujourd'hui pas encore fait : la série tient
+  assert.equal(C.globalStreak(new Set(["2026-10-12"]), TODAY).current, 0);
+  assert.deepEqual([C.levelOf(0).level, C.levelOf(99).level, C.levelOf(100).level, C.levelOf(300).level], [1, 1, 2, 3]);
+  assert.equal(C.levelOf(150).progress, 0.25);
+  const done = task({ status: "done", doneAt: "2026-10-14", doneTime: "18:30", slot: { date: "2026-10-14", start: "16:00", end: "18:00" } });
+  assert.deepEqual(C.taskOnTimeStats([done], TODAY), { ok: 0, late: 1 }); // fini après la fin du créneau
+  assert.deepEqual(C.taskOnTimeStats([{ ...done, doneTime: "17:00" }], TODAY), { ok: 1, late: 0 });
+});

@@ -23,7 +23,7 @@ export interface ClassSession { id: ID; courseId: ID; day: number; start: string
 export const classOn = (c: ClassSession, date: string) => c.day === weekday(parseISO(date)) && (!c.dates?.length || c.dates.some(([a, b]) => date >= a && date <= b));
 export interface Task {
   id: ID; title: string; courseId: ID | null; kind: TaskKind; status: TaskStatus;
-  deadline: string; estimate: number; spent: number; priority: Priority; createdAt: string; doneAt?: string;
+  deadline: string; estimate: number; spent: number; priority: Priority; createdAt: string; doneAt?: string; doneTime?: string;
   /** Créneau précis choisi par l'utilisateur (sinon : réparti automatiquement selon l'estimation). */
   slot?: { date: string; start: string; end: string };
   /** Jours où l'on veut travailler (devoir, projet) ou réviser (examen) ; vide = réparti automatiquement jusqu'à l'échéance. */
@@ -277,7 +277,7 @@ export function reducer(s: AppState, a: Action): AppState {
       ...s, tasks: s.tasks.map((t) => {
         if (t.id !== a.id) return t;
         const next = { ...t, ...a.patch };
-        if (a.patch.status === "done" && t.status !== "done") next.doneAt = todayISO();
+        if (a.patch.status === "done" && t.status !== "done") { next.doneAt = todayISO(); next.doneTime = nowHHMM(); }
         if (a.patch.status && a.patch.status !== "done") delete next.doneAt;
         return next;
       }),
@@ -979,6 +979,13 @@ export function taskOnTimeStats(tasks: Task[], today: string, days?: number): On
   let ok = 0, late = 0;
   for (const t of tasks) {
     if (t.deadline === NO_DEADLINE) continue;
+    // Tâche avec un créneau précis : jugée sur l'heure de fin du créneau (pas seulement sur le jour).
+    if (t.slot) {
+      const endM = toMin(t.slot.end), d = t.slot.date;
+      if (t.status === "done" && t.doneAt) { if (inWin(t.doneAt)) { if (t.doneAt < d || (t.doneAt === d && !(t.doneTime && toMin(t.doneTime) > endM))) ok++; else late++; } }
+      else if (inWin(d) && (d < today || (d === today && nowMinutes() > endM))) late++;
+      continue;
+    }
     if (t.status === "done" && t.doneAt) { if (!inWin(t.doneAt)) continue; if (t.doneAt <= t.deadline) ok++; else late++; }
     else if (t.status !== "done" && t.deadline < today && inWin(t.deadline)) late++;
   }
@@ -1064,3 +1071,38 @@ export function choreDoneLate(c: Chore, date: string): boolean {
 export function choreSlotEnd(c: Chore, date: string): number | null { const s = c.pinned?.[date] ?? c.time; return s ? toMin(s) + c.minutes : null; }
 export const nowMinutes = () => { const n = new Date(); return n.getHours() * 60 + n.getMinutes(); };
 export const nowHHMM = () => { const n = new Date(); return `${pad(n.getHours())}:${pad(n.getMinutes())}`; };
+
+// ---------------------------------------------------------------- Série globale et niveaux (gamification douce)
+/** Jours où au moins une chose a été faite (tâche, tâche perso, corvée, routine). */
+export function activeDays(state: AppState): Set<string> {
+  const days = new Set<string>();
+  for (const t of state.tasks) if (t.status === "done" && t.doneAt) days.add(t.doneAt);
+  for (const t of state.todos ?? []) if (t.done && t.doneAt) days.add(t.doneAt);
+  for (const c of state.chores) for (const d of c.done) days.add(c.doneOn?.[d] ?? d);
+  for (const h of state.habits ?? []) for (const d of h.done) days.add(d);
+  return days;
+}
+/** Points : 10 par chose faite, +5 si elle l'a été à l'heure. */
+export function xpOf(state: AppState): number {
+  const today = todayISO();
+  const n = state.tasks.filter((t) => t.status === "done").length + (state.todos ?? []).filter((t) => t.done).length
+    + state.chores.reduce((k, c) => k + c.done.length, 0) + (state.habits ?? []).reduce((k, h) => k + h.done.length, 0);
+  const onTime = taskOnTimeStats(state.tasks, today).ok + todoOnTimeStats(state.todos ?? [], today).ok + choreOnTimeStats(state.chores, today).ok;
+  return n * 10 + onTime * 5;
+}
+export const LEVELS = ["Graine", "Pousse", "Bourgeon", "Fleur", "Arbuste", "Arbre", "Forêt", "Montagne", "Étoile", "Comète", "Galaxie"];
+/** Niveau n atteint à 50·n·(n−1) points (0, 100, 300, 600…). */
+export function levelOf(xp: number) {
+  let lv = 1; while (50 * (lv + 1) * lv <= xp) lv++;
+  const from = 50 * lv * (lv - 1), to = 50 * (lv + 1) * lv;
+  return { level: lv, name: LEVELS[Math.min(lv - 1, LEVELS.length - 1)], from, to, progress: (xp - from) / (to - from) };
+}
+/** Série globale : jours consécutifs actifs (aujourd'hui compte s'il est actif, sinon on part d'hier). */
+export function globalStreak(days: Set<string>, today: string): { current: number; best: number; todayDone: boolean } {
+  const t0 = parseISO(today); let current = 0;
+  const todayDone = days.has(today);
+  for (let i = todayDone ? 0 : 1; i < 2000; i++) { if (days.has(iso(addDays(t0, -i)))) current++; else break; }
+  const sorted = [...days].sort(); let best = 0, run = 0, prev = "";
+  for (const d of sorted) { run = prev && daysBetween(prev, d) === 1 ? run + 1 : 1; best = Math.max(best, run); prev = d; }
+  return { current, best: Math.max(best, current), todayDone };
+}
