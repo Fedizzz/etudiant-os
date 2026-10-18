@@ -191,3 +191,5 @@ button:hover > .sketch-icon, button:hover .sketch-icon { transform: rotate(-6deg
 @keyframes colon-blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: .15; } }
 .colon-blink { animation: colon-blink 1s steps(1) infinite; }
 @media (prefers-reduced-motion: reduce) { .flame-bob, .flame-glow, .xp-fill, .pop-in, .confetti > i, .colon-blink { animation: none; } }
+.drop-hover { outline: 3px dashed rgb(var(--accent)); outline-offset: -2px; border-radius: 8px; background: rgb(var(--accent) / .08); }
+.dragging-src { opacity: .45; transform: scale(.94); }

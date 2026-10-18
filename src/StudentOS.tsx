@@ -458,9 +458,9 @@ const TaskForm: React.FC<{ onDone: () => void; task?: Task }> = ({ onDone, task 
     e.preventDefault();
     if (!f.title.trim()) { toast("Donnez un titre à la tâche.", "bad"); return; }
     if (isPerso) {
-      const data = { ...f, title: f.title.trim(), courseId: f.courseId || null, deadline: NO_DEADLINE, noPlan: true, slot: undefined, doDates: undefined, steps: steps.map((x) => ({ ...x, text: x.text.trim() })).filter((x) => x.text) };
+      const data = { ...f, title: f.title.trim(), courseId: f.courseId || null, deadline: NO_DEADLINE, slot: undefined, ...(pickDays && doDates.length ? { doDates: [...doDates].sort(), noPlan: undefined } : { doDates: undefined, noPlan: true }), steps: steps.map((x) => ({ ...x, text: x.text.trim() })).filter((x) => x.text) };
       if (task) { dispatch({ type: "task/update", id: task.id, patch: data }); toast("Tâche mise à jour"); }
-      else { dispatch({ type: "task/add", task: { id: uid(), status: "todo", createdAt: todayISO(), ...data } }); toast("Devoir perso ajouté (sans échéance)"); }
+      else { dispatch({ type: "task/add", task: { id: uid(), status: "todo", createdAt: todayISO(), ...data } }); toast(pickDays && doDates.length ? "Devoir perso ajouté, placé sur vos jours choisis" : "Devoir perso ajouté (sans échéance)"); }
       onDone(); return;
     }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(f.deadline) || isNaN(parseISO(f.deadline).getTime())) { toast("Choisissez une date d'échéance valide.", "bad"); return; }
@@ -487,7 +487,19 @@ const TaskForm: React.FC<{ onDone: () => void; task?: Task }> = ({ onDone, task 
         <option value="devoir">Devoir</option><option value="examen">Examen</option><option value="projet">Projet</option><option value="perso">Devoir perso (sans échéance)</option></Select></Field>
       <Field label="Priorité" htmlFor="tf-prio"><Select id="tf-prio" value={f.priority} onChange={(e) => setF({ ...f, priority: Number(e.target.value) as Priority })}>
         <option value={1}>Basse</option><option value={2}>Normale</option><option value={3}>Haute</option></Select></Field>
-      {isPerso ? <p className="col-span-2 rounded-lg bg-sunken p-2.5 text-[12px] text-muted sm:col-span-4">Devoir perso : pas d'échéance ni de do date. Il reste juste dans votre liste, sans être placé dans le planning.</p> : <>
+      {isPerso ? <div className="col-span-2 flex flex-col gap-2 sm:col-span-4" data-testid="perso-do">
+        <p className="rounded-lg bg-sunken p-2.5 text-[12px] text-muted">Devoir perso : pas d'échéance. Vous pouvez quand même choisir des jours pour y travailler (do date).</p>
+        <div className="flex gap-1.5" role="group">{([["none", "🚫 Pas de do date"], ["pick", "📅 Choisir mes jours"]] as const).map(([v, l]) => <button key={v} type="button" aria-pressed={(v === "pick") === pickDays} onClick={() => { setDoMode(v); if (v === "none") setDoDates([]); }}
+          className={cx("flex-1 rounded-lg border-2 px-2 py-1.5 text-[12px] font-semibold", (v === "pick") === pickDays ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-line bg-sunken text-muted")}>{l}</button>)}</div>
+        {pickDays && <>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {[...doDates].sort().map((d) => <span key={d} className="inline-flex items-center gap-1 rounded-full border-2 border-fg bg-hi px-2.5 py-0.5 text-[12px] font-medium text-[rgb(24_22_46)]">{fmtDate(d)}<button type="button" aria-label={`Retirer le ${fmtDate(d)}`} onClick={() => setDoDates(doDates.filter((x) => x !== d))}><X size={11} /></button></span>)}
+            <Input type="date" aria-label="Jour de travail" value={doPick} min={todayISO()} onChange={(e) => setDoPick(e.target.value)} className="h-8 w-auto py-0 text-[12px]" />
+            <Btn type="button" size="sm" onClick={() => { if (doPick && !doDates.includes(doPick)) setDoDates([...doDates, doPick]); }}><Plus size={12} />Ajouter</Btn>
+          </div>
+          <Field label="Durée estimée (min)" htmlFor="tf-pest"><Input id="tf-pest" type="number" min={15} step={15} value={f.estimate} onChange={(e) => setF({ ...f, estimate: Math.max(15, Number(e.target.value)) })} /></Field>
+        </>}
+      </div> : <>
       <Field label={isExam ? "Date de l'examen" : "Échéance (à rendre)"} htmlFor="tf-dl" className="col-span-2"><Input id="tf-dl" type="date" value={f.deadline} onChange={(e) => setF({ ...f, deadline: e.target.value })} /></Field>
       <TimeMode id="tf-mode" value={mode} onChange={setMode} className="col-span-2" />
       {mode === "duration" ? <>
@@ -1588,6 +1600,27 @@ const Planning: React.FC = () => {
   const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
   const [exporting, setExporting] = useState(false);
   const [sel, setSel] = useState<{ b: Block; date: string } | null>(null);
+  // Glisser un bloc verticalement pour changer son heure (corvées, tâches, événements).
+  const [dragI, setDragI] = useState<{ i: number; dy: number } | null>(null);
+  const dragRef = useRef<number | null>(null);
+  const snap = (dy: number) => Math.round(((dy / PX) * 60) / 5) * 5;
+  const blockDrag = useDrag({
+    onMove: (_dx, dy) => { if (dragRef.current !== null) setDragI({ i: dragRef.current, dy }); },
+    onCancel: () => { setDragI(null); dragRef.current = null; },
+    onDrop: (_dx, dy) => {
+      const i = dragRef.current; setDragI(null); dragRef.current = null; if (i === null) return;
+      const b = plan.blocks[i]; const delta = snap(dy); if (!delta) return;
+      const start = Math.max(0, Math.min(23 * 60 + 55 - (b.end - b.start), b.start + delta)), t = toHHMM(start), len = b.end - b.start;
+      if (b.kind === "chore" && b.refId) { const c = state.chores.find((x) => x.id === b.refId); if (c) moveChoreTo(dispatch, c, date, date, t); }
+      else if (b.kind === "task" && b.refId) { const tk = state.tasks.find((x) => x.id === b.refId); if (tk) { const l = tk.slot ? toMin(tk.slot.end) - toMin(tk.slot.start) : Math.max(len, 15); dispatch({ type: "task/update", id: tk.id, patch: { slot: { date, start: t, end: toHHMM(Math.min(23 * 60 + 59, start + l)) }, doDates: undefined, noPlan: undefined } }); } }
+      else if (b.kind === "event" && b.refId) { const ev = state.events.find((x) => x.id === b.refId); if (ev) { const e = toHHMM(start + len);
+        if (ev.recurrence === "none") dispatch({ type: "event/update", id: ev.id, patch: { start: t, end: e } });
+        else { dispatch({ type: "event/skip", id: ev.id, date }); dispatch({ type: "event/add", event: { id: uid(), title: ev.title, date, start: t, end: e, recurrence: "none", until: null, ...(ev.color ? { color: ev.color } : {}) } }); } } }
+      else return;
+      toast(`« ${b.label.replace(/^✓ /, "")} » : ${t}`);
+    },
+  });
+  const movable = (b: Block) => !!b.refId && (b.kind === "chore" || b.kind === "task" || (b.kind === "event" && state.events.some((e) => e.id === b.refId)));
   const [mode, setMode] = useState<"day" | "week">(() => { try { return localStorage.getItem("etudiant-os/planning-view") === "week" ? "week" : "day"; } catch { return "day"; } });
   useEffect(() => { try { localStorage.setItem("etudiant-os/planning-view", mode); } catch { /* préférence facultative */ } }, [mode]);
   const exportPdf = async () => {
@@ -1633,12 +1666,12 @@ const Planning: React.FC = () => {
             <div className="absolute inset-x-0 z-10 h-px bg-bad" style={{ top: ((nowMin - startH * 60) / 60) * PX }}><span className="absolute -left-0.5 -top-[3px] h-[7px] w-[7px] rounded-full bg-bad" /></div>
           )}
           {plan.blocks.map((b, i) => { const ln = lanes[i]; const h = Math.max(22, ((b.end - b.start) / 60) * PX - 3), compact = h < 44; return (
-            <div key={i} role="button" tabIndex={0} onClick={() => setSel({ b, date })} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSel({ b, date }); } }} title={`${toHHMM(b.start)}–${toHHMM(b.end)} · ${b.label}`}
-              className={cx("absolute cursor-pointer overflow-hidden rounded-md px-2 text-xs shadow-sm transition hover:brightness-95", compact ? "flex items-center gap-1.5 py-0" : "py-1.5", BLOCK_STYLE[b.kind], ln.lanes > 1 && "ring-1 ring-bg")}
-              style={{ top: ((b.start - startH * 60) / 60) * PX + 1.5, height: h, borderLeftColor: b.color,
+            <div key={i} role="button" tabIndex={0} onPointerDown={movable(b) ? (e) => { dragRef.current = i; blockDrag.onPointerDown(e); } : undefined} onClick={() => { if (blockDrag.wasDrag()) return; setSel({ b, date }); }} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSel({ b, date }); } }} title={`${toHHMM(b.start)}–${toHHMM(b.end)} · ${b.label}`}
+              className={cx("absolute cursor-pointer overflow-hidden rounded-md px-2 text-xs shadow-sm hover:brightness-95", dragI?.i !== i && "transition", compact ? "flex items-center gap-1.5 py-0" : "py-1.5", BLOCK_STYLE[b.kind], ln.lanes > 1 && "ring-1 ring-bg", dragI?.i === i && "z-30 scale-[1.02] shadow-lg ring-2 ring-accent")}
+              style={{ top: ((b.start - startH * 60) / 60) * PX + 1.5 + (dragI?.i === i ? (snap(dragI.dy) / 60) * PX : 0), height: h, borderLeftColor: b.color,
                 left: `calc(3.5rem + (100% - 4rem) * ${ln.lane} / ${ln.lanes})`, width: `calc((100% - 4rem) / ${ln.lanes} - 3px)` }}>
               <div className={cx("flex items-center gap-1.5", compact && "shrink-0")}>
-                <span className="font-mono text-[10px] tabular-nums text-muted">{toHHMM(b.start)}{compact ? "" : `–${toHHMM(b.end)}`}</span>
+                <span className="font-mono text-[10px] tabular-nums text-muted">{dragI?.i === i ? <b className="text-accent">{toHHMM(b.start + snap(dragI.dy))}</b> : toHHMM(b.start)}{compact ? "" : `–${toHHMM(b.end + (dragI?.i === i ? snap(dragI.dy) : 0))}`}</span>
                 {b.kind === "task" && <Zap size={10} className="text-accent" />}{b.kind === "chore" && <Home size={10} className="text-warn" />}{b.kind === "meal" && <Coffee size={10} />}{b.kind === "event" && <CalendarClock size={10} className="text-pink" />}
                 {b.kind === "event" && b.refId && <button className="ml-auto rounded px-1 text-[10px] text-muted hover:bg-sunken hover:text-bad" aria-label={`Retirer ${b.label} ce jour-là`} title="Retirer cette occurrence"
                   onClick={(e) => { e.stopPropagation(); const evt = state.events.find((x) => x.id === b.refId); if (!evt) return;
@@ -1824,7 +1857,16 @@ const Academic: React.FC<{ openNewTask: () => void }> = ({ openNewTask }) => {
   const [dragId, setDragId] = useState<ID | null>(null);
   const [courseForm, setCourseForm] = useState({ name: "", code: "", coef: 1 });
   const today = todayISO();
-  const tasks = state.tasks.filter((t) => !filter || t.courseId === filter);
+  const [when, setWhen] = useState<"" | "today" | "tomorrow" | "week">("");
+  // Jours concernés par chaque tâche : échéance, do dates, créneau précis et travail planifié (7 jours).
+  const touched = useMemo(() => {
+    const m = new Map<ID, Set<string>>(); const add = (id: ID, d: string) => { if (!m.has(id)) m.set(id, new Set()); m.get(id)!.add(d); };
+    for (const t of state.tasks) { add(t.id, t.deadline); t.doDates?.forEach((d) => add(t.id, d)); if (t.slot) add(t.id, t.slot.date); }
+    for (const p of planRange(state, today, 7, today)) for (const b of p.blocks) if (b.kind === "task" && b.refId) add(b.refId, p.date);
+    return m;
+  }, [state, today]);
+  const range = when === "today" ? [today] : when === "tomorrow" ? [iso(addDays(parseISO(today), 1))] : when === "week" ? Array.from({ length: 7 }, (_, i) => iso(addDays(parseISO(today), i))) : null;
+  const tasks = state.tasks.filter((t) => (!filter || t.courseId === filter) && (!range || range.some((d) => touched.get(t.id)?.has(d)) || (range && t.status !== "done" && t.deadline < today && when !== "tomorrow")));
   const move = (t: Task, dir: 1 | -1) => { const i = ORDER.indexOf(t.status) + dir; if (i < 0 || i >= ORDER.length) return; dispatch({ type: "task/update", id: t.id, patch: { status: ORDER[i] } }); if (ORDER[i] === "done") toast(`« ${t.title} » terminé`); };
   const palette = ["#2f6fed", "#0f9d76", "#d9822b", "#c2417a", "#7a5af5", "#1d9bb5", "#b5651d"];
 
@@ -1832,6 +1874,8 @@ const Academic: React.FC<{ openNewTask: () => void }> = ({ openNewTask }) => {
     <div className="flex flex-col gap-4">
       <AcademicNotes />
       <div className="flex flex-wrap items-center gap-2">
+        <div className="flex gap-1" role="group" aria-label="Période">{([["", "Tout"], ["today", "Aujourd'hui"], ["tomorrow", "Demain"], ["week", "Cette semaine"]] as const).map(([k, l]) => <button key={k} onClick={() => setWhen(k)} aria-pressed={when === k}
+          className={cx("rounded-full border px-2.5 py-1 text-[12px] font-medium", when === k ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-line bg-sunken")}>{l}</button>)}</div>
         <Select id="ac-filter" aria-label="Filtrer par module" className="w-auto" value={filter} onChange={(e) => setFilter(e.target.value)}>
           <option value="">Tous les modules</option>{state.courses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select>
         <span className="text-xs text-muted">Glissez une carte d'une colonne à l'autre, ou utilisez les flèches.</span>
@@ -2553,6 +2597,68 @@ const CHORE_PRESETS: { name: string; recurrence: Recurrence; day: number; minute
 /** Personne d'autre que « Moi » : pas de colocataire et aucune corvée partagée. */
 const isSolo = (s: AppState) => !s.settings.roommates.length && s.chores.every((c) => c.assignees.every((a) => a === "Moi"));
 const REC_LABEL: Record<Recurrence, string> = { daily: "Quotidienne", weekly: "Hebdomadaire", biweekly: "Bimensuelle", once: "Une seule fois" };
+/** Glisser-déposer simple (souris, doigt, Apple Pencil). Souris : dès 6 px. Tactile : appui long (~0,35 s) puis glisser, le défilement est bloqué pendant le geste. */
+function useDrag(opts: { onMove?: (dx: number, dy: number, x: number, y: number) => void; onDrop: (dx: number, dy: number, x: number, y: number) => void; onCancel?: () => void }) {
+  const st = useRef<{ x: number; y: number; active: boolean; timer?: number; moved: boolean; pointer: string } | null>(null);
+  const suppressClick = useRef(false);
+  const o = useRef(opts); o.current = opts;
+  useEffect(() => () => { if (st.current?.timer) window.clearTimeout(st.current.timer); }, []);
+  const block = (e: TouchEvent) => { if (st.current?.active) e.preventDefault(); };
+  const end = (e: PointerEvent) => {
+    const s = st.current; window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", end); window.removeEventListener("pointercancel", cancel); window.removeEventListener("touchmove", block);
+    if (!s) return; if (s.timer) window.clearTimeout(s.timer); st.current = null;
+    if (s.active && s.moved) { suppressClick.current = true; window.setTimeout(() => (suppressClick.current = false), 50); o.current.onDrop(e.clientX - s.x, e.clientY - s.y, e.clientX, e.clientY); }
+    else if (s.active) o.current.onCancel?.();
+  };
+  const cancel = () => { const s = st.current; st.current = null; if (s?.timer) window.clearTimeout(s.timer); window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", end); window.removeEventListener("pointercancel", cancel); window.removeEventListener("touchmove", block); o.current.onCancel?.(); };
+  const move = (e: PointerEvent) => {
+    const s = st.current; if (!s) return; const dx = e.clientX - s.x, dy = e.clientY - s.y;
+    if (!s.active) { if (s.pointer === "mouse" && Math.hypot(dx, dy) > 6) s.active = true; else if (s.pointer !== "mouse" && Math.hypot(dx, dy) > 10) { cancel(); return; } else return; }
+    if (Math.hypot(dx, dy) > 4) s.moved = true;
+    o.current.onMove?.(dx, dy, e.clientX, e.clientY);
+  };
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    st.current = { x: e.clientX, y: e.clientY, active: false, moved: false, pointer: e.pointerType };
+    if (e.pointerType !== "mouse") st.current.timer = window.setTimeout(() => { if (st.current) { st.current.active = true; navigator.vibrate?.(15); o.current.onMove?.(0, 0, st.current.x, st.current.y); } }, 350);
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", end); window.addEventListener("pointercancel", cancel);
+    window.addEventListener("touchmove", block, { passive: false });
+  };
+  return { onPointerDown, wasDrag: () => suppressClick.current };
+}
+
+/** Déplace une occurrence de corvée vers un autre jour (et éventuellement une heure). */
+function moveChoreTo(dispatch: (a: Action) => void, chore: Chore, from: string, to: string, time: string | null) {
+  if (to === from) { dispatch({ type: "chore/pin", id: chore.id, date: from, time: time ?? "" }); return; }
+  const pin = time ? { [to]: time } : {};
+  if (chore.recurrence === "once") dispatch({ type: "chore/update", id: chore.id, patch: { date: to, day: weekday(parseISO(to)), pinned: pin } });
+  else {
+    dispatch({ type: "chore/skip", id: chore.id, date: from });
+    dispatch({ type: "chore/add", chore: { id: uid(), name: chore.name, recurrence: "once", date: to, day: weekday(parseISO(to)), minutes: chore.minutes, assignees: [chore.assignees[0] ?? "Moi"], done: [], pinned: pin, ...(chore.steps?.length ? { steps: chore.steps, stepsDone: {} } : {}) } });
+  }
+}
+
+/** Case de corvée déplaçable (tableau de la semaine). */
+const ChoreDragCell: React.FC<{ chore: Chore; date: string; children: (drag: { onPointerDown: (e: React.PointerEvent) => void; wasDrag: () => boolean; dragging: boolean }) => React.ReactNode }> = ({ chore, date, children }) => {
+  const { dispatch, toast } = useStore();
+  const [dragging, setDragging] = useState(false);
+  const [hover, setHover] = useState<string | null>(null);
+  const cellAt = (x: number, y: number) => (document.elementFromPoint(x, y) as HTMLElement | null)?.closest<HTMLElement>(`[data-chore-row="${chore.id}"][data-date]`);
+  const drag = useDrag({
+    onMove: (_dx, _dy, x, y) => { setDragging(true); const c = cellAt(x, y); const d = c?.dataset.date ?? null; setHover(d); document.querySelectorAll(".drop-hover").forEach((n) => n.classList.remove("drop-hover")); c?.classList.add("drop-hover"); },
+    onDrop: (_dx, _dy, x, y) => {
+      setDragging(false); document.querySelectorAll(".drop-hover").forEach((n) => n.classList.remove("drop-hover"));
+      const to = cellAt(x, y)?.dataset.date;
+      if (!to || to === date) return;
+      if (to < todayISO()) { toast("Choisissez aujourd'hui ou un jour à venir.", "bad"); return; }
+      moveChoreTo(dispatch, chore, date, to, null); toast(`${chore.name} : déplacée au ${fmtDate(to)}`);
+    },
+    onCancel: () => { setDragging(false); document.querySelectorAll(".drop-hover").forEach((n) => n.classList.remove("drop-hover")); },
+  });
+  void hover;
+  return <>{children({ ...drag, dragging })}</>;
+};
+
 const Chores: React.FC = () => {
   const { state, dispatch, toast, undoable } = useStore();
   const [offset, setOffset] = useState(0);
@@ -2587,14 +2693,14 @@ const Chores: React.FC = () => {
                     <td className="pr-2"><p className="font-medium text-fg">{c.name}</p>
                       <button className="text-[11px] text-accent hover:underline" onClick={() => setEditSteps(c.id)} aria-label={`Checklist de ${c.name}`}>{c.steps?.length ? `☑ Checklist · ${c.steps.length} étape${c.steps.length > 1 ? "s" : ""}` : "+ Checklist"}</button><p className="text-[11px] text-muted">{REC_LABEL[c.recurrence]}{c.recurrence === "once" && c.date ? ` · ${fmtDate(c.date)}` : ""}{c.time ? ` · ${c.time}–${toHHMM(toMin(c.time) + c.minutes)}` : ` · ${c.minutes} min`}</p></td>
                     {days.map((d) => { const on = choreScheduledOn(c, d); const k = iso(d); const done = c.done.includes(k); const skipped = (c.skipped ?? []).includes(k); const who = choreAssignee(c, d); const by = c.doneBy?.[k] ?? who; return (
-                      <td key={k} className="relative text-center">{on ? (<>
+                      <td key={k} className="relative text-center" data-chore-row={c.id} data-date={k}>{on ? (<>
                         {skipped ? (
                           <button onClick={() => { dispatch({ type: "chore/skip", id: c.id, date: k }); toast("Report annulé", "info"); }} title="Reportée · cliquer pour annuler le report"
                             className="flex h-10 w-full flex-col items-center justify-center rounded-md border border-dashed border-line text-[10px] text-muted">reportée</button>
-                        ) : <button onClick={() => { dispatch({ type: "chore/toggle", id: c.id, date: k, who }); if (!done) toast(solo ? `${c.name} : faite` : `${c.name} : fait par ${who}`); }} title={done ? `Faite par ${by} · cliquer pour annuler` : `À faire par ${who} · cliquer quand c'est fait`}
-                          className={cx("flex h-10 w-full flex-col items-center justify-center rounded-md border text-[11px] transition", done && choreDoneLate(c, k) ? "border-warn/50 bg-warn/12 text-warn" : done ? "border-ok/40 bg-ok/12 text-ok" : k < today || (k === today && (choreSlotEnd(c, k) ?? 1e9) < nowMinutes()) ? "border-bad/30 bg-bad/6 text-bad" : who === "Moi" ? "border-accent/40 bg-accent/8 text-fg" : "border-line bg-sunken text-fg hover:border-accent/50")}>
+                        ) : <ChoreDragCell chore={c} date={k}>{(dg) => <button onPointerDown={!done && k >= today ? dg.onPointerDown : undefined} style={{ touchAction: "pan-x pan-y" }} onClick={() => { if (dg.wasDrag()) return; dispatch({ type: "chore/toggle", id: c.id, date: k, who }); if (!done) toast(solo ? `${c.name} : faite` : `${c.name} : fait par ${who}`); }} title={done ? `Faite par ${by} · cliquer pour annuler` : `À faire par ${who} · cliquer quand c'est fait`}
+                          className={cx(dg.dragging && "dragging-src", "flex h-10 w-full flex-col items-center justify-center rounded-md border text-[11px] transition", done && choreDoneLate(c, k) ? "border-warn/50 bg-warn/12 text-warn" : done ? "border-ok/40 bg-ok/12 text-ok" : k < today || (k === today && (choreSlotEnd(c, k) ?? 1e9) < nowMinutes()) ? "border-bad/30 bg-bad/6 text-bad" : who === "Moi" ? "border-accent/40 bg-accent/8 text-fg" : "border-line bg-sunken text-fg hover:border-accent/50")}>
                           {done ? <><Check size={14} />{choreDoneLate(c, k) ? <span className="text-[9px]">en retard</span> : !solo && by !== who && <span className="text-[9px]">{by}</span>}</> : <span className="font-medium">{solo ? "à faire" : who}</span>}
-                        </button>}
+                        </button>}</ChoreDragCell>}
                         {!done && !skipped && k >= iso(addDays(parseISO(today), -7)) && <button aria-label={`Reporter ${c.name}`} title="Reporter (non faite, sans pénalité)" onClick={() => { dispatch({ type: "chore/skip", id: c.id, date: k }); toast(`${c.name} reportée`, "info"); }}
                           className="absolute right-1 top-1 rounded px-0.5 text-[9px] leading-none text-muted opacity-60 hover:text-fg hover:opacity-100">↷</button>}
                       </>) : <span className="block h-10 rounded-md bg-sunken/40" />}</td>); })}
@@ -2603,7 +2709,7 @@ const Chores: React.FC = () => {
               </tbody>
             </table>
           </div>)}
-        {solo ? <p className="mt-2 text-xs text-muted">Cliquez une case quand la corvée est faite. Les corvées non faites sont ajoutées à votre planning du jour, à l'heure choisie ou dans un créneau libre. ↷ reporte une corvée sans la marquer faite.</p> :
+        {solo ? <p className="mt-2 text-xs text-muted">Cliquez une case quand la corvée est faite. Les corvées non faites sont ajoutées à votre planning du jour, à l'heure choisie ou dans un créneau libre. ↷ reporte une corvée sans la marquer faite. Glissez une case vers un autre jour pour la déplacer (appui long sur iPhone/iPad).</p> :
         <p className="mt-2 text-xs text-muted">La rotation avance automatiquement : chaque jour pour les tâches quotidiennes, chaque semaine (ou toutes les deux semaines) pour les autres. Les cases « Moi » non faites sont injectées dans le planning du jour. ↷ reporte une corvée sans la marquer faite. Les données restent sur cet appareil (pas de partage entre colocataires).</p>}
       </Card>
       <div className={cx("grid grid-cols-1 gap-4 md:grid-cols-2", !solo && "xl:grid-cols-3")}>
@@ -2781,12 +2887,15 @@ const HabitForm: React.FC<{ habit?: Habit; preset?: (typeof HABIT_PRESETS)[numbe
   const init = habit ?? (preset ? { name: preset.name, emoji: preset.emoji, cat: preset.cat, time: preset.time, days: preset.days ?? ALL_DAYS, steps: (preset.steps ?? []).map((text) => ({ id: uid(), text })), note: "" } : null);
   const [f, setF] = useState({ name: init?.name ?? "", emoji: init?.emoji ?? "✨", cat: (init?.cat ?? "soin") as HabitCat, time: init?.time ?? "", days: init?.days ?? ALL_DAYS, note: init?.note ?? "" });
   const [steps, setSteps] = useState<Step[]>(init?.steps ?? []);
+  const [rec, setRec] = useState<"week" | "every" | "month">(habit?.every ? "every" : habit?.monthDay ? "month" : "week");
+  const [every, setEvery] = useState(habit?.every ?? 2), [monthDay, setMonthDay] = useState(habit?.monthDay ?? new Date().getDate());
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!f.name.trim()) { toast("Donnez un nom à la routine.", "bad"); return; }
-    if (!f.days.length) { toast("Choisissez au moins un jour.", "bad"); return; }
+    if (rec === "week" && !f.days.length) { toast("Choisissez au moins un jour.", "bad"); return; }
     const clean = steps.map((x) => ({ id: x.id, text: x.text.trim() })).filter((x) => x.text);
-    const data = { name: f.name.trim(), emoji: f.emoji, cat: f.cat, days: [...f.days].sort(), time: f.time || undefined, note: f.note.trim() || undefined, steps: clean.length ? clean : undefined };
+    const data = { name: f.name.trim(), emoji: f.emoji, cat: f.cat, days: [...f.days].sort(), time: f.time || undefined, note: f.note.trim() || undefined, steps: clean.length ? clean : undefined,
+      every: rec === "every" ? Math.max(2, Math.min(60, Math.round(every))) : undefined, monthDay: rec === "month" ? Math.max(1, Math.min(31, Math.round(monthDay))) : undefined };
     if (habit) { dispatch({ type: "habit/update", id: habit.id, patch: data }); toast("Routine mise à jour"); }
     else { dispatch({ type: "habit/add", habit: { id: uid(), ...data, done: [], stepsDone: {}, since: todayISO() } }); toast(`${f.emoji} ${f.name.trim()} ajoutée`); }
     onDone();
@@ -2799,10 +2908,17 @@ const HabitForm: React.FC<{ habit?: Habit; preset?: (typeof HABIT_PRESETS)[numbe
           className={cx("grid h-9 w-9 place-items-center rounded-lg border-2 text-lg transition", f.emoji === em ? "border-fg bg-hi" : "border-line bg-sunken hover:border-fg/60")}>{em}</button>)}</div></div>
       <Field label="Catégorie" htmlFor="hb-cat"><Select id="hb-cat" value={f.cat} onChange={(e) => setF({ ...f, cat: e.target.value as HabitCat })}>{HABIT_CATS.map((c) => <option key={c.k} value={c.k}>{c.label}</option>)}</Select></Field>
       <Field label="Heure (facultatif)" htmlFor="hb-time"><Input id="hb-time" type="time" value={f.time} onChange={(e) => setF({ ...f, time: e.target.value })} /></Field>
+      <div className="col-span-2"><p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">Récurrence</p>
+        <div className="flex gap-1.5" role="group">{([["week", "Jours de la semaine"], ["every", "Tous les N jours"], ["month", "Chaque mois"]] as const).map(([k, l]) => <button key={k} type="button" aria-pressed={rec === k} onClick={() => setRec(k)}
+          className={cx("flex-1 rounded-lg border-2 px-2 py-1.5 text-[12px] font-semibold", rec === k ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-line bg-sunken text-muted")}>{l}</button>)}</div></div>
+      {rec === "every" && <Field label="Tous les … jours" htmlFor="hb-every" className="col-span-2"><Input id="hb-every" type="number" min={2} max={60} value={every} onChange={(e) => setEvery(Number(e.target.value))} /></Field>}
+      {rec === "month" && <Field label="Le … de chaque mois" htmlFor="hb-month" className="col-span-2"><Input id="hb-month" type="number" min={1} max={31} value={monthDay} onChange={(e) => setMonthDay(Number(e.target.value))} /></Field>}
+      {rec === "week" && <>
       <div className="col-span-2"><p className="mb-1.5 flex items-center justify-between text-[11px] font-medium uppercase tracking-wider text-muted">Jours
         <span className="flex gap-2 normal-case tracking-normal"><button type="button" className="text-accent hover:underline" onClick={() => setF({ ...f, days: ALL_DAYS })}>Tous les jours</button><button type="button" className="text-accent hover:underline" onClick={() => setF({ ...f, days: [0, 1, 2, 3, 4] })}>En semaine</button></span></p>
         <div className="flex gap-1.5">{DAYS.map((d, i) => { const on = f.days.includes(i); return <button key={d} type="button" aria-pressed={on} onClick={() => setF({ ...f, days: on ? f.days.filter((x) => x !== i) : [...f.days, i] })}
           className={cx("h-9 flex-1 rounded-lg border-2 text-[12px] font-semibold transition", on ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-line bg-sunken text-muted")}>{d}</button>; })}</div></div>
+      </>}
       <Field label="Note (dose, produit…)" htmlFor="hb-note" className="col-span-2"><Input id="hb-note" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} placeholder="Ex. 1 comprimé après le repas" /></Field>
       <StepsEditor id="hb-steps" steps={steps} onChange={setSteps} className="col-span-2" placeholder="Ex. Nettoyant, sérum, crème…" />
       <div className="col-span-2 flex justify-end gap-2"><Btn type="button" variant="ghost" onClick={onDone}>Annuler</Btn><Btn type="submit" variant="primary">{habit ? <><Check size={14} />Enregistrer</> : <><Plus size={14} />Ajouter</>}</Btn></div>
@@ -2987,7 +3103,7 @@ const Routines: React.FC = () => {
           <thead><tr><th className="text-left text-[11px] font-medium uppercase tracking-wider text-muted">Routine</th>{week.map((d) => <th key={d} className={cx("rounded-md py-1 text-center font-medium", d === today ? "bg-accent/10 text-accent" : "text-muted")}>{DAYS[weekday(parseISO(d))]} {parseISO(d).getDate()}</th>)}<th /></tr></thead>
           <tbody>{habits.map((h) => (
             <tr key={h.id} className="group">
-              <td className="pr-2"><p className="flex items-center gap-1.5 font-medium text-fg"><span aria-hidden>{h.emoji}</span>{h.name}</p><p className="text-[11px] text-muted">{catOf(h.cat).label}{h.time ? ` · ${h.time}` : ""}{h.days.length < 7 ? ` · ${h.days.map((d) => DAYS[d]).join(", ")}` : ""}</p></td>
+              <td className="pr-2"><p className="flex items-center gap-1.5 font-medium text-fg"><span aria-hidden>{h.emoji}</span>{h.name}</p><p className="text-[11px] text-muted">{catOf(h.cat).label}{h.time ? ` · ${h.time}` : ""}{h.every ? ` · tous les ${h.every} jours` : h.monthDay ? ` · le ${h.monthDay} du mois` : h.days.length < 7 ? ` · ${h.days.map((d) => DAYS[d]).join(", ")}` : ""}</p></td>
               {week.map((d) => { const on = habitOn(h, d), done = h.done.includes(d); return (
                 <td key={d} className="text-center">{on ? <button onClick={() => d <= today && dispatch({ type: "habit/toggle", id: h.id, date: d })} disabled={d > today} aria-label={`${h.name} le ${fmtDate(d)} : ${done ? "fait" : "non fait"}`}
                   className={cx("flex h-9 w-full items-center justify-center rounded-md border transition", done ? "border-ok/40 bg-ok/12 text-ok" : d < today ? "border-bad/30 bg-bad/6 text-bad" : d === today ? "border-accent/40 bg-accent/8" : "border-line bg-sunken text-muted opacity-60")}>

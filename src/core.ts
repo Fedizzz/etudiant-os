@@ -61,7 +61,7 @@ export interface PlanEvent { id: ID; title: string; date: string; start: string;
 /** bedOk / wakeOk : couché / levé à l'heure prévue (coché par l'utilisateur ; absent = non renseigné). */
 export type HabitCat = "soin" | "santé" | "sport" | "bien-être" | "maison" | "autre";
 /** Routine quotidienne : days = jours de la semaine (0 = lundi) ; done = dates faites ; stepsDone = étapes cochées par date. */
-export interface Habit { id: ID; name: string; emoji: string; cat: HabitCat; time?: string; days: number[]; done: string[]; steps?: Step[]; stepsDone?: Record<string, ID[]>; note?: string; since: string }
+export interface Habit { id: ID; name: string; emoji: string; cat: HabitCat; time?: string; days: number[]; done: string[]; steps?: Step[]; stepsDone?: Record<string, ID[]>; note?: string; since: string; /** Tous les N jours (depuis « since »). */ every?: number; /** Chaque mois, ce jour-là (1-31). */ monthDay?: number }
 export type TodoKind = "admin" | "rdv" | "appel" | "achat" | "santé" | "perso" | "autre";
 /** Tâche perso ponctuelle : due = jour prévu ; start/end = horaire précis (« HH:MM ») ; priority 1 basse → 3 haute. */
 export interface Todo { id: ID; text: string; done: boolean; due?: string; start?: string; end?: string; priority?: Priority; kind?: TodoKind; note?: string; steps?: Step[]; doneAt?: string; doneTime?: string; createdAt: string }
@@ -500,6 +500,7 @@ export function validateState(x: unknown): { ok: true; state: AppState; repaired
       const days = Array.isArray(h.days) ? [...new Set(h.days.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))].sort() : [];
       const sd = h.stepsDone && typeof h.stepsDone === "object" ? Object.fromEntries(Object.entries(h.stepsDone).filter(([k, v]) => isDate(k) && Array.isArray(v)).map(([k, v]) => [k, (v as unknown[]).filter(isStr)]).slice(-120)) : {};
       return { id: h.id, name: h.name.slice(0, 80), emoji: isStr(h.emoji) ? h.emoji.slice(0, 8) : "✨", cat: (HABIT_CATS.some((c) => c.k === h.cat) ? h.cat : "autre") as HabitCat,
+        ...(isNum(h.every) && h.every >= 2 && h.every <= 60 ? { every: Math.round(h.every) } : {}), ...(isNum(h.monthDay) && h.monthDay >= 1 && h.monthDay <= 31 ? { monthDay: Math.round(h.monthDay) } : {}),
         days: days.length ? days : [0, 1, 2, 3, 4, 5, 6], done: h.done.filter(isDate), since: isDate(h.since) ? h.since : todayISO(),
         ...(isTime(h.time) ? { time: h.time } : {}), ...(st.length ? { steps: st, stepsDone: sd } : {}), ...(isStr(h.note) && h.note.trim() ? { note: h.note.slice(0, 200) } : {}) };
     }),
@@ -1018,7 +1019,12 @@ export const HABIT_CATS: { k: HabitCat; label: string; color: string }[] = [
   { k: "maison", label: "Maison", color: "#1d9bb5" }, { k: "autre", label: "Autre", color: "#5b6b8c" },
 ];
 /** La routine est-elle prévue ce jour-là ? */
-export const habitOn = (h: Habit, date: string) => date >= h.since && h.days.includes(weekday(parseISO(date)));
+export function habitOn(h: Habit, date: string): boolean {
+  if (date < h.since) return false;
+  if (h.every && h.every > 1) return daysBetween(h.since, date) % h.every === 0;      // tous les N jours
+  if (h.monthDay) { const d = parseISO(date); const last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(); return d.getDate() === Math.min(h.monthDay, last); } // chaque mois
+  return h.days.includes(weekday(parseISO(date)));
+}
 export const habitStepsDone = (h: Habit, date: string) => (h.stepsDone?.[date] ?? []).filter((id) => h.steps?.some((x) => x.id === id));
 /** Faites / manquées (jours passés prévus non faits) depuis la création, sur `days` jours max. Aujourd'hui n'est jamais « manqué ». */
 export function habitStats(habits: Habit[], today: string, days = 365): OnTimeCount {

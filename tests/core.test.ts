@@ -471,3 +471,10 @@ test("série globale, niveaux et retard des tâches à créneau", () => {
   assert.deepEqual(C.taskOnTimeStats([done], TODAY), { ok: 0, late: 1 }); // fini après la fin du créneau
   assert.deepEqual(C.taskOnTimeStats([{ ...done, doneTime: "17:00" }], TODAY), { ok: 1, late: 0 });
 });
+
+test("routines : tous les N jours et chaque mois", () => {
+  const h: C.Habit = { id: "h", name: "Masque", emoji: "🧖", cat: "soin", days: [0, 1, 2, 3, 4, 5, 6], done: [], since: "2026-10-01", every: 3 };
+  assert.deepEqual(["2026-10-01", "2026-10-02", "2026-10-04", "2026-10-07"].map((d) => C.habitOn(h, d)), [true, false, true, true]);
+  const m: C.Habit = { ...h, every: undefined, monthDay: 31 };
+  assert.deepEqual(["2026-10-31", "2026-11-30", "2026-11-29"].map((d) => C.habitOn(m, d)), [true, true, false]); // 31 → dernier jour des mois courts
+});
