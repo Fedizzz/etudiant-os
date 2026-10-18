@@ -49,6 +49,22 @@ try {
   await B.reload(); await sleep(1200); await B.click("[data-testid=flat-tab-depenses]"); await sleep(300);
   const delBob = await B.locator("[data-testid=flat-expenses] li", { hasText: "Internet" }).locator("button[aria-label='Supprimer la dépense']").count();
   ok(delBob === 0, "Bob (membre) n'a pas de bouton supprimer sur la dépense d'Alice");
+  // Ménage partagé : Alice crée une corvée quotidienne en rotation, Bob la voit et la coche
+  await A.reload(); await sleep(1200); await A.click("[data-testid=flat-tab-menage]"); await sleep(300);
+  ok(await A.locator("text=Aucune corvée commune").count() === 1, "ménage : liste vide au départ");
+  await A.click("[data-testid=flat-add-chore]"); await A.selectOption("#fc-rec", "daily"); await A.fill("#fc-name", "Vaisselle"); await A.click("[data-testid=fc-submit]"); await sleep(900);
+  ok(await A.locator("[data-testid=flat-chore-row]", { hasText: "Vaisselle" }).count() >= 1, "Alice voit la corvée dans la semaine");
+  await B.reload(); await sleep(1200); await B.click("[data-testid=flat-tab-menage]"); await sleep(400);
+  ok(await B.locator("[data-testid=flat-chore-row]", { hasText: "Vaisselle" }).count() >= 7 - 0 || await B.locator("[data-testid=flat-chore-row]", { hasText: "Vaisselle" }).count() >= 1, "Bob voit la même corvée");
+  const todayRow = B.locator("[data-testid=flat-chore-row]", { hasText: "Vaisselle" }).nth(await B.evaluate(() => (new Date().getDay() + 6) % 7));
+  await todayRow.locator("input[type=checkbox]").click(); await sleep(900);
+  await A.reload(); await sleep(1200); await A.click("[data-testid=flat-tab-menage]"); await sleep(400);
+  const aRow = A.locator("[data-testid=flat-chore-row]", { hasText: "Vaisselle" }).nth(await A.evaluate(() => (new Date().getDay() + 6) % 7));
+  ok((await aRow.innerText()).includes("fait par Bob"), "Alice voit « fait par Bob »");
+  // Alice (propriétaire) supprime la corvée
+  await A.locator("summary", { hasText: "Gérer les corvées" }).click(); A.once("dialog", (d) => d.accept());
+  await A.locator("button[aria-label='Supprimer la corvée']").click(); await sleep(900);
+  ok(await A.locator("text=Aucune corvée commune").count() === 1, "corvée supprimée");
   // Quitter
   await B.click("[data-testid=flat-tab-membres]"); await B.click("[data-testid=flat-leave]"); await B.click("[role=dialog] button:text-is('Quitter')"); await sleep(900);
   ok(await B.locator("text=Créer un appartement").count() === 1, "Bob quitte : retour aux formulaires");

@@ -33,3 +33,12 @@ export const addExpense = (sb: SupabaseClient, e: { cents: number; label: string
 export const removeExpense = (sb: SupabaseClient, id: string) => run(sb.rpc("remove_flat_expense", { p_id: id }));
 export const checkoutGroceries = (sb: SupabaseClient, e: { cents: number; label: string; date: string; paidBy: string; shares: Record<string, number> }) =>
   run(sb.rpc("flat_checkout", { p_amount_cents: e.cents, p_label: e.label, p_date: e.date, p_paid_by: e.paidBy, p_shares: e.shares }));
+
+// ------------------------------------------------------------- Ménage partagé
+import type { FlatChore, FlatChoreDone } from "./flat.ts";
+export const loadChores = (sb: SupabaseClient, flat: string) => run(sb.from("flat_chores").select("*").eq("flat_id", flat).order("created_at")) as Promise<FlatChore[]>;
+export const loadChoreDone = (sb: SupabaseClient, flat: string) => run(sb.from("flat_chore_done").select("*").eq("flat_id", flat).order("done_on", { ascending: false }).limit(1000)) as Promise<FlatChoreDone[]>;
+export const addChore = (sb: SupabaseClient, c: { name: string; recurrence: FlatChore["recurrence"]; day: number; due: string | null; minutes: number; rotation: string[] }) =>
+  run(sb.rpc("add_flat_chore", { p_name: c.name, p_recurrence: c.recurrence, p_day: c.day, p_due: c.due, p_minutes: c.minutes, p_rotation: c.rotation }));
+export const removeChore = (sb: SupabaseClient, id: string) => run(sb.rpc("remove_flat_chore", { p_id: id }));
+export const setChoreDone = (sb: SupabaseClient, id: string, date: string, done: boolean) => run(sb.rpc("set_flat_chore_done", { p_id: id, p_date: date, p_done: done }));

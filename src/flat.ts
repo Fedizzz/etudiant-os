@@ -55,3 +55,23 @@ export function centsFromInput(v: string): number | null {
 }
 /** Nom lisible d'un membre (ancien membre si sa ligne a disparu). */
 export const nameOf = (flat: Pick<Flat, "members">, id: string) => flat.members.find((m) => m.user_id === id)?.display_name ?? "ancien membre";
+
+// ---------------------------------------------------------------- Ménage partagé
+import { choreAssignee, choreScheduledOn } from "./core.ts";
+import type { Chore } from "./core.ts";
+
+export interface FlatChore { id: string; flat_id: string; name: string; recurrence: "daily" | "weekly" | "biweekly" | "once"; day: number; due_on: string | null; minutes: number; rotation: string[]; created_by: string }
+export interface FlatChoreDone { chore_id: string; flat_id: string; done_on: string; done_by: string }
+
+/** Corvée commune sous la forme utilisée par le calendrier de l'application (la rotation = les membres encore présents, dans l'ordre choisi). */
+const asLocal = (c: FlatChore, activeIds: string[]): Chore => ({
+  id: c.id, name: c.name, recurrence: c.recurrence, day: c.day, minutes: c.minutes, done: [],
+  ...(c.due_on ? { date: c.due_on } : {}), assignees: c.rotation.filter((u) => activeIds.includes(u)),
+});
+/** La corvée a-t-elle lieu ce jour-là ? (mêmes règles que le ménage personnel) */
+export const flatChoreOn = (c: FlatChore, d: Date) => choreScheduledOn(asLocal(c, []), d);
+/** Qui doit la faire ce jour-là (rotation entre les membres encore présents) ; null si personne n'est désigné. */
+export function flatChoreAssignee(c: FlatChore, d: Date, activeIds: string[]): string | null {
+  const l = asLocal(c, activeIds);
+  return l.assignees.length ? choreAssignee(l, d) : null;
+}

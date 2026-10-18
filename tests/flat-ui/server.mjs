@@ -19,7 +19,7 @@ http.createServer(async (req, res) => {
       const out = await withUser(subOf(req), (c) => c.query(sql, keys.map((k) => args[k] === null ? null : typeof args[k] === "object" ? JSON.stringify(args[k]) : String(args[k]))));
       return json(res, 200, out.rows[0]?.v ?? null);
     }
-    if ((m = url.pathname.match(/^\/rest\/v1\/(flat_groceries|flat_expenses)$/))) {
+    if ((m = url.pathname.match(/^\/rest\/v1\/(flat_groceries|flat_expenses|flat_chores|flat_chore_done)$/))) {
       const where = [], vals = [];
       for (const [k, v] of url.searchParams) if (/^[a-z_]+$/.test(k) && !["select", "order", "limit"].includes(k) && v.startsWith("eq.")) { vals.push(v.slice(3)); where.push(`${k} = $${vals.length}`); }
       const order = (url.searchParams.get("order") ?? "").split(",").filter(Boolean).map((o) => { const [c, d] = o.split("."); return /^[a-z_]+$/.test(c) ? `${c} ${d === "desc" ? "desc" : "asc"}` : null; }).filter(Boolean);

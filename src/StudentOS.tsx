@@ -2852,6 +2852,7 @@ const Chores: React.FC = () => {
   const onTime = useMemo(() => ({ all: choreOnTimeStats(state.chores, today), d30: choreOnTimeStats(state.chores, today, 30), d7: choreOnTimeStats(state.chores, today, 7) }), [state.chores, today, state.settings.onTimeMode]);
   return (
     <div className="flex flex-col gap-4">
+      <p className="rounded-xl bg-sunken px-4 py-2 text-xs text-muted">Ces corvées sont les vôtres, sur votre planning. Pour partager le ménage avec vos colocataires (tout le monde voit et coche les mêmes corvées), utilisez l'onglet <b className="text-fg">Colocation</b> → Ménage.</p>
       <Card title={<span className="flex items-center gap-2"><Repeat size={15} />Semaine {isoWeek(monday)} · {monday.toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}</span>}
         action={<><Btn size="sm" variant="ghost" onClick={() => setOffset(offset - 1)} aria-label="Semaine précédente"><ChevronLeft size={14} /></Btn><Btn size="sm" onClick={() => setOffset(0)}>Cette semaine</Btn><Btn size="sm" variant="ghost" onClick={() => setOffset(offset + 1)} aria-label="Semaine suivante"><ChevronRight size={14} /></Btn></>}>
         {!state.chores.length ? <Empty icon={<Home size={18} />} title="Aucune corvée définie" hint="Ajoutez une corvée ci-dessous pour générer la matrice et la rotation." /> : (
@@ -3604,7 +3605,9 @@ const SettingsView: React.FC = () => {
           <Field label="Coucher par défaut" htmlFor="st-bed"><Input id="st-bed" type="time" value={s.bedDefault} onChange={(e) => set({ bedDefault: e.target.value })} /></Field>
           <Field label="Préparation matin (min)" htmlFor="st-prep"><Input id="st-prep" type="number" min={10} max={180} value={s.prepMinutes} onChange={(e) => set({ prepMinutes: Number(e.target.value) })} /></Field>
           <Field label="Endormissement (min)" htmlFor="st-fall"><Input id="st-fall" type="number" min={0} max={60} value={s.fallAsleep} onChange={(e) => set({ fallAsleep: Number(e.target.value) })} /></Field>
-          <Field label="Colocataires" htmlFor="st-room"><Input id="st-room" defaultValue={s.roommates.join(", ")} placeholder="Sami, Lina" onBlur={(e) => set({ roommates: e.target.value.split(",").map((x) => x.trim()).filter(Boolean) })} /></Field>
+          <div className="col-span-2 text-xs text-muted">{s.roommates.length > 0
+            ? <>Ancienne liste de colocataires : {s.roommates.join(", ")}. <button type="button" className="font-semibold underline" onClick={() => set({ roommates: [] })}>La retirer</button> · Le ménage partagé se fait maintenant dans Colocation.</>
+            : "Colocataires : le ménage, les courses et les dépenses se partagent dans l'onglet Colocation."}</div>
           <Field label="Devise" htmlFor="st-cur"><Select id="st-cur" value={s.currency} onChange={(e) => set({ currency: e.target.value })}>{["€", "$", "£", "CHF", "DT", "MAD", "FCFA"].map((c) => <option key={c} value={c}>{c}</option>)}</Select></Field>
           <Field label="« À l'heure » compté selon" htmlFor="st-ontime" className="col-span-2">
             <Select id="st-ontime" value={s.onTimeMode ?? "time"} onChange={(e) => dispatch({ type: "settings", patch: { onTimeMode: e.target.value === "day" ? "day" : undefined } })}>
@@ -3648,8 +3651,8 @@ const SettingsView: React.FC = () => {
 // ---------------------------------------------------------------- Premier lancement
 const Onboarding: React.FC<{ onDone: (s: AppState) => void }> = ({ onDone }) => {
   const { env } = useStore();
-  const [f, setF] = useState({ name: env.account?.displayName ?? "", roommates: "", budget: "600", wake: "07:30", bed: "23:30", sleepGoal: 8 });
-  const settings = (): Partial<SettingsState> => ({ name: f.name.trim() || "Moi", roommates: f.roommates.split(",").map((x) => x.trim()).filter(Boolean), wakeDefault: f.wake, bedDefault: f.bed, sleepGoal: f.sleepGoal });
+  const [f, setF] = useState({ name: env.account?.displayName ?? "", budget: "600", wake: "07:30", bed: "23:30", sleepGoal: 8 });
+  const settings = (): Partial<SettingsState> => ({ name: f.name.trim() || "Moi", roommates: [], wakeDefault: f.wake, bedDefault: f.bed, sleepGoal: f.sleepGoal });
   const start = (e: React.FormEvent) => { e.preventDefault(); onDone(blank(settings(), parseAmount(f.budget) || 600)); };
   const demo = () => { const s = seed(); onDone({ ...s, settings: { ...s.settings, onboarded: true } }); };
   return (
@@ -3659,7 +3662,6 @@ const Onboarding: React.FC<{ onDone: (s: AppState) => void }> = ({ onDone }) => 
           <div><h1 className="font-display text-3xl font-extrabold tracking-tight">Bienvenue dans <span className="marker">Étudiant OS<svg viewBox="0 0 200 20" preserveAspectRatio="none" aria-hidden><path d="M2 12 C 40 6, 80 16, 120 9 S 180 6, 198 11" /></svg></span></h1><p className="text-sm text-muted">Trois réglages et votre espace est prêt. Tout reste dans ce navigateur.</p></div></div>
         <form onSubmit={start} className="inked stagger grid grid-cols-2 gap-3 rounded-3xl bg-panel p-5">
           <Field label="Votre prénom" htmlFor="ob-name" className="col-span-2"><Input id="ob-name" autoFocus placeholder="Ex. Khaled" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
-          <Field label="Colocataires (pour le ménage, facultatif)" htmlFor="ob-room" className="col-span-2"><Input id="ob-room" placeholder="Ex. Sami, Lina" value={f.roommates} onChange={(e) => setF({ ...f, roommates: e.target.value })} /></Field>
           <Field label="Budget mensuel (€)" htmlFor="ob-budget"><Input id="ob-budget" inputMode="decimal" value={f.budget} onChange={(e) => setF({ ...f, budget: e.target.value })} /></Field>
           <Field label="Sommeil visé (h)" htmlFor="ob-sleep"><Input id="ob-sleep" type="number" min={5} max={11} step={0.5} value={f.sleepGoal} onChange={(e) => setF({ ...f, sleepGoal: Number(e.target.value) })} /></Field>
           <Field label="Réveil habituel" htmlFor="ob-wake"><Input id="ob-wake" type="time" value={f.wake} onChange={(e) => setF({ ...f, wake: e.target.value })} /></Field>

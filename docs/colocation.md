@@ -6,6 +6,8 @@ Onglet **Colocation** (compte requis) :
   Le propriétaire peut régénérer le code ou retirer un membre ; quitter l'appartement transmet la propriété au plus ancien membre ; le dernier qui part supprime l'appartement.
 - **Courses communes** : tout le monde ajoute, coche, supprime. « Valider les achats » crée la dépense partagée et retire les articles cochés (une seule opération côté base).
 - **Dépenses partagées** : qui a payé, partagé entre qui (parts égales en centimes, le reste va aux premiers), historique, **« qui doit combien à qui »** (virements minimaux) et « Marquer remboursé ».
+- **Ménage partagé** (onglet Ménage de la colocation) : corvées communes (chaque jour, chaque semaine, une semaine sur deux, une fois) avec **rotation entre les colocataires** ; tout le monde voit la semaine, coche, et on voit « fait par X ». Le propriétaire (ou l'auteur) supprime. Un ancien membre est retiré de la rotation.
+- Le ménage personnel (onglet Ménage) reste individuel, sur votre planning. L'ancienne liste de « colocataires » (simples noms) n'est plus proposée à l'inscription ni dans les réglages ; si elle existait, un lien « La retirer » permet de l'effacer (les anciennes corvées ne sont pas supprimées).
 - Les données sont relues toutes les 15 s, au retour sur l'onglet et après chaque action (pas de temps réel pour l'instant).
 
 ## Données et sécurité
@@ -16,7 +18,8 @@ Onglet **Colocation** (compte requis) :
 - Les identifiants d'utilisateur des dépenses ne sont pas des clés étrangères : supprimer un compte ne supprime pas l'historique des autres.
 
 ## ⚠ À faire avant de mettre en ligne
-La migration **n'a pas été appliquée** sur votre Supabase. Tant qu'elle ne l'est pas, l'onglet affiche « La colocation n'est pas encore activée sur ce serveur ». Pour l'appliquer : `supabase db push` (ou coller le fichier dans l'éditeur SQL du tableau de bord Supabase). Sauvegardez avant (Réglages → export, et sauvegarde de la base).
+Deux migrations : `20261019000001_flats.sql` (appartement, courses, dépenses) puis `20261020000001_flat_chores.sql` (ménage partagé). Sans la seconde, seul l'onglet Ménage de la colocation affiche « pas encore activé » ; le reste fonctionne (testé).
+Une migration **non appliquée** sur votre Supabase fait afficher ce message. Tant qu'elle ne l'est pas, l'onglet affiche « La colocation n'est pas encore activée sur ce serveur ». Pour l'appliquer : `supabase db push` (ou coller le fichier dans l'éditeur SQL du tableau de bord Supabase). Sauvegardez avant (Réglages → export, et sauvegarde de la base).
 
 ## Tests
 - `node --test --experimental-strip-types tests/flat.test.ts` (inclus dans `npm test`) : partage en centimes, soldes, virements minimaux.
@@ -25,6 +28,6 @@ La migration **n'a pas été appliquée** sur votre Supabase. Tant qu'elle ne l'
   Ce test ne remplace pas `npm run test:db` (vraie pile Supabase, non lancé ici).
 
 ## Limites et suite
-- Pas de liste de ménage partagée (les corvées restent personnelles) ni de dépenses à parts inégales ni de scan de ticket vers la dépense commune : prochaines étapes.
+- Les corvées communes n'apparaissent pas encore dans le planning personnel ni le tableau de bord ; pas de dépenses à parts inégales ni de scan de ticket vers la dépense commune : prochaines étapes.
 - Pas de notifications ni de temps réel.
 - Un propriétaire ne peut pas encore renommer l'appartement.

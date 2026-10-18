@@ -13,6 +13,7 @@ grant usage on schema auth to anon, authenticated; grant usage on schema public 
 create function public._require_active() returns uuid language plpgsql stable security definer set search_path = '' as $$
 begin if auth.uid() is null then raise exception 'non authentifié' using errcode = '28000'; end if; return auth.uid(); end $$;
 \i supabase/migrations/20261019000001_flats.sql
+\i supabase/migrations/20261020000001_flat_chores.sql
 
 insert into auth.users (id, email) values
   ('00000000-0000-0000-0000-00000000000a', 'a@t'), ('00000000-0000-0000-0000-00000000000b', 'b@t'),
@@ -132,5 +133,57 @@ set role authenticated;
 do $$ declare i int; begin for i in 1..7 loop perform set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-00000000000' || i, false); perform public.join_flat((select c from code2), 'M' || i); end loop; end $$;
 select pg_temp.as_user('10000000-0000-0000-0000-000000000008');
 select pg_temp.fails($$select public.join_flat((select c from code2), 'M8')$$, 'complet');
+reset role;
+
+-- ================================================================ Ménage partagé (20261020000001_flat_chores.sql)
+reset role;
+insert into auth.users (id, email) values ('00000000-0000-0000-0000-0000000000f1', 'f1@t'), ('00000000-0000-0000-0000-0000000000f2', 'f2@t');
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000f1');
+set role authenticated;
+select public.create_flat('Coloc ménage', 'Alice');
+create temp table code3 as select (public.my_flat() ->> 'invite_code') as c; grant all on code3 to public;
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000f2');
+select public.join_flat((select c from code3), 'Bob');
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000f1');
+select public.add_flat_chore('Poubelles', 'weekly', 2, null, 10, '["00000000-0000-0000-0000-0000000000f1","00000000-0000-0000-0000-0000000000f2"]');
+select public.add_flat_chore('Cuisine', 'daily', 0, null, 15, '[]');
+select public.add_flat_chore('Grand ménage', 'once', 0, current_date + 3, 60, '["00000000-0000-0000-0000-0000000000f2"]');
+select pg_temp.fails($$select public.add_flat_chore('x', 'monthly', 0, null, 10, '[]')$$, 'récurrence');
+select pg_temp.fails($$select public.add_flat_chore('x', 'once', 0, null, 10, '[]')$$, 'date invalide');
+select pg_temp.fails($$select public.add_flat_chore('', 'daily', 0, null, 10, '[]')$$, 'invalide');
+select pg_temp.fails($$select public.add_flat_chore('x', 'daily', 0, null, 10, '["00000000-0000-0000-0000-00000000000d"]')$$, 'pas membre');
+select pg_temp.fails($$select public.add_flat_chore('x', 'daily', 9, null, 10, '[]')$$, 'check');
+-- Bob voit les corvées d'Alice, coche, Alice voit « fait par Bob »
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000f2');
+select pg_temp.eq((select count(*) from public.flat_chores), 3::bigint, 'Bob voit les 3 corvées');
+select public.set_flat_chore_done((select id from public.flat_chores where name = 'Cuisine'), current_date, true);
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000f1');
+select pg_temp.eq((select done_by from public.flat_chore_done limit 1), '00000000-0000-0000-0000-0000000000f2'::uuid, 'fait par Bob visible par Alice');
+-- Alice (propriétaire) peut décocher ; un second coche le même jour ne remplace pas l'auteur
+select public.set_flat_chore_done((select id from public.flat_chores where name = 'Cuisine'), current_date, true);
+select pg_temp.eq((select done_by from public.flat_chore_done limit 1), '00000000-0000-0000-0000-0000000000f2'::uuid, 'auteur conservé');
+select public.set_flat_chore_done((select id from public.flat_chores where name = 'Cuisine'), current_date, false);
+select pg_temp.eq((select count(*) from public.flat_chore_done), 0::bigint, 'propriétaire décoche');
+select pg_temp.fails($$select public.set_flat_chore_done((select id from public.flat_chores where name = 'Cuisine'), current_date + 10, true)$$, 'date invalide');
+-- Un membre ne peut pas décocher ce qu'un autre a coché, ni supprimer une corvée qu'il n'a pas créée
+select public.set_flat_chore_done((select id from public.flat_chores where name = 'Poubelles'), current_date, true);
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000f2');
+select public.set_flat_chore_done((select id from public.flat_chores where name = 'Poubelles'), current_date, false);
+select pg_temp.eq((select count(*) from public.flat_chore_done), 1::bigint, 'Bob ne décoche pas le coche d''Alice');
+select public.remove_flat_chore((select id from public.flat_chores where name = 'Poubelles'));
+select pg_temp.eq((select count(*) from public.flat_chores where name = 'Poubelles'), 1::bigint, 'Bob ne supprime pas la corvée d''Alice');
+-- Un inconnu ne voit rien
+reset role;
+insert into auth.users (id, email) values ('00000000-0000-0000-0000-0000000000e1', 'e@t');
+set role authenticated;
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000e1');
+select pg_temp.eq((select count(*) from public.flat_chores), 0::bigint, 'étranger : aucune corvée');
+select pg_temp.eq((select count(*) from public.flat_chore_done), 0::bigint, 'étranger : aucun coche');
+select pg_temp.fails($$insert into public.flat_chores (flat_id, name, recurrence, created_by) select id, 'x', 'daily', '00000000-0000-0000-0000-0000000000e1' from public.flats$$, 'permission denied');
+-- Suppression par l'auteur
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000f1');
+select public.remove_flat_chore((select id from public.flat_chores where name = 'Poubelles'));
+select pg_temp.eq((select count(*) from public.flat_chores where name = 'Poubelles'), 0::bigint, 'auteur supprime sa corvée');
+select pg_temp.eq((select count(*) from public.flat_chore_done), 0::bigint, 'coches supprimés avec la corvée');
 reset role;
 select 'TOUT EST OK' as resultat;

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { balances, centsFromInput, settleUp, splitEqual } from "../src/flat.ts";
+import { balances, centsFromInput, flatChoreAssignee, flatChoreOn, settleUp, splitEqual } from "../src/flat.ts";
+import type { FlatChore } from "../src/flat.ts";
 
 const sum = (o: Record<string, number>) => Object.values(o).reduce((a, b) => a + b, 0);
 
@@ -58,4 +59,29 @@ test("centsFromInput", () => {
   assert.equal(centsFromInput("-3"), null);
   assert.equal(centsFromInput("1,234"), null);
   assert.equal(centsFromInput("abc"), null);
+});
+
+const chore = (p: Partial<FlatChore> = {}): FlatChore => ({ id: "c", flat_id: "f", name: "Poubelles", recurrence: "weekly", day: 2, due_on: null, minutes: 10, rotation: ["a", "b"], created_by: "a", ...p });
+test("corvée commune hebdomadaire : seulement le bon jour, rotation une semaine sur deux", () => {
+  const wed1 = new Date(2026, 9, 14), wed2 = new Date(2026, 9, 21), thu = new Date(2026, 9, 15);  // mercredis consécutifs
+  assert.equal(flatChoreOn(chore(), wed1), true);
+  assert.equal(flatChoreOn(chore(), thu), false);
+  const x = flatChoreAssignee(chore(), wed1, ["a", "b"]), y = flatChoreAssignee(chore(), wed2, ["a", "b"]);
+  assert.ok(x && y && x !== y, "deux colocataires se relaient");
+  assert.equal(flatChoreAssignee(chore(), new Date(2026, 9, 28), ["a", "b"]), x, "retour au premier au bout de deux semaines");
+});
+test("corvée commune : quotidienne, ponctuelle, bimensuelle", () => {
+  assert.equal(flatChoreOn(chore({ recurrence: "daily" }), new Date(2026, 9, 17)), true);
+  const once = chore({ recurrence: "once", due_on: "2026-10-20", rotation: ["b"] });
+  assert.equal(flatChoreOn(once, new Date(2026, 9, 20)), true);
+  assert.equal(flatChoreOn(once, new Date(2026, 9, 21)), false);
+  assert.equal(flatChoreAssignee(once, new Date(2026, 9, 20), ["a", "b"]), "b");
+  const bi = chore({ recurrence: "biweekly" });
+  assert.notEqual(flatChoreOn(bi, new Date(2026, 9, 14)), flatChoreOn(bi, new Date(2026, 9, 21)));
+});
+test("corvée commune : un ancien membre est retiré de la rotation ; sans personne, pas de responsable", () => {
+  const c = chore({ recurrence: "daily", rotation: ["a", "gone"] });
+  for (let d = 1; d <= 6; d++) assert.equal(flatChoreAssignee(c, new Date(2026, 9, d), ["a"]), "a");
+  assert.equal(flatChoreAssignee(chore({ rotation: [] }), new Date(2026, 9, 14), ["a", "b"]), null);
+  assert.equal(flatChoreAssignee(chore({ rotation: ["gone"] }), new Date(2026, 9, 14), ["a"]), null);
 });
