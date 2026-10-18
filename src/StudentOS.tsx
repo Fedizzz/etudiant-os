@@ -10,9 +10,8 @@ import type { Action, Aisle, PlanEvent, Chore, Habit, HabitCat, Todo, TodoKind, 
 import type { AppEnv } from "./env.ts";
 import { LangSwitch } from "./i18n.tsx";
 import { OcrError, scanReceipt } from "./ocr.ts";
-import { FlatView } from "./flatView.tsx";
-import { useFlatChores } from "./useFlatChores.ts";
-import type { FlatChoresApi } from "./useFlatChores.ts";
+import { FlatChoresPanel, FlatExpensesPanel, FlatGroceriesPanel, FlatView, ScopeSwitch, useScope } from "./flatView.tsx";
+import { FlatCtx, useFlat, useFlatData } from "./useFlatData.ts";
 import type { OcrOutput, OcrProgress } from "./ocr.ts";
 
 /* ============================================================================
@@ -2268,7 +2267,7 @@ const BUILTIN_TEMPLATES: GroceryTemplate[] = [
   { id: "tpl-budget", name: "Petit budget (< 20 €)", items: pick("Lentilles", "Pois chiches", "Riz basmati", "Carottes", "Oignons", "Œufs", "Thon en boîte", "Bananes") },
 ];
 
-const Groceries: React.FC = () => {
+const PersonalGroceries: React.FC = () => {
   const { state, dispatch, toast, undoable } = useStore();
   const [name, setName] = useState(""); const [qty, setQty] = useState(""); const [aisle, setAisle] = useState<Aisle | "auto">("auto");
   const [quick, setQuick] = useState(false); const [bulk, setBulk] = useState(""); const [hideChecked, setHideChecked] = useState(false);
@@ -2507,7 +2506,7 @@ const CatSelect: React.FC<Omit<React.SelectHTMLAttributes<HTMLSelectElement>, "o
     </Select>
   );
 };
-const BudgetView: React.FC = () => {
+const PersonalBudget: React.FC = () => {
   const { state, dispatch, toast, undoable } = useStore();
   const cur = state.settings.currency;
   const [offset, setOffset] = useState(0);
@@ -2833,8 +2832,9 @@ const ChoreDragCell: React.FC<{ chore: Chore; date: string; children: (drag: { o
   return <>{children({ ...drag, dragging })}</>;
 };
 
-const Chores: React.FC = () => {
+const PersonalChores: React.FC = () => {
   const { state: fullState, dispatch, toast, undoable } = useStore();
+  const flatStatus = useFlat().status;
   // Ménage personnel : sans les corvées de la colocation (elles sont dans Colocation → Ménage).
   const state = useMemo(() => withoutShared(fullState), [fullState]);
   const [offset, setOffset] = useState(0);
@@ -2856,7 +2856,7 @@ const Chores: React.FC = () => {
   const onTime = useMemo(() => ({ all: choreOnTimeStats(state.chores, today), d30: choreOnTimeStats(state.chores, today, 30), d7: choreOnTimeStats(state.chores, today, 7) }), [state.chores, today, state.settings.onTimeMode]);
   return (
     <div className="flex flex-col gap-4">
-      <p className="rounded-xl bg-sunken px-4 py-2 text-xs text-muted">Ces corvées sont les vôtres, sur votre planning. Pour partager le ménage avec vos colocataires (tout le monde voit et coche les mêmes corvées), utilisez l'onglet <b className="text-fg">Colocation</b> → Ménage.</p>
+      {flatStatus !== "in" && <p className="rounded-xl bg-sunken px-4 py-2 text-xs text-muted">Pour partager le ménage avec vos colocataires, créez ou rejoignez un appartement dans l'onglet <b className="text-fg">Colocation</b> : une version partagée apparaît alors ici.</p>}
       <Card title={<span className="flex items-center gap-2"><Repeat size={15} />Semaine {isoWeek(monday)} · {monday.toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}</span>}
         action={<><Btn size="sm" variant="ghost" onClick={() => setOffset(offset - 1)} aria-label="Semaine précédente"><ChevronLeft size={14} /></Btn><Btn size="sm" onClick={() => setOffset(0)}>Cette semaine</Btn><Btn size="sm" variant="ghost" onClick={() => setOffset(offset + 1)} aria-label="Semaine suivante"><ChevronRight size={14} /></Btn></>}>
         {!state.chores.length ? <Empty icon={<Home size={18} />} title="Aucune corvée définie" hint="Ajoutez une corvée ci-dessous pour générer la matrice et la rotation." /> : (
@@ -3713,6 +3713,17 @@ const CommandPalette: React.FC<{ commands: Command[]; onClose: () => void }> = (
   );
 };
 
+// Onglets Courses / Budget / Ménage : version personnelle seule hors appartement ; avec un appartement, un choix « Perso / Colocation » ajoute la version partagée.
+const ScopedTab: React.FC<{ id: "groceries" | "budget" | "chores"; personal: React.ReactNode; shared: React.ReactNode }> = ({ id, personal, shared }) => {
+  const d = useFlat();
+  const [scope, setScope] = useScope(id);
+  if (d.status !== "in") return <>{personal}</>;
+  return (<div className="flex flex-col gap-4"><ScopeSwitch id={id} value={scope} onChange={setScope} />{scope === "flat" ? shared : personal}</div>);
+};
+const Groceries: React.FC = () => <ScopedTab id="groceries" personal={<PersonalGroceries />} shared={<FlatGroceriesPanel />} />;
+const BudgetView: React.FC = () => <ScopedTab id="budget" personal={<PersonalBudget />} shared={<FlatExpensesPanel />} />;
+const Chores: React.FC = () => <ScopedTab id="chores" personal={<PersonalChores />} shared={<FlatChoresPanel />} />;
+
 const NAV: { key: ViewKey; label: string; icon: React.FC<{ size?: number }>; short: string }[] = [
   { key: "dashboard", label: "Tableau de bord", icon: LayoutDashboard, short: "1" },
   { key: "planning", label: "Planning", icon: CalendarClock, short: "2" },
@@ -3787,16 +3798,15 @@ export interface StudentOSProps {
   override?: { key: string; title: string; node: React.ReactNode } | null;
 }
 export default function StudentOS({ state: ownState, dispatch: ownDispatch, env, view, onView, notice, headerExtra, menuExtra, override }: StudentOSProps) {
-  // Corvées de la colocation (seulement avec un compte et un appartement) : fusionnées dans l'AFFICHAGE (planning, tableau de bord), jamais enregistrées dans l'état personnel.
-  const flatChores = useFlatChores(env);
-  const state = useMemo(() => (flatChores.chores.length ? { ...ownState, chores: [...ownState.chores, ...flatChores.chores] } : ownState), [ownState, flatChores.chores]);
-  const dispatchRef = useRef<{ toggle: FlatChoresApi["toggle"]; toast?: (t: string, tone?: "ok" | "bad" | "info") => void }>({ toggle: flatChores.toggle });
-  dispatchRef.current.toggle = flatChores.toggle;
+  // Colocation (seulement avec un compte) : données partagées par toute l'application ; ses corvées sont fusionnées dans l'AFFICHAGE (planning, tableau de bord), jamais enregistrées dans l'état personnel.
+  const flatData = useFlatData(env);
+  const state = useMemo(() => (flatData.virtual.length ? { ...ownState, chores: [...ownState.chores, ...flatData.virtual] } : ownState), [ownState, flatData.virtual]);
+  const flatRef = useRef(flatData); flatRef.current = flatData;
   const dispatch = useCallback((a: Action) => {
     if (a.type.startsWith("chore/") && "id" in a && typeof a.id === "string" && a.id.startsWith("flat:")) {
-      // Action sur une corvée commune : cocher/décocher passe par la base ; le reste se fait dans Colocation → Ménage.
-      if (a.type === "chore/toggle") void dispatchRef.current.toggle(a.id, a.date).then((err) => { if (err) dispatchRef.current.toast?.(err, "bad"); });
-      else if (a.type !== "chore/pin") dispatchRef.current.toast?.("Cette corvée est commune : modifiez-la dans Colocation → Ménage.", "info");
+      // Action sur une corvée commune : cocher/décocher passe par la base ; le reste se fait dans Ménage → Colocation.
+      if (a.type === "chore/toggle") void flatRef.current.toggleChore(a.id, a.date).then((err) => { if (err) flatRef.current.notify.current?.(err, "bad"); });
+      else if (a.type !== "chore/pin") flatRef.current.notify.current?.("Cette corvée est commune : modifiez-la dans Ménage, en mode Colocation.", "info");
       return;
     }
     ownDispatch(a);
@@ -3863,7 +3873,7 @@ export default function StudentOS({ state: ownState, dispatch: ownDispatch, env,
     setToasts((t) => [...t.slice(-3), { id, text, tone, action: act }]);
     window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), action ? 6500 : 3200);
   }, []);
-  dispatchRef.current.toast = toast;
+  flatData.notify.current = toast;
   const undoable = useCallback((a: Action, text: string) => {
     const prev = stateRef.current;
     dispatch(a);
@@ -3920,15 +3930,15 @@ export default function StudentOS({ state: ownState, dispatch: ownDispatch, env,
   const navItems = NAV.filter((n) => !state.settings.hiddenViews.includes(n.key));
 
   if (!state.settings.onboarded && !override) return (
-    <StoreCtx.Provider value={ctx}>
+    <StoreCtx.Provider value={ctx}><FlatCtx.Provider value={flatData}>
       <style>{accentCss(state.settings.accent)}</style>
       <Onboarding onDone={(s) => { dispatch({ type: "replace", state: s }); setView("dashboard"); toast(`Bienvenue ${s.settings.name} ! Commencez par ajouter vos cours dans Académique et Planning.`); }} />
       <ToastStack toasts={toasts} />
-    </StoreCtx.Provider>
+    </FlatCtx.Provider></StoreCtx.Provider>
   );
 
   return (
-    <StoreCtx.Provider value={ctx}>
+    <StoreCtx.Provider value={ctx}><FlatCtx.Provider value={flatData}>
       <style>{accentCss(state.settings.accent)}</style>
       <div className="flex min-h-full bg-bg text-fg">
         <aside className="sticky top-0 hidden h-screen w-[76px] shrink-0 flex-col overflow-y-auto p-3 md:flex lg:w-60 2xl:w-64" style={{ paddingTop: "calc(var(--safe-top) + 12px)" }}>
@@ -3995,6 +4005,6 @@ export default function StudentOS({ state: ownState, dispatch: ownDispatch, env,
         </Modal>
       )}
       <ToastStack toasts={toasts} />
-    </StoreCtx.Provider>
+    </FlatCtx.Provider></StoreCtx.Provider>
   );
 }

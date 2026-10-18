@@ -1,15 +1,19 @@
 # Colocation (appartement partagé)
 
 ## Ce que ça fait
-Onglet **Colocation** (compte requis) :
-- **Appartement** : on le crée (nom + prénom visible), on invite avec un **code de 10 caractères**. 8 membres maximum, un seul appartement actif par personne.
-  Le propriétaire peut régénérer le code ou retirer un membre ; quitter l'appartement transmet la propriété au plus ancien membre ; le dernier qui part supprime l'appartement.
-- **Courses communes** : tout le monde ajoute, coche, supprime. « Valider les achats » crée la dépense partagée et retire les articles cochés (une seule opération côté base).
-- **Dépenses partagées** : qui a payé, partagé entre qui (parts égales en centimes, le reste va aux premiers), historique, **« qui doit combien à qui »** (virements minimaux) et « Marquer remboursé ».
-- **Ménage partagé** (onglet Ménage de la colocation) : corvées communes (chaque jour, chaque semaine, une semaine sur deux, une fois) avec **rotation entre les colocataires** ; tout le monde voit la semaine, coche, et on voit « fait par X ». Le propriétaire (ou l'auteur) supprime. Un ancien membre est retiré de la rotation.
-- **Planning et tableau de bord** : si vous êtes dans un appartement, vos tours de corvée commune apparaissent dans votre planning du jour et dans « Ménage du jour » (cochables : la base est mise à jour, tout le monde le voit). Sans appartement (ou sans compte), rien ne change. Ces corvées sont fusionnées à l'affichage seulement : jamais enregistrées dans vos données personnelles, jamais exportées, jamais comptées dans vos points ni vos statistiques. Les modifier (reporter, étapes, suppression) se fait dans Colocation → Ménage.
-- Le ménage personnel (onglet Ménage) reste individuel, sur votre planning. L'ancienne liste de « colocataires » (simples noms) n'est plus proposée à l'inscription ni dans les réglages ; si elle existait, un lien « La retirer » permet de l'effacer (les anciennes corvées ne sont pas supprimées).
-- Les données sont relues toutes les 15 s, au retour sur l'onglet et après chaque action (pas de temps réel pour l'instant).
+**Onglet Colocation** (compte requis) : créer un appartement ou en rejoindre un, voir les **membres** et le **code d'invitation** (10 caractères, copier / régénérer pour le propriétaire), retirer un membre (propriétaire), quitter. Rien d'autre.
+8 membres maximum, un seul appartement actif par personne ; quitter transmet la propriété au plus ancien membre ; le dernier qui part supprime l'appartement.
+
+**Dans un appartement seulement**, les onglets existants gagnent un choix **Perso | nom de l'appartement** (mémorisé par onglet) :
+- **Courses** : liste commune (tout le monde ajoute, coche, supprime). « Valider les achats » crée la dépense partagée et retire les articles cochés (une seule opération côté base).
+- **Budget** : dépenses partagées (qui a payé, partagé entre qui, parts égales en centimes, le reste va aux premiers), historique, **« qui doit combien à qui »** (virements minimaux), « Marquer remboursé ».
+- **Ménage** : corvées communes (chaque jour, chaque semaine, une semaine sur deux, une fois) avec rotation entre colocataires ; tout le monde voit la semaine, coche, et voit « fait par X ». Un ancien membre est retiré de la rotation.
+- **Planning et tableau de bord** : vos tours de corvée commune apparaissent dans votre journée et dans « Ménage du jour » (cochables ; la base est mise à jour, tout le monde le voit). Les corvées des autres s'affichent sur le tableau de bord avec leur nom, sans bloc dans votre planning. Fusionnées à l'affichage seulement : jamais enregistrées dans vos données personnelles, jamais exportées, jamais comptées dans vos points ni vos statistiques. Les modifier (reporter, étapes, suppression) se fait dans Ménage → Colocation.
+
+**Sans appartement (ou sans compte)** : Courses, Budget et Ménage sont exactement la version personnelle, sans sélecteur.
+
+L'ancienne liste de « colocataires » (simples noms) n'est plus proposée à l'inscription ni dans les réglages ; si elle existait, un lien « La retirer » permet de l'effacer (les anciennes corvées ne sont pas supprimées).
+Les données sont relues toutes les 20 s, au retour sur l'onglet et après chaque action (pas de temps réel pour l'instant).
 
 ## Données et sécurité
 - Migration **additive** `supabase/migrations/20261019000001_flats.sql` : nouvelles tables `flats`, `flat_members`, `flat_groceries`, `flat_expenses`, `flat_join_log`. Aucune table existante n'est modifiée ; `user_data` (données personnelles) est intact.

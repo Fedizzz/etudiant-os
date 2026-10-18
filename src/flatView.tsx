@@ -7,10 +7,9 @@ import { supabase } from "./supabase.ts";
 import { balances, centsFromInput, eurosOf, flatChoreAssignee, flatChoreOn, nameOf, settleUp, sharesFor } from "./flat.ts";
 import type { Flat, FlatChore, FlatChoreDone, FlatExpense, FlatGrocery } from "./flat.ts";
 import * as api from "./flatApi.ts";
-import { FLAT_CHANGED } from "./useFlatChores.ts";
+import { useFlat } from "./useFlatData.ts";
 import { DAYS, DAYS_LONG, addDays, cx, fmtDate, iso, todayISO, weekday } from "./core.ts";
 
-type Tab = "courses" | "depenses" | "menage" | "membres";
 
 /** Fenêtre au centre (ne se ferme pas en touchant à côté : on perd rarement ce qu'on a saisi). */
 const Dialog: React.FC<{ title: string; onClose: () => void; children: React.ReactNode }> = ({ title, onClose, children }) => {
@@ -39,67 +38,64 @@ const SplitFields: React.FC<{ flat: Flat; paidBy: string; setPaidBy: (v: string)
   );
 };
 
+/** Onglet « Colocation » : créer ou rejoindre un appartement, voir les membres et le code d'invitation. Les courses, dépenses et corvées partagées sont dans les onglets Courses, Budget et Ménage. */
 export const FlatView: React.FC = () => {
   const { env, toast } = useStore();
+  const d = useFlat();
   const sb = supabase;
-  const [flat, setFlat] = useState<Flat | null | undefined>(undefined);
-  const [groceries, setGroceries] = useState<FlatGrocery[]>([]);
-  const [expenses, setExpenses] = useState<FlatExpense[]>([]);
-  const [chores, setChores] = useState<FlatChore[]>([]);
-  const [done, setDone] = useState<FlatChoreDone[]>([]);
-  /** false tant que la migration du ménage partagé n'est pas appliquée : le reste de la colocation continue de fonctionner. */
-  const [choresOk, setChoresOk] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>("courses");
-  const busy = useRef(false);
-
-  const refresh = useCallback(async () => {
-    if (!sb || busy.current) return;
-    busy.current = true;
-    try {
-      const f = await api.loadFlat(sb);
-      setFlat(f); setErr(null);
-      if (f) {
-        const [g, e, cd] = await Promise.all([api.loadGroceries(sb, f.id), api.loadExpenses(sb, f.id),
-          Promise.all([api.loadChores(sb, f.id), api.loadChoreDone(sb, f.id)]).catch(() => null)]);
-        setGroceries(g); setExpenses(e); setChoresOk(cd !== null); if (cd) { setChores(cd[0]); setDone(cd[1]); }
-      } else { setGroceries([]); setExpenses([]); setChores([]); setDone([]); }
-    } catch (e) { setErr(api.flatError(e)); setFlat((cur) => (cur === undefined ? null : cur)); }
-    finally { busy.current = false; }
-  }, [sb]);
-  useEffect(() => {
-    void refresh();
-    const t = window.setInterval(() => { if (!document.hidden) void refresh(); }, 15000);
-    const v = () => { if (!document.hidden) void refresh(); };
-    document.addEventListener("visibilitychange", v);
-    return () => { window.clearInterval(t); document.removeEventListener("visibilitychange", v); };
-  }, [refresh]);
-  /** Exécute une action puis relit les données ; l'erreur est affichée en clair. */
-  const act = async (fn: () => Promise<unknown>, ok?: string) => {
-    try { await fn(); if (ok) toast(ok, "ok"); } catch (e) { toast(api.flatError(e), "bad"); }
-    busy.current = false; await refresh();
-    window.dispatchEvent(new Event(FLAT_CHANGED));
-  };
-
-  if (!sb || env.mode !== "cloud") return <Card><Empty icon={<Users size={18} />} title="Colocation : compte nécessaire" hint="Créez un compte (Réglages) pour partager une liste de courses et des dépenses avec vos colocataires. En mode local, les données restent sur cet appareil seulement." /></Card>;
-  if (flat === undefined) return <Card><p className="py-8 text-center text-sm text-muted">Chargement…</p></Card>;
-  if (flat === null) return <NoFlat err={err} defaultName={env.account?.displayName ?? ""} onCreate={(n, d) => act(() => api.createFlat(sb, n, d), "Appartement créé")} onJoin={async (c, d) => { try { const okj = await api.joinFlat(sb, c, d); if (!okj) { toast("Code d'invitation invalide.", "bad"); return; } toast("Vous avez rejoint l'appartement", "ok"); } catch (e) { toast(api.flatError(e), "bad"); } busy.current = false; await refresh(); window.dispatchEvent(new Event(FLAT_CHANGED)); }} />;
-
-  const active = flat.members.filter((m) => !m.left);
+  if (!sb || env.mode !== "cloud") return <Card><Empty icon={<Users size={18} />} title="Colocation : compte nécessaire" hint="Créez un compte (Réglages) pour partager une liste de courses, des dépenses et le ménage avec vos colocataires. En mode local, les données restent sur cet appareil seulement." /></Card>;
+  if (d.status === "loading") return <Card><p className="py-8 text-center text-sm text-muted">Chargement…</p></Card>;
+  if (!d.flat) return <NoFlat err={d.err} defaultName={env.account?.displayName ?? ""} onCreate={(n, me) => d.act(() => api.createFlat(sb, n, me), "Appartement créé")}
+    onJoin={async (c, me) => { try { if (!(await api.joinFlat(sb, c, me))) { toast("Code d'invitation invalide.", "bad"); return; } toast("Vous avez rejoint l'appartement", "ok"); } catch (e) { toast(api.flatError(e), "bad"); } await d.refresh(); }} />;
+  const flat = d.flat, active = flat.members.filter((m) => !m.left);
   const iAmOwner = flat.members.find((m) => m.user_id === flat.me)?.role === "owner";
   return (
     <div className="flex flex-col gap-4" data-testid="flat-view">
-      <Card title={<span className="flex items-center gap-2"><Users size={15} />{flat.name} <Pill tone="info">{active.length} membre{active.length > 1 ? "s" : ""}</Pill></span>}
-        action={<div className="flex gap-1">{([["courses", "Courses"], ["depenses", "Dépenses"], ["menage", "Ménage"], ["membres", "Membres"]] as [Tab, string][]).map(([k, l]) => <Btn key={k} size="sm" variant={tab === k ? "primary" : "ghost"} onClick={() => setTab(k)} data-testid={`flat-tab-${k}`}>{l}</Btn>)}</div>}>
-        {err && <p role="alert" className="mb-2 rounded-lg bg-warn/15 px-3 py-2 text-xs">{err}</p>}
-        {tab === "courses" && <FlatGroceries flat={flat} items={groceries} act={act} sb={sb} />}
-        {tab === "depenses" && <FlatExpenses flat={flat} expenses={expenses} act={act} sb={sb} />}
-        {tab === "menage" && !choresOk && <p className="rounded-lg bg-warn/15 px-3 py-2 text-xs" data-testid="flat-chores-off">Le ménage partagé n'est pas encore activé sur ce serveur (mise à jour de la base à appliquer). Le reste de la colocation fonctionne normalement.</p>}
-        {tab === "menage" && choresOk && <FlatChores flat={flat} chores={chores} done={done} act={act} sb={sb} />}
-        {tab === "membres" && <FlatMembers flat={flat} iAmOwner={iAmOwner} act={act} sb={sb} />}
+      <Card title={<span className="flex items-center gap-2"><Users size={15} />{flat.name} <Pill tone="info">{`${active.length} membre(s)`}</Pill></span>}>
+        {d.err && <p role="alert" className="mb-2 rounded-lg bg-warn/15 px-3 py-2 text-xs">{d.err}</p>}
+        <p className="mb-3 text-xs text-muted">Dans un appartement, les onglets Courses, Budget et Ménage proposent aussi la version partagée avec vos colocataires.</p>
+        <FlatMembers flat={flat} iAmOwner={iAmOwner} act={d.act} sb={sb} />
       </Card>
     </div>
   );
+};
+
+/** Choix « Perso / Colocation » en haut des onglets Courses, Budget et Ménage (affiché seulement dans un appartement). */
+export const ScopeSwitch: React.FC<{ id: string; value: "perso" | "flat"; onChange: (v: "perso" | "flat") => void }> = ({ id, value, onChange }) => {
+  const d = useFlat();
+  if (d.status !== "in" || !d.flat) return null;
+  return (
+    <div className="flex w-full items-center gap-1 rounded-2xl border-2 border-line p-1 sm:w-auto sm:self-start" role="tablist" data-testid={`scope-${id}`}>
+      {([["perso", "Perso"], ["flat", d.flat.name]] as ["perso" | "flat", string][]).map(([k, l]) => (
+        <button key={k} role="tab" aria-selected={value === k} data-testid={`scope-${id}-${k}`} onClick={() => onChange(k)}
+          className={cx("min-w-0 flex-1 truncate rounded-xl px-4 py-1.5 text-[13px] font-semibold sm:flex-none", value === k ? "bg-hi text-[rgb(24_22_46)]" : "text-muted hover:text-fg")}>{l}</button>))}
+    </div>
+  );
+};
+/** Mode choisi pour un onglet (mémorisé) : « flat » seulement si l'utilisateur est dans un appartement. */
+export function useScope(id: string): ["perso" | "flat", (v: "perso" | "flat") => void] {
+  const d = useFlat();
+  const key = `etudiant-os/scope/${id}`;
+  const [v, setV] = useState<"perso" | "flat">(() => { try { return localStorage.getItem(key) === "flat" ? "flat" : "perso"; } catch { return "perso"; } });
+  const set = (x: "perso" | "flat") => { setV(x); try { localStorage.setItem(key, x); } catch { /* facultatif */ } };
+  return [d.status === "in" && v === "flat" ? "flat" : "perso", set];
+}
+
+/** Version partagée de chaque onglet (à afficher à la place de la version personnelle quand le mode « Colocation » est choisi). */
+export const FlatGroceriesPanel: React.FC = () => {
+  const d = useFlat(); if (!d.flat || !supabase) return null;
+  return <Card title={<span className="flex items-center gap-2"><Users size={15} />Liste de courses commune</span>}><FlatGroceries flat={d.flat} items={d.groceries} act={d.act} sb={supabase} /></Card>;
+};
+export const FlatExpensesPanel: React.FC = () => {
+  const d = useFlat(); if (!d.flat || !supabase) return null;
+  return <Card title={<span className="flex items-center gap-2"><Users size={15} />Dépenses partagées</span>}><FlatExpenses flat={d.flat} expenses={d.expenses} act={d.act} sb={supabase} /></Card>;
+};
+export const FlatChoresPanel: React.FC = () => {
+  const d = useFlat(); if (!d.flat || !supabase) return null;
+  return <Card title={<span className="flex items-center gap-2"><Users size={15} />Ménage de la colocation</span>}>
+    {d.choresOk ? <FlatChores flat={d.flat} chores={d.chores} done={d.done} act={d.act} sb={supabase} />
+      : <p className="rounded-lg bg-warn/15 px-3 py-2 text-xs" data-testid="flat-chores-off">Le ménage partagé n'est pas encore activé sur ce serveur (mise à jour de la base à appliquer). Le reste de la colocation fonctionne normalement.</p>}
+  </Card>;
 };
 
 const NoFlat: React.FC<{ err: string | null; defaultName: string; onCreate: (n: string, d: string) => void; onJoin: (c: string, d: string) => void }> = ({ err, defaultName, onCreate, onJoin }) => {
