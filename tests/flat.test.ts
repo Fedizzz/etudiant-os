@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { balances, centsFromInput, flatChoreAssignee, flatChoreOn, settleUp, splitEqual, virtualChores } from "../src/flat.ts";
-import { choreAssignee, choreOnTimeStats, planFor, blank, xpOf, activeDays, reducer, withoutShared } from "../src/core.ts";
+import { balances, centsFromInput, choreToRpc, flatChoreAssignee, flatChoreOn, settleUp, splitEqual, virtualChores } from "../src/flat.ts";
+import { choreAssignee, choreDoneLate, choreOnTimeStats, planFor, blank, xpOf, activeDays, reducer, withoutShared } from "../src/core.ts";
 import type { FlatChore } from "../src/flat.ts";
 
 const sum = (o: Record<string, number>) => Object.values(o).reduce((a, b) => a + b, 0);
@@ -62,7 +62,7 @@ test("centsFromInput", () => {
   assert.equal(centsFromInput("abc"), null);
 });
 
-const chore = (p: Partial<FlatChore> = {}): FlatChore => ({ id: "c", flat_id: "f", name: "Poubelles", recurrence: "weekly", day: 2, due_on: null, minutes: 10, rotation: ["a", "b"], created_by: "a", ...p });
+const chore = (p: Partial<FlatChore> = {}): FlatChore => ({ id: "c", flat_id: "f", name: "Poubelles", recurrence: "weekly", day: 2, due_on: null, minutes: 10, time: null, steps: [], rotation: ["a", "b"], created_by: "a", ...p });
 test("corvée commune hebdomadaire : seulement le bon jour, rotation une semaine sur deux", () => {
   const wed1 = new Date(2026, 9, 14), wed2 = new Date(2026, 9, 21), thu = new Date(2026, 9, 15);  // mercredis consécutifs
   assert.equal(flatChoreOn(chore(), wed1), true);
@@ -135,4 +135,27 @@ test("sans appartement : aucune corvée ajoutée au planning ni aux statistiques
   const base0 = blank({ name: "T" }, 600);
   assert.deepEqual(virtualChores(FLAT, [], []), []);
   assert.equal(xpOf(base0), xpOf({ ...base0, chores: [...base0.chores, ...virtualChores(FLAT, [], [])] }));
+});
+
+test("virtualChores : heure fixe, étapes, étapes cochées, report, jour réel du coche (retard)", () => {
+  const c = chore({ recurrence: "daily", time: "18:30", steps: [{ id: "s1", text: "Vider" }, { id: "s2", text: "Laver" }] });
+  const v = virtualChores(FLAT, [c], [
+    { chore_id: "c", flat_id: "f", done_on: "2026-10-12", done_by: "a", skipped: false, steps_done: ["s1", "s2"], ticked_on: "2026-10-14" },
+    { chore_id: "c", flat_id: "f", done_on: "2026-10-13", done_by: null, skipped: true, steps_done: [], ticked_on: null },
+    { chore_id: "c", flat_id: "f", done_on: "2026-10-14", done_by: null, skipped: false, steps_done: ["s1"], ticked_on: null },
+  ])[0];
+  assert.equal(v.time, "18:30");
+  assert.deepEqual(v.steps?.map((x) => x.text), ["Vider", "Laver"]);
+  assert.deepEqual(v.done, ["2026-10-12"]);
+  assert.equal(v.doneOn?.["2026-10-12"], "2026-10-14", "coché deux jours après : en retard");
+  assert.deepEqual(v.skipped, ["2026-10-13"]);
+  assert.deepEqual(v.stepsDone, { "2026-10-12": ["s1", "s2"], "2026-10-14": ["s1"] });
+  assert.equal(choreDoneLate(v, "2026-10-12"), true, "le calcul de retard du ménage personnel s'applique tel quel");
+  assert.equal(choreDoneLate(v, "2026-10-14"), false);
+});
+test("choreToRpc : « Moi » = soi, prénoms rapprochés des membres, étapes nettoyées, date seulement pour « une fois »", () => {
+  const r = choreToRpc(FLAT, { name: " Frigo ", recurrence: "weekly", day: 6, minutes: 20, time: "18:00", date: "2026-10-20", assignees: ["Moi", "Bob", "Inconnu"], steps: [{ id: "1", text: " Vider " }, { id: "2", text: "  " }] });
+  assert.deepEqual(r, { name: "Frigo", recurrence: "weekly", day: 6, due: null, minutes: 20, time: "18:00", steps: [{ id: "1", text: "Vider" }], rotation: ["a", "b"] });
+  const once = choreToRpc(FLAT, { name: "Grand ménage", recurrence: "once", day: 1, minutes: 9999, assignees: ["Bob"], date: "2026-10-20" });
+  assert.equal(once.due, "2026-10-20"); assert.equal(once.minutes, 600); assert.deepEqual(once.rotation, ["b"]); assert.equal(once.time, null);
 });

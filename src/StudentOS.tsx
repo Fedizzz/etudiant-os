@@ -10,7 +10,7 @@ import type { Action, Aisle, PlanEvent, Chore, Habit, HabitCat, Todo, TodoKind, 
 import type { AppEnv } from "./env.ts";
 import { LangSwitch } from "./i18n.tsx";
 import { OcrError, scanReceipt } from "./ocr.ts";
-import { FlatChoresPanel, FlatExpensesPanel, FlatGroceriesPanel, FlatView, ScopeSwitch, useScope } from "./flatView.tsx";
+import { FlatChoresGate, FlatExpensesPanel, FlatGroceriesPanel, FlatView, ScopeSwitch, useScope } from "./flatView.tsx";
 import { FlatCtx, useFlat, useFlatData } from "./useFlatData.ts";
 import type { OcrOutput, OcrProgress } from "./ocr.ts";
 
@@ -1468,7 +1468,7 @@ const ChoreMove: React.FC<{ chore: Chore; date: string; start: number; onDone: (
     else {
       // Occurrence d'une corvée récurrente : reportée ce jour-là, et recréée une seule fois au nouveau jour.
       dispatch({ type: "chore/skip", id: chore.id, date });
-      dispatch({ type: "chore/add", chore: { id: uid(), name: chore.name, recurrence: "once", date: d, day: weekday(parseISO(d)), minutes: chore.minutes, assignees: [chore.assignees[0] ?? "Moi"], done: [], pinned: pin, ...(chore.steps?.length ? { steps: chore.steps, stepsDone: {} } : {}) } });
+      dispatch({ type: "chore/add", chore: { id: uid(), name: chore.name, recurrence: "once", date: d, day: weekday(parseISO(d)), minutes: chore.minutes, assignees: [chore.assignees[0] ?? "Moi"], done: [], pinned: pin, ...(chore.steps?.length ? { steps: chore.steps, stepsDone: {} } : {}), ...(chore.shared || chore.id.startsWith("flat:") ? { shared: true, ...(chore.time ? { time: chore.time } : {}) } : {}) } });
     }
     toast(auto ? `${chore.name} : déplacée au ${fmtDate(d)} (heure automatique)` : `${chore.name} : déplacée au ${fmtDate(d)} à ${t}`); onDone();
   };
@@ -2807,7 +2807,7 @@ function moveChoreTo(dispatch: (a: Action) => void, chore: Chore, from: string, 
   if (chore.recurrence === "once") dispatch({ type: "chore/update", id: chore.id, patch: { date: to, day: weekday(parseISO(to)), pinned: pin } });
   else {
     dispatch({ type: "chore/skip", id: chore.id, date: from });
-    dispatch({ type: "chore/add", chore: { id: uid(), name: chore.name, recurrence: "once", date: to, day: weekday(parseISO(to)), minutes: chore.minutes, assignees: [chore.assignees[0] ?? "Moi"], done: [], pinned: pin, ...(chore.steps?.length ? { steps: chore.steps, stepsDone: {} } : {}) } });
+    dispatch({ type: "chore/add", chore: { id: uid(), name: chore.name, recurrence: "once", date: to, day: weekday(parseISO(to)), minutes: chore.minutes, assignees: [chore.assignees[0] ?? "Moi"], done: [], pinned: pin, ...(chore.steps?.length ? { steps: chore.steps, stepsDone: {} } : {}), ...(chore.shared || chore.id.startsWith("flat:") ? { shared: true, ...(chore.time ? { time: chore.time } : {}) } : {}) } });
   }
 }
 
@@ -2832,23 +2832,25 @@ const ChoreDragCell: React.FC<{ chore: Chore; date: string; children: (drag: { o
   return <>{children({ ...drag, dragging })}</>;
 };
 
-const PersonalChores: React.FC = () => {
+/** Ménage : le même écran pour le ménage personnel et, dans un appartement, pour celui de la colocation (`flat`) : suggestions, checklist, heure fixe, report, historique… */
+const ChoresBoard: React.FC<{ flat?: boolean }> = ({ flat = false }) => {
   const { state: fullState, dispatch, toast, undoable } = useStore();
-  const flatStatus = useFlat().status;
-  // Ménage personnel : sans les corvées de la colocation (elles sont dans Colocation → Ménage).
-  const state = useMemo(() => withoutShared(fullState), [fullState]);
+  const fd = useFlat(), flatStatus = fd.status;
+  // Personnel : sans les corvées de la colocation. Colocation : seulement celles-là (le drapeau « shared » les exclut des statistiques personnelles : on le retire pour leurs propres statistiques).
+  const state = useMemo(() => flat ? { ...fullState, chores: fullState.chores.filter((c) => c.shared).map((c) => ({ ...c, shared: false })) } : withoutShared(fullState), [fullState, flat]);
+  const memberNames = useMemo(() => (flat && fd.flat ? fd.flat.members.filter((m) => !m.left).map((m) => (m.user_id === fd.flat!.me ? "Moi" : m.display_name === "Moi" ? "Moi (colocataire)" : m.display_name)) : []), [flat, fd.flat]);
   const [offset, setOffset] = useState(0);
   const monday = addDays(new Date(), offset * 7 - weekday(new Date()));
   const days = Array.from({ length: 7 }, (_, i) => addDays(monday, i));
   // Sans colocataire (et sans corvée partagée), on masque tout ce qui concerne la rotation.
-  const solo = isSolo(state);
+  const solo = !flat && isSolo(state);
   const [cmode, setCmode] = useState<"duration" | "slot">("duration");
   const [presetEnd, setPresetEnd] = useState(false);
   const [newSteps, setNewSteps] = useState<Step[]>([]);
   const [editSteps, setEditSteps] = useState<ID | null>(null);
   const editing = state.chores.find((c) => c.id === editSteps);
-  const [f, setF] = useState({ name: "", recurrence: "weekly" as Recurrence, day: 5, date: todayISO(), minutes: 20, time: "18:00", end: "18:30", assignees: ["Moi", ...state.settings.roommates].join(", ") });
-  const people = Array.from(new Set(state.chores.flatMap((c) => c.assignees)));
+  const [f, setF] = useState({ name: "", recurrence: "weekly" as Recurrence, day: 5, date: todayISO(), minutes: 20, time: "18:00", end: "18:30", assignees: (flat ? memberNames : ["Moi", ...state.settings.roommates]).join(", ") });
+  const people = Array.from(new Set(flat ? [...memberNames, ...state.chores.flatMap((c) => c.assignees)] : state.chores.flatMap((c) => c.assignees)));
   const minutesBy = people.map((p) => ({ p, min: state.chores.reduce((n, c) => n + days.filter((d) => choreScheduledOn(c, d) && choreAssignee(c, d) === p).length * c.minutes, 0) }));
   const maxMin = Math.max(1, ...minutesBy.map((x) => x.min));
   const today = todayISO();
@@ -2856,7 +2858,7 @@ const PersonalChores: React.FC = () => {
   const onTime = useMemo(() => ({ all: choreOnTimeStats(state.chores, today), d30: choreOnTimeStats(state.chores, today, 30), d7: choreOnTimeStats(state.chores, today, 7) }), [state.chores, today, state.settings.onTimeMode]);
   return (
     <div className="flex flex-col gap-4">
-      {flatStatus !== "in" && <p className="rounded-xl bg-sunken px-4 py-2 text-xs text-muted">Pour partager le ménage avec vos colocataires, créez ou rejoignez un appartement dans l'onglet <b className="text-fg">Colocation</b> : une version partagée apparaît alors ici.</p>}
+      {!flat && flatStatus !== "in" && <p className="rounded-xl bg-sunken px-4 py-2 text-xs text-muted">Pour partager le ménage avec vos colocataires, créez ou rejoignez un appartement dans l'onglet <b className="text-fg">Colocation</b> : une version partagée apparaît alors ici.</p>}
       <Card title={<span className="flex items-center gap-2"><Repeat size={15} />Semaine {isoWeek(monday)} · {monday.toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}</span>}
         action={<><Btn size="sm" variant="ghost" onClick={() => setOffset(offset - 1)} aria-label="Semaine précédente"><ChevronLeft size={14} /></Btn><Btn size="sm" onClick={() => setOffset(0)}>Cette semaine</Btn><Btn size="sm" variant="ghost" onClick={() => setOffset(offset + 1)} aria-label="Semaine suivante"><ChevronRight size={14} /></Btn></>}>
         {!state.chores.length ? <Empty icon={<Home size={18} />} title="Aucune corvée définie" hint="Ajoutez une corvée ci-dessous pour générer la matrice et la rotation." /> : (
@@ -2883,7 +2885,7 @@ const PersonalChores: React.FC = () => {
                         {!done && !skipped && k >= iso(addDays(parseISO(today), -7)) && <button aria-label={`Reporter ${c.name}`} title="Reporter (non faite, sans pénalité)" onClick={() => { dispatch({ type: "chore/skip", id: c.id, date: k }); toast(`${c.name} reportée`, "info"); }}
                           className="absolute right-1 top-1 rounded px-0.5 text-[9px] leading-none text-muted opacity-60 hover:text-fg hover:opacity-100">↷</button>}
                       </>) : <span className="block h-10 rounded-md bg-sunken/40" />}</td>); })}
-                    <td><button className="p-1 text-muted opacity-0 hover:text-bad group-hover:opacity-100" aria-label="Supprimer la corvée" onClick={() => undoable({ type: "chore/remove", id: c.id }, `Corvée « ${c.name} » supprimée`)}><Trash2 size={12} /></button></td>
+                    <td><button className="p-1 text-muted opacity-0 hover:text-bad group-hover:opacity-100" aria-label="Supprimer la corvée" onClick={() => flat ? (window.confirm(`Supprimer la corvée « ${c.name} » pour tout l'appartement ?`) && dispatch({ type: "chore/remove", id: c.id })) : undoable({ type: "chore/remove", id: c.id }, `Corvée « ${c.name} » supprimée`)}><Trash2 size={12} /></button></td>
                   </tr>))}
               </tbody>
             </table>
@@ -2919,12 +2921,12 @@ const PersonalChores: React.FC = () => {
           {!solo && <p className="mt-2 text-[11px] text-muted">« Prévues » : selon la rotation automatique. Une corvée faite par quelqu'un d'autre est comptée pour la personne qui l'a faite.</p>}
         </Card>
         <Card title="Nouvelle corvée">
-          <form className="grid grid-cols-2 gap-2" onSubmit={(e) => { e.preventDefault(); const assignees = state.settings.roommates.length ? f.assignees.split(",").map((s) => s.trim()).filter(Boolean) : ["Moi"];
+          <form className="grid grid-cols-2 gap-2" onSubmit={(e) => { e.preventDefault(); const assignees = (flat || state.settings.roommates.length) ? f.assignees.split(",").map((s) => s.trim()).filter(Boolean) : ["Moi"];
             if (!f.name.trim() || !assignees.length) { toast("Nom et au moins une personne requis.", "bad"); return; }
             if (cmode === "slot" && toMin(f.end) <= toMin(f.time)) { toast("L'heure de fin doit suivre l'heure de début.", "bad"); return; }
             const minutes = cmode === "slot" ? toMin(f.end) - toMin(f.time) : f.minutes;
             if (f.recurrence === "once" && !/^\d{4}-\d{2}-\d{2}$/.test(f.date)) { toast("Choisissez la date de la corvée.", "bad"); return; }
-            dispatch({ type: "chore/add", chore: { id: uid(), name: f.name.trim(), recurrence: f.recurrence, day: f.recurrence === "once" ? weekday(parseISO(f.date)) : f.day, ...(f.recurrence === "once" ? { date: f.date } : {}), minutes, assignees, done: [], ...(cmode === "slot" ? { time: f.time } : {}), ...(newSteps.some((x) => x.text.trim()) ? { steps: newSteps.filter((x) => x.text.trim()).map(({ id, text }) => ({ id, text: text.trim() })), stepsDone: {} } : {}) } }); setF({ ...f, name: "" }); setNewSteps([]); toast(state.settings.roommates.length ? "Corvée ajoutée à la rotation" : "Corvée ajoutée"); }}>
+            dispatch({ type: "chore/add", chore: { id: uid(), name: f.name.trim(), recurrence: f.recurrence, day: f.recurrence === "once" ? weekday(parseISO(f.date)) : f.day, ...(f.recurrence === "once" ? { date: f.date } : {}), minutes, assignees, done: [], ...(flat ? { shared: true } : {}), ...(cmode === "slot" ? { time: f.time } : {}), ...(newSteps.some((x) => x.text.trim()) ? { steps: newSteps.filter((x) => x.text.trim()).map(({ id, text }) => ({ id, text: text.trim() })), stepsDone: {} } : {}) } }); setF({ ...f, name: "" }); setNewSteps([]); toast(flat || state.settings.roommates.length ? "Corvée ajoutée à la rotation" : "Corvée ajoutée"); }}>
             <div className="col-span-2">
               <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">Suggestions</p>
               <div className="relative">
@@ -2956,7 +2958,14 @@ const PersonalChores: React.FC = () => {
               : <><Field label="Début" htmlFor="ch-time"><Input id="ch-time" type="time" value={f.time} onChange={(e) => setF({ ...f, time: e.target.value })} /></Field>
                 <Field label="Fin" htmlFor="ch-end"><Input id="ch-end" type="time" value={f.end} onChange={(e) => setF({ ...f, end: e.target.value })} /></Field></>}
             <StepsEditor id="ch-steps" steps={newSteps} onChange={setNewSteps} className="col-span-2" placeholder="Ex. Vider le frigo, laver les étagères…" />
-            {state.settings.roommates.length > 0 && <Field label="Rotation (séparée par des virgules)" htmlFor="ch-who" className="col-span-2"><Input id="ch-who" placeholder="Moi, Inès" value={f.assignees} onChange={(e) => setF({ ...f, assignees: e.target.value })} /></Field>}
+            {flat ? (
+              <fieldset className="col-span-2"><legend className="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted">{f.recurrence === "once" ? "Qui la fait" : "Rotation entre"}</legend>
+                <div className="flex flex-wrap gap-2" data-testid="chore-rotation">{memberNames.map((n) => { const on = f.assignees.split(",").map((x) => x.trim()).includes(n);
+                  return (<label key={n} className={cx("flex cursor-pointer items-center gap-1.5 rounded-full border-2 px-3 py-1 text-xs font-semibold", on ? "border-fg bg-hi/60" : "border-line text-muted")}>
+                    <input type="checkbox" className="sr-only" checked={on} onChange={() => { const cur = f.assignees.split(",").map((x) => x.trim()).filter(Boolean); const next = f.recurrence === "once" ? [n] : on ? cur.filter((x) => x !== n) : memberNames.filter((m) => cur.includes(m) || m === n); setF({ ...f, assignees: next.join(", ") }); }} />{n === "Moi" ? "Moi" : n}</label>); })}</div>
+                {f.recurrence !== "once" && <p className="mt-1 text-[11px] text-muted">Les personnes cochées se relaient dans l'ordre de la liste.</p>}
+              </fieldset>
+            ) : state.settings.roommates.length > 0 && <Field label="Rotation (séparée par des virgules)" htmlFor="ch-who" className="col-span-2"><Input id="ch-who" placeholder="Moi, Inès" value={f.assignees} onChange={(e) => setF({ ...f, assignees: e.target.value })} /></Field>}
             <p className="col-span-2 text-[11px] text-muted">{cmode === "duration" ? "La corvée est placée dans un créneau libre de votre planning." : "La corvée apparaît à cet horaire dans votre planning."}{!state.settings.roommates.length && " Ajoutez des colocataires dans Réglages pour activer la rotation."}</p>
             <Btn type="submit" variant="primary" className="col-span-2"><Plus size={14} />Ajouter</Btn>
           </form>
@@ -3722,7 +3731,7 @@ const ScopedTab: React.FC<{ id: "groceries" | "budget" | "chores"; personal: Rea
 };
 const Groceries: React.FC = () => <ScopedTab id="groceries" personal={<PersonalGroceries />} shared={<FlatGroceriesPanel />} />;
 const BudgetView: React.FC = () => <ScopedTab id="budget" personal={<PersonalBudget />} shared={<FlatExpensesPanel />} />;
-const Chores: React.FC = () => <ScopedTab id="chores" personal={<PersonalChores />} shared={<FlatChoresPanel />} />;
+const Chores: React.FC = () => <ScopedTab id="chores" personal={<ChoresBoard />} shared={<FlatChoresGate><ChoresBoard flat /></FlatChoresGate>} />;
 
 const NAV: { key: ViewKey; label: string; icon: React.FC<{ size?: number }>; short: string }[] = [
   { key: "dashboard", label: "Tableau de bord", icon: LayoutDashboard, short: "1" },
@@ -3803,10 +3812,9 @@ export default function StudentOS({ state: ownState, dispatch: ownDispatch, env,
   const state = useMemo(() => (flatData.virtual.length ? { ...ownState, chores: [...ownState.chores, ...flatData.virtual] } : ownState), [ownState, flatData.virtual]);
   const flatRef = useRef(flatData); flatRef.current = flatData;
   const dispatch = useCallback((a: Action) => {
-    if (a.type.startsWith("chore/") && "id" in a && typeof a.id === "string" && a.id.startsWith("flat:")) {
-      // Action sur une corvée commune : cocher/décocher passe par la base ; le reste se fait dans Ménage → Colocation.
-      if (a.type === "chore/toggle") void flatRef.current.toggleChore(a.id, a.date).then((err) => { if (err) flatRef.current.notify.current?.(err, "bad"); });
-      else if (a.type !== "chore/pin") flatRef.current.notify.current?.("Cette corvée est commune : modifiez-la dans Ménage, en mode Colocation.", "info");
+    // Corvée commune (id « flat:… », ou ajout marqué « shared ») : tout passe par la base ; l'heure figée par le planning (chore/pin) n'est pas enregistrée.
+    if (a.type.startsWith("chore/") && (("id" in a && typeof a.id === "string" && a.id.startsWith("flat:")) || (a.type === "chore/add" && a.chore.shared))) {
+      void flatRef.current.choreAction(a).then((err) => { if (err) flatRef.current.notify.current?.(err, "bad"); });
       return;
     }
     ownDispatch(a);

@@ -65,23 +65,46 @@ try {
   await reload(B); await nav(B, "Budget"); await scope(B, "budget", "flat");
   ok(await B.locator("[data-testid=flat-expenses] li", { hasText: "Internet" }).locator("button[aria-label='Supprimer la dépense']").count() === 0, "Bob (membre) n'a pas de bouton supprimer sur la dépense d'Alice");
 
-  // ---- Ménage : corvées communes
+  // ---- Ménage : même écran que le ménage personnel (suggestions, rotation, checklist, report…)
   await nav(A, "Ménage"); await scope(A, "chores", "flat");
-  ok(await A.locator("text=Aucune corvée commune").count() === 1, "ménage commun : vide au départ");
-  await A.click("[data-testid=flat-add-chore]"); await A.selectOption("#fc-rec", "daily"); await A.fill("#fc-name", "Vaisselle"); await A.click("[data-testid=fc-submit]"); await sleep(1000);
-  ok(await A.locator("[data-testid=flat-chore-row]", { hasText: "Vaisselle" }).count() >= 1, "Alice voit la corvée dans la semaine");
+  ok(await A.locator("text=Aucune corvée définie").count() === 1, "ménage commun : vide au départ");
+  ok(await A.locator("[data-testid=chore-presets]").count() === 1, "suggestions de corvées présentes (comme au perso)");
+  ok(await A.locator("[data-testid=chore-rotation] label").count() === 2, "rotation entre colocataires : une puce par membre");
+  const addForm = (p) => p.locator("form", { has: p.locator("#ch-name") });
+  await A.click("[data-testid=chore-presets] button:text-is('Vaisselle')");
+  ok(await A.inputValue("#ch-name") === "Vaisselle", "une suggestion remplit le formulaire");
+  await A.fill("#ch-steps", "Rincer"); await A.press("#ch-steps", "Enter"); await A.fill("#ch-steps", "Essuyer"); await A.press("#ch-steps", "Enter");
+  await addForm(A).locator("button[type=submit]").click(); await sleep(1400);
+  ok(await A.locator("tr", { hasText: "Vaisselle" }).count() === 1, "la corvée apparaît dans la matrice de la semaine");
+  ok((await A.locator("tr", { hasText: "Vaisselle" }).innerText()).includes("Checklist · 2"), "checklist de 2 étapes enregistrée");
+  await A.click("[data-testid=chore-presets] button:text-is('Cuisiner le dîner')"); await addForm(A).locator("button[type=submit]").click(); await sleep(1200);
+  // Bob voit la même matrice, coche les étapes : la corvée passe « faite » toute seule (comme au perso)
   await reload(B); await nav(B, "Ménage"); await scope(B, "chores", "flat");
-  const idx = await B.evaluate(() => (new Date().getDay() + 6) % 7);
-  await B.locator("[data-testid=flat-chore-row]", { hasText: "Vaisselle" }).nth(idx).locator("input[type=checkbox]").click(); await sleep(1000);
-  await reload(A); await nav(A, "Ménage"); await scope(A, "chores", "flat");
-  ok((await A.locator("[data-testid=flat-chore-row]", { hasText: "Vaisselle" }).nth(idx).innerText()).includes("fait par Bob"), "Alice voit « fait par Bob »");
-  await A.locator("summary", { hasText: "Gérer les corvées" }).click();
-  await A.locator("button[aria-label='Supprimer la corvée']").click(); await sleep(900);
-  ok(await A.locator("text=Aucune corvée commune").count() === 1, "corvée supprimée");
+  ok(await B.locator("tr", { hasText: "Vaisselle" }).count() === 1, "Bob voit la corvée créée par Alice");
+  await B.click("button[aria-label='Checklist de Vaisselle']"); await sleep(400);
+  await B.locator("[role=dialog] button", { hasText: "Rincer" }).first().click(); await sleep(700);
+  await B.locator("[role=dialog] button", { hasText: "Essuyer" }).first().click(); await sleep(1200);
+  await B.keyboard.press("Escape"); await sleep(300);
+  await nav(B, "Tableau de bord");
+  ok(await B.locator("button[aria-label='Annuler Vaisselle']").count() === 1, "toutes les étapes cochées : la corvée est marquée faite");
+  await reload(A); await nav(A, "Tableau de bord");
+  ok(await A.locator("button[aria-label='Annuler Vaisselle']").count() === 1, "Alice voit la corvée faite par Bob");
+  await nav(A, "Ménage"); await scope(A, "chores", "flat");
+  // report d'un jour (comme au perso) : enregistré pour tous
+  await A.locator("button[aria-label='Reporter Cuisiner le dîner']").first().click(); await sleep(1000);
+  ok(await A.locator("tr", { hasText: "Cuisiner le dîner" }).locator("text=reportée").count() === 1, "« Reporter » : le jour est marqué reportée");
+  await reload(B); await nav(B, "Ménage"); await scope(B, "chores", "flat");
+  ok(await B.locator("tr", { hasText: "Cuisiner le dîner" }).locator("text=reportée").count() === 1, "Bob voit aussi le report");
+  ok(await B.locator("text=À l'heure ?").count() === 1 && await B.locator("text=Historique · 4 semaines").count() === 1, "historique et compteur « à l'heure » présents");
+  // suppression (confirmation) : Alice supprime ses deux corvées
+  await A.locator("tr", { hasText: "Vaisselle" }).locator("button[aria-label='Supprimer la corvée']").click(); await sleep(900);
+  await A.locator("tr", { hasText: "Cuisiner le dîner" }).locator("button[aria-label='Supprimer la corvée']").click(); await sleep(900);
+  ok(await A.locator("text=Aucune corvée définie").count() === 1, "corvées supprimées");
 
   // ---- Tableau de bord, planning, ménage personnel
-  await A.click("[data-testid=flat-add-chore]"); await A.selectOption("#fc-rec", "daily"); await A.fill("#fc-name", "Balai");
-  await A.locator("label", { hasText: "Bob" }).click(); await A.click("[data-testid=fc-submit]"); await sleep(1000);   // rotation : Alice seule
+  await addForm(A).locator("#ch-name").fill("Balai");
+  await A.locator("[data-testid=chore-rotation] label", { hasText: "Bob" }).click();   // rotation : Alice seule
+  await A.selectOption("#ch-rec", "daily"); await addForm(A).locator("button[type=submit]").click(); await sleep(1200);
   await nav(A, "Tableau de bord");
   ok(await A.locator("text=Balai").count() >= 1, "tableau de bord d'Alice : « Balai » affichée");
   await nav(B, "Tableau de bord"); await sleep(21000);   // relecture automatique (20 s)
@@ -94,7 +117,7 @@ try {
   await A.locator("button[aria-label='Marquer Balai comme faite']").click(); await sleep(1200);
   ok(await A.locator("button[aria-label='Annuler Balai']").count() === 1, "cochée tout de suite sur le tableau de bord");
   await reload(B); await nav(B, "Ménage"); await scope(B, "chores", "flat");
-  ok((await B.locator("[data-testid=flat-chore-row]", { hasText: "Balai" }).nth(idx).innerText()).includes("fait par Alice"), "Bob voit « fait par Alice »");
+  ok(await B.locator("tr", { hasText: "Balai" }).locator("button.border-ok\\/40, button[class*='ok']").count() >= 1 || (await B.locator("tr", { hasText: "Balai" }).innerText()).includes("Alice"), "Bob voit la corvée du Balai faite par Alice");
 
   // ---- Quitter : retour à la version sans appartement
   await nav(B, "Colocation"); await B.click("[data-testid=flat-leave]"); await B.click("[role=dialog] button:text-is('Quitter')"); await sleep(1000);

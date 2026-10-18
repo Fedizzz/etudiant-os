@@ -14,6 +14,7 @@ create function public._require_active() returns uuid language plpgsql stable se
 begin if auth.uid() is null then raise exception 'non authentifié' using errcode = '28000'; end if; return auth.uid(); end $$;
 \i supabase/migrations/20261019000001_flats.sql
 \i supabase/migrations/20261020000001_flat_chores.sql
+\i supabase/migrations/20261021000001_flat_chores_full.sql
 
 insert into auth.users (id, email) values
   ('00000000-0000-0000-0000-00000000000a', 'a@t'), ('00000000-0000-0000-0000-00000000000b', 'b@t'),
@@ -185,5 +186,48 @@ select pg_temp.as_user('00000000-0000-0000-0000-0000000000f1');
 select public.remove_flat_chore((select id from public.flat_chores where name = 'Poubelles'));
 select pg_temp.eq((select count(*) from public.flat_chores where name = 'Poubelles'), 0::bigint, 'auteur supprime sa corvée');
 select pg_temp.eq((select count(*) from public.flat_chore_done), 0::bigint, 'coches supprimés avec la corvée');
+reset role;
+
+-- ================================================================ Ménage complet (20261021000001_flat_chores_full.sql)
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000f1');
+create temp table cx as select public.save_flat_chore(null, 'Frigo', 'weekly', 6, null, 20, '18:30', '[{"id":"s1","text":"Vider"},{"id":"s2","text":"Laver"}]', '["00000000-0000-0000-0000-0000000000f1","00000000-0000-0000-0000-0000000000f2"]') as id; grant all on cx to public;
+select pg_temp.eq((select time from public.flat_chores where id = (select id from cx)), '18:30', 'heure enregistrée');
+select pg_temp.eq(jsonb_array_length((select steps from public.flat_chores where id = (select id from cx))), 2, 'étapes enregistrées');
+select pg_temp.fails($$select public.save_flat_chore(null, 'x', 'daily', 0, null, 10, '25:99', '[]', '[]')$$, 'heure invalide');
+select pg_temp.fails($$select public.save_flat_chore(null, 'x', 'daily', 0, null, 10, null, '[{"id":"a","text":""}]', '[]')$$, 'étape invalide');
+select pg_temp.fails($$select public.save_flat_chore(null, 'x', 'daily', 0, null, 10, null, '"nope"', '[]')$$, 'étapes invalides');
+-- modification par un autre membre (étapes), pas par un étranger
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000f2');
+select public.save_flat_chore((select id from cx), 'Frigo', 'weekly', 6, null, 20, '18:30', '[{"id":"s1","text":"Vider"}]', '["00000000-0000-0000-0000-0000000000f1"]');
+select pg_temp.eq(jsonb_array_length((select steps from public.flat_chores where id = (select id from cx))), 1, 'un membre modifie les étapes');
+-- état d'un jour : étapes, fait, report
+select public.set_flat_chore_day((select id from cx), current_date, null, null, '["s1"]');
+select pg_temp.eq((select steps_done from public.flat_chore_done where chore_id = (select id from cx)), '["s1"]'::jsonb, 'étapes cochées enregistrées (ligne sans « fait »)');
+select pg_temp.eq((select done_by from public.flat_chore_done where chore_id = (select id from cx)) is null, true, 'ligne d''étapes : pas « fait »');
+select public.set_flat_chore_day((select id from cx), current_date, true);
+select pg_temp.eq((select done_by from public.flat_chore_done where chore_id = (select id from cx)), '00000000-0000-0000-0000-0000000000f2'::uuid, 'fait par F2');
+select pg_temp.eq((select ticked_on from public.flat_chore_done where chore_id = (select id from cx)), current_date, 'jour réel du coche enregistré');
+select pg_temp.eq((select steps_done from public.flat_chore_done where chore_id = (select id from cx)), '["s1"]'::jsonb, 'étapes conservées en cochant');
+-- F1 (propriétaire) décoche ; F2 ne décoche pas le coche d'un autre
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000f1');
+select public.set_flat_chore_day((select id from cx), current_date + 1, true);
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000f2');
+select public.set_flat_chore_day((select id from cx), current_date + 1, false);
+select pg_temp.eq((select done_by from public.flat_chore_done where chore_id = (select id from cx) and done_on = current_date + 1), '00000000-0000-0000-0000-0000000000f1'::uuid, 'F2 ne décoche pas le coche de F1');
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000f1');
+select public.set_flat_chore_day((select id from cx), current_date + 1, false);
+select pg_temp.eq((select count(*) from public.flat_chore_done where chore_id = (select id from cx) and done_on = current_date + 1), 0::bigint, 'ligne vide supprimée');
+-- report : annule le « fait » de soi, puis se retire
+select public.set_flat_chore_day((select id from cx), current_date + 2, true);
+select public.set_flat_chore_day((select id from cx), current_date + 2, null, true);
+select pg_temp.eq((select skipped from public.flat_chore_done where chore_id = (select id from cx) and done_on = current_date + 2), true, 'reportée');
+select pg_temp.eq((select done_by from public.flat_chore_done where chore_id = (select id from cx) and done_on = current_date + 2) is null, true, 'reportée : plus « fait »');
+select public.set_flat_chore_day((select id from cx), current_date + 2, null, false);
+select pg_temp.eq((select count(*) from public.flat_chore_done where chore_id = (select id from cx) and done_on = current_date + 2), 0::bigint, 'report annulé');
+select pg_temp.fails($$select public.set_flat_chore_day((select id from cx), current_date + 200, true)$$, 'date invalide');
+select pg_temp.fails($$select public.set_flat_chore_day((select id from cx), current_date, null, null, '[1,2]')$$, 'étapes invalides');
+-- étranger : rien
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000e1');
+select pg_temp.fails($$select public.save_flat_chore((select id from cx), 'x', 'daily', 0, null, 10, null, '[]', '[]')$$, 'pas d''appartement');
 reset role;
 select 'TOUT EST OK' as resultat;

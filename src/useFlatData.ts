@@ -2,11 +2,12 @@
  * au retour sur l'onglet et après chaque action). Actif seulement avec un compte : sinon status = "off" et rien ne change.
  * Sert : l'onglet Colocation (membres, code), les onglets Courses / Budget / Ménage (version colocation) et le planning (corvées). */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import type { Chore } from "./core.ts";
+import { choreStepsDone } from "./core.ts";
+import type { Action, Chore } from "./core.ts";
 import type { AppEnv } from "./env.ts";
 import { supabase } from "./supabase.ts";
 import * as api from "./flatApi.ts";
-import { virtualChores } from "./flat.ts";
+import { choreToRpc, virtualChores } from "./flat.ts";
 import type { Flat, FlatChore, FlatChoreDone, FlatExpense, FlatGrocery } from "./flat.ts";
 
 export interface FlatData {
@@ -21,13 +22,14 @@ export interface FlatData {
   act(fn: () => Promise<unknown>, ok?: string): Promise<void>;
   /** Corvées communes sous la forme des corvées personnelles (planning, tableau de bord). Vide hors appartement. */
   virtual: Chore[];
-  /** Coche / décoche une corvée commune (id « flat:… ») ; affichage immédiat puis relecture. Renvoie un message d'erreur ou null. */
-  toggleChore(id: string, date: string): Promise<string | null>;
+  /** Action sur une corvée commune (ajout, coche, report, étape, modification, suppression) : même vocabulaire que le ménage personnel. Affichage immédiat quand c'est possible, puis relecture. Renvoie un message d'erreur ou null. */
+  choreAction(a: Action): Promise<string | null>;
   /** Fonction d'affichage des messages, branchée par l'application. */
   notify: { current: ((text: string, tone?: "ok" | "bad" | "info") => void) | null };
 }
-const OFF: FlatData = { status: "off", flat: null, groceries: [], expenses: [], chores: [], done: [], choresOk: true, err: null, refresh: async () => {}, act: async () => {}, virtual: [], toggleChore: async () => null, notify: { current: null } };
+const OFF: FlatData = { status: "off", flat: null, groceries: [], expenses: [], chores: [], done: [], choresOk: true, err: null, refresh: async () => {}, act: async () => {}, virtual: [], choreAction: async () => null, notify: { current: null } };
 
+const todayLocal = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 export function useFlatData(env: AppEnv): FlatData {
   const live = env.mode === "cloud" && !!supabase;
   const [status, setStatus] = useState<FlatData["status"]>(live ? "loading" : "off");
@@ -69,17 +71,53 @@ export function useFlatData(env: AppEnv): FlatData {
     busy.current = false; await refresh();
   }, [refresh]);
   const virtual = useMemo(() => (flat && status === "in" ? virtualChores(flat, chores, done) : []), [flat, status, chores, done]);
-  const toggleChore = useCallback(async (id: string, date: string) => {
-    if (!supabase) return "Corvée introuvable.";
-    const cid = id.slice(5), was = done.some((d) => d.chore_id === cid && d.done_on === date);
-    if (!chores.some((c) => c.id === cid)) return "Corvée introuvable.";
-    setDone((cur) => was ? cur.filter((d) => !(d.chore_id === cid && d.done_on === date)) : [...cur, { chore_id: cid, flat_id: flat?.id ?? "", done_on: date, done_by: flat?.me ?? "" }]);
-    try { await api.setChoreDone(supabase, cid, date, !was); busy.current = false; await refresh(); return null; }
-    catch (e) { busy.current = false; await refresh(); return api.flatError(e); }
-  }, [done, chores, flat, refresh]);
+  /** Modifie localement l'état d'un jour (affichage immédiat avant la réponse de la base). */
+  const patchDay = useCallback((cid: string, date: string, fn: (r: FlatChoreDone) => FlatChoreDone) => {
+    setDone((cur) => {
+      const i = cur.findIndex((d) => d.chore_id === cid && d.done_on === date);
+      const base: FlatChoreDone = i >= 0 ? cur[i] : { chore_id: cid, flat_id: flat?.id ?? "", done_on: date, done_by: null, skipped: false, steps_done: [], ticked_on: null };
+      const next = fn(base);
+      const empty = !next.done_by && !next.skipped && !(next.steps_done?.length);
+      return i >= 0 ? (empty ? cur.filter((_, k) => k !== i) : cur.map((d, k) => (k === i ? next : d))) : (empty ? cur : [...cur, next]);
+    });
+  }, [flat]);
+  const choreAction = useCallback(async (a: Action): Promise<string | null> => {
+    if (!supabase || !flat) return "Colocation indisponible.";
+    const sb = supabase;
+    const cid = "id" in a && typeof a.id === "string" ? a.id.replace(/^flat:/, "") : "";
+    const cur = virtual.find((c) => c.id === `flat:${cid}`);
+    const refreshAfter = async (err: unknown) => { busy.current = false; await refresh(); return err ? api.flatError(err) : null; };
+    try {
+      switch (a.type) {
+        case "chore/add": await api.saveChore(sb, null, choreToRpc(flat, a.chore)); return await refreshAfter(null);
+        case "chore/remove": await api.removeChore(sb, cid); return await refreshAfter(null);
+        case "chore/update": {
+          if (!cur) return "Corvée introuvable.";
+          await api.saveChore(sb, cid, choreToRpc(flat, { ...cur, ...a.patch })); return await refreshAfter(null);
+        }
+        case "chore/toggle": {
+          const was = done.some((d) => d.chore_id === cid && d.done_on === a.date && d.done_by);
+          patchDay(cid, a.date, (r) => was ? { ...r, done_by: null, ticked_on: null } : { ...r, done_by: flat.me, skipped: false, ticked_on: todayLocal() });
+          await api.setChoreDay(sb, cid, a.date, { done: !was }); return await refreshAfter(null);
+        }
+        case "chore/skip": {
+          const was = done.some((d) => d.chore_id === cid && d.done_on === a.date && d.skipped);
+          patchDay(cid, a.date, (r) => was ? { ...r, skipped: false } : { ...r, skipped: true, done_by: null, ticked_on: null });
+          await api.setChoreDay(sb, cid, a.date, { skipped: !was }); return await refreshAfter(null);
+        }
+        case "chore/step": {
+          if (!cur) return "Corvée introuvable.";
+          const now = choreStepsDone(cur, a.date), next = now.includes(a.stepId) ? now.filter((x) => x !== a.stepId) : [...now, a.stepId];
+          patchDay(cid, a.date, (r) => ({ ...r, steps_done: next }));
+          await api.setChoreDay(sb, cid, a.date, { stepsDone: next }); return await refreshAfter(null);
+        }
+        default: return null;   // chore/pin : l'heure de la journée n'est pas enregistrée pour les corvées communes
+      }
+    } catch (e) { return await refreshAfter(e); }
+  }, [flat, virtual, done, refresh, patchDay]);
 
-  return useMemo(() => (!live ? OFF : { status, flat, groceries, expenses, chores, done, choresOk, err, refresh, act, virtual, toggleChore, notify }),
-    [live, status, flat, groceries, expenses, chores, done, choresOk, err, refresh, act, virtual, toggleChore]);
+  return useMemo(() => (!live ? OFF : { status, flat, groceries, expenses, chores, done, choresOk, err, refresh, act, virtual, choreAction, notify }),
+    [live, status, flat, groceries, expenses, chores, done, choresOk, err, refresh, act, virtual, choreAction]);
 }
 
 export const FlatCtx = createContext<FlatData>(OFF);

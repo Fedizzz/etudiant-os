@@ -36,8 +36,16 @@ export const checkoutGroceries = (sb: SupabaseClient, e: { cents: number; label:
 
 // ------------------------------------------------------------- Ménage partagé
 import type { FlatChore, FlatChoreDone } from "./flat.ts";
-export const loadChores = (sb: SupabaseClient, flat: string) => run(sb.from("flat_chores").select("*").eq("flat_id", flat).order("created_at")) as Promise<FlatChore[]>;
-export const loadChoreDone = (sb: SupabaseClient, flat: string) => run(sb.from("flat_chore_done").select("*").eq("flat_id", flat).order("done_on", { ascending: false }).limit(1000)) as Promise<FlatChoreDone[]>;
+// Colonnes listées une à une : si la migration « ménage complet » manque (colonnes time / steps), la lecture échoue et l'onglet l'indique.
+export const loadChores = (sb: SupabaseClient, flat: string) => run(sb.from("flat_chores").select("id, flat_id, name, recurrence, day, due_on, minutes, time, steps, rotation, created_by").eq("flat_id", flat).order("created_at")) as Promise<FlatChore[]>;
+export const loadChoreDone = (sb: SupabaseClient, flat: string) => run(sb.from("flat_chore_done").select("chore_id, flat_id, done_on, done_by, skipped, steps_done, ticked_on").eq("flat_id", flat).order("done_on", { ascending: false }).limit(2000)) as Promise<FlatChoreDone[]>;
+export interface ChoreArgs { name: string; recurrence: FlatChore["recurrence"]; day: number; due: string | null; minutes: number; time: string | null; steps: { id: string; text: string }[]; rotation: string[] }
+/** Crée (id null) ou modifie une corvée commune. */
+export const saveChore = (sb: SupabaseClient, id: string | null, c: ChoreArgs) =>
+  run(sb.rpc("save_flat_chore", { p_id: id, p_name: c.name, p_recurrence: c.recurrence, p_day: c.day, p_due: c.due, p_minutes: c.minutes, p_time: c.time, p_steps: c.steps, p_rotation: c.rotation }));
+/** État d'un jour : fait / reporté / étapes cochées (null = inchangé). */
+export const setChoreDay = (sb: SupabaseClient, id: string, date: string, p: { done?: boolean | null; skipped?: boolean | null; stepsDone?: string[] | null }) =>
+  run(sb.rpc("set_flat_chore_day", { p_id: id, p_date: date, p_done: p.done ?? null, p_skipped: p.skipped ?? null, p_steps_done: p.stepsDone ?? null }));
 export const addChore = (sb: SupabaseClient, c: { name: string; recurrence: FlatChore["recurrence"]; day: number; due: string | null; minutes: number; rotation: string[] }) =>
   run(sb.rpc("add_flat_chore", { p_name: c.name, p_recurrence: c.recurrence, p_day: c.day, p_due: c.due, p_minutes: c.minutes, p_rotation: c.rotation }));
 export const removeChore = (sb: SupabaseClient, id: string) => run(sb.rpc("remove_flat_chore", { p_id: id }));

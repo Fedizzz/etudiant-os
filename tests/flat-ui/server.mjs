@@ -23,7 +23,10 @@ http.createServer(async (req, res) => {
       const where = [], vals = [];
       for (const [k, v] of url.searchParams) if (/^[a-z_]+$/.test(k) && !["select", "order", "limit"].includes(k) && v.startsWith("eq.")) { vals.push(v.slice(3)); where.push(`${k} = $${vals.length}`); }
       const order = (url.searchParams.get("order") ?? "").split(",").filter(Boolean).map((o) => { const [c, d] = o.split("."); return /^[a-z_]+$/.test(c) ? `${c} ${d === "desc" ? "desc" : "asc"}` : null; }).filter(Boolean);
-      const sql = `select to_jsonb(t) as v from public.${m[1]} t ${where.length ? "where " + where.join(" and ") : ""} ${order.length ? "order by " + order.join(",") : ""} limit ${Math.min(+url.searchParams.get("limit") || 1000, 1000)}`;
+      const sel = url.searchParams.get("select") ?? "*", cols = sel === "*" ? null : sel.split(",").map((c) => c.trim());
+      if (cols && !cols.every((c) => /^[a-z_]+$/.test(c))) return json(res, 400, { code: "PGRST100", message: "select invalide" });
+      // Colonnes demandées vérifiées comme PostgREST : une colonne absente donne une erreur 42703 (migration manquante).
+      const sql = `select to_jsonb(r) as v from (select ${cols ? cols.join(", ") : "*"} from public.${m[1]} t ${where.length ? "where " + where.join(" and ") : ""} ${order.length ? "order by " + order.join(",") : ""} limit ${Math.min(+url.searchParams.get("limit") || 1000, 1000)}) r`;
       const out = await withUser(subOf(req), (c) => c.query(sql, vals));
       return json(res, 200, out.rows.map((r) => r.v));
     }

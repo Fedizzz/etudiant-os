@@ -60,13 +60,14 @@ export const nameOf = (flat: Pick<Flat, "members">, id: string) => flat.members.
 import { choreAssignee, choreScheduledOn } from "./core.ts";
 import type { Chore } from "./core.ts";
 
-export interface FlatChore { id: string; flat_id: string; name: string; recurrence: "daily" | "weekly" | "biweekly" | "once"; day: number; due_on: string | null; minutes: number; rotation: string[]; created_by: string }
-export interface FlatChoreDone { chore_id: string; flat_id: string; done_on: string; done_by: string }
+export interface FlatChore { id: string; flat_id: string; name: string; recurrence: "daily" | "weekly" | "biweekly" | "once"; day: number; due_on: string | null; minutes: number; time: string | null; steps: { id: string; text: string }[]; rotation: string[]; created_by: string }
+/** État d'un jour d'une corvée : fait (done_by renseigné), reporté et/ou étapes cochées. ticked_on = jour réel du coche (null pour d'anciennes lignes). */
+export interface FlatChoreDone { chore_id: string; flat_id: string; done_on: string; done_by: string | null; skipped?: boolean; steps_done?: string[]; ticked_on?: string | null }
 
 /** Corvée commune sous la forme utilisée par le calendrier de l'application (la rotation = les membres encore présents, dans l'ordre choisi). */
 const asLocal = (c: FlatChore, activeIds: string[]): Chore => ({
   id: c.id, name: c.name, recurrence: c.recurrence, day: c.day, minutes: c.minutes, done: [],
-  ...(c.due_on ? { date: c.due_on } : {}), assignees: c.rotation.filter((u) => activeIds.includes(u)),
+  ...(c.due_on ? { date: c.due_on } : {}), ...(c.time ? { time: c.time } : {}), ...(c.steps?.length ? { steps: c.steps } : {}), assignees: c.rotation.filter((u) => activeIds.includes(u)),
 });
 /** La corvée a-t-elle lieu ce jour-là ? (mêmes règles que le ménage personnel) */
 export const flatChoreOn = (c: FlatChore, d: Date) => choreScheduledOn(asLocal(c, []), d);
@@ -83,8 +84,20 @@ export function virtualChores(flat: Pick<Flat, "me" | "members">, chores: FlatCh
   const label = (id: string) => id === flat.me ? "Moi" : (() => { const n = active.find((m) => m.user_id === id)?.display_name ?? "?"; return n === "Moi" ? "Moi (colocataire)" : n; })();
   return chores.map((c) => {
     const l = asLocal(c, active.map((m) => m.user_id));
-    const mine = done.filter((d) => d.chore_id === c.id);
+    const rows = done.filter((d) => d.chore_id === c.id);
+    const ticked = rows.filter((d) => d.done_by);
+    const stepsDone = Object.fromEntries(rows.filter((d) => d.steps_done?.length).map((d) => [d.done_on, d.steps_done!]));
     return { ...l, id: `flat:${c.id}`, shared: true, assignees: l.assignees.map(label),
-      done: mine.map((d) => d.done_on), doneBy: Object.fromEntries(mine.map((d) => [d.done_on, label(d.done_by)])), doneOn: Object.fromEntries(mine.map((d) => [d.done_on, d.done_on])) };
+      done: ticked.map((d) => d.done_on), doneBy: Object.fromEntries(ticked.map((d) => [d.done_on, label(d.done_by!)])),
+      doneOn: Object.fromEntries(ticked.map((d) => [d.done_on, d.ticked_on ?? d.done_on])),
+      skipped: rows.filter((d) => d.skipped).map((d) => d.done_on), ...(Object.keys(stepsDone).length ? { stepsDone } : {}) };
   });
+}
+
+/** Corvée (forme personnelle, prénoms) → paramètres de save_flat_chore : « Moi » = soi, les prénoms sont rapprochés des membres actifs. */
+export function choreToRpc(flat: Pick<Flat, "me" | "members">, c: Pick<Chore, "name" | "recurrence" | "day" | "date" | "minutes" | "time" | "steps" | "assignees">) {
+  const active = flat.members.filter((m) => !m.left);
+  const ids = c.assignees.map((n) => n === "Moi" ? flat.me : (active.find((m) => m.display_name === n || (n === "Moi (colocataire)" && m.display_name === "Moi"))?.user_id ?? null)).filter((x): x is string => !!x);
+  return { name: c.name.trim(), recurrence: c.recurrence, day: c.day, due: c.recurrence === "once" ? (c.date ?? null) : null, minutes: Math.max(1, Math.min(600, Math.round(c.minutes) || 20)),
+    time: c.time ?? null, steps: (c.steps ?? []).map((x) => ({ id: x.id, text: x.text.trim() })).filter((x) => x.text).slice(0, 40), rotation: [...new Set(ids)] };
 }

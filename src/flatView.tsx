@@ -90,12 +90,11 @@ export const FlatExpensesPanel: React.FC = () => {
   const d = useFlat(); if (!d.flat || !supabase) return null;
   return <Card title={<span className="flex items-center gap-2"><Users size={15} />Dépenses partagées</span>}><FlatExpenses flat={d.flat} expenses={d.expenses} act={d.act} sb={supabase} /></Card>;
 };
-export const FlatChoresPanel: React.FC = () => {
+/** Affiche le ménage de la colocation, ou explique qu'une migration de la base reste à appliquer. */
+export const FlatChoresGate: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const d = useFlat(); if (!d.flat || !supabase) return null;
-  return <Card title={<span className="flex items-center gap-2"><Users size={15} />Ménage de la colocation</span>}>
-    {d.choresOk ? <FlatChores flat={d.flat} chores={d.chores} done={d.done} act={d.act} sb={supabase} />
-      : <p className="rounded-lg bg-warn/15 px-3 py-2 text-xs" data-testid="flat-chores-off">Le ménage partagé n'est pas encore activé sur ce serveur (mise à jour de la base à appliquer). Le reste de la colocation fonctionne normalement.</p>}
-  </Card>;
+  return d.choresOk ? <>{children}</>
+    : <Card title={<span className="flex items-center gap-2"><Users size={15} />Ménage de la colocation</span>}><p className="rounded-lg bg-warn/15 px-3 py-2 text-xs" data-testid="flat-chores-off">Le ménage partagé n'est pas encore activé sur ce serveur (mise à jour de la base à appliquer). Le reste de la colocation fonctionne normalement.</p></Card>;
 };
 
 const NoFlat: React.FC<{ err: string | null; defaultName: string; onCreate: (n: string, d: string) => void; onJoin: (c: string, d: string) => void }> = ({ err, defaultName, onCreate, onJoin }) => {
@@ -253,88 +252,5 @@ const FlatMembers: React.FC<{ flat: Flat; iAmOwner: boolean; act: Act; sb: Sb }>
         <div className="mt-4 flex justify-end gap-2"><Btn variant="ghost" onClick={() => setLeave(false)}>Rester</Btn><Btn variant="primary" onClick={async () => { await act(() => api.leaveFlat(sb), "Vous avez quitté l'appartement"); setLeave(false); }}>Quitter</Btn></div>
       </Dialog>}
     </div>
-  );
-};
-
-const FlatChores: React.FC<{ flat: Flat; chores: FlatChore[]; done: FlatChoreDone[]; act: Act; sb: Sb }> = ({ flat, chores, done, act, sb }) => {
-  const [offset, setOffset] = useState(0), [add, setAdd] = useState(false);
-  const active = flat.members.filter((m) => !m.left), activeIds = active.map((m) => m.user_id);
-  const today = todayISO();
-  const monday = addDays(new Date(), offset * 7 - weekday(new Date()));
-  const days = Array.from({ length: 7 }, (_, i) => addDays(monday, i));
-  const doneBy = (id: string, date: string) => done.find((d) => d.chore_id === id && d.done_on === date)?.done_by;
-  const owner = flat.members.find((m) => m.user_id === flat.me)?.role === "owner";
-  const mineToday = chores.filter((c) => flatChoreOn(c, new Date()) && flatChoreAssignee(c, new Date(), activeIds) === flat.me && !doneBy(c.id, today)).length;
-  return (
-    <div>
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm" data-testid="flat-chores-summary">{mineToday ? <>Aujourd'hui, <b>{mineToday}</b> corvée{mineToday > 1 ? "s" : ""} pour vous.</> : "Rien à faire pour vous aujourd'hui."}</p>
-        <Btn variant="primary" onClick={() => setAdd(true)} data-testid="flat-add-chore"><Plus size={14} />Ajouter une corvée</Btn>
-      </div>
-      <div className="mb-2 flex items-center justify-between">
-        <Btn size="sm" variant="ghost" onClick={() => setOffset(offset - 1)} aria-label="Semaine précédente">←</Btn>
-        <span className="text-xs font-semibold text-muted">{offset === 0 ? "Cette semaine" : fmtDate(iso(days[0]))}</span>
-        <Btn size="sm" variant="ghost" onClick={() => setOffset(offset + 1)} aria-label="Semaine suivante">→</Btn>
-      </div>
-      {!chores.length ? <Empty icon={<Users size={18} />} title="Aucune corvée commune" hint="Ajoutez une corvée (vaisselle, poubelles…) et choisissez qui se relaie : tous les colocataires la voient et la cochent." /> : (
-        <div className="flex flex-col gap-3" data-testid="flat-chores-week">
-          {days.map((d) => {
-            const date = iso(d), list = chores.filter((c) => flatChoreOn(c, d));
-            if (!list.length) return null;
-            return (
-              <div key={date}>
-                <p className={cx("mb-1 text-[11px] font-semibold uppercase tracking-wider", date === today ? "text-fg" : "text-muted")}>{DAYS_LONG[weekday(d)]} {d.getDate()}{date === today && " · aujourd'hui"}</p>
-                <ul className="flex flex-col">{list.map((c) => {
-                  const who = flatChoreAssignee(c, d, activeIds), by = doneBy(c.id, date), mine = who === flat.me;
-                  return (
-                    <li key={c.id} data-testid="flat-chore-row" className={cx("flex items-center gap-3 rounded-lg px-2 py-1.5 text-[13px] hover:bg-sunken", mine && !by && "bg-hi/30")}>
-                      <input type="checkbox" aria-label={by ? "Décocher" : "Cocher"} checked={!!by} onChange={() => void act(() => api.setChoreDone(sb, c.id, date, !by))} />
-                      <span className={cx("min-w-0 flex-1 truncate", by && "text-muted line-through")}>{c.name} <span className="font-mono text-[10px] text-muted">{c.minutes} min</span></span>
-                      <span className="text-[11px] text-muted">{by ? <>fait par {nameOf(flat, by)}</> : who ? (mine ? <b className="text-fg">à vous</b> : nameOf(flat, who)) : "—"}</span>
-                    </li>);
-                })}</ul>
-              </div>);
-          })}
-        </div>)}
-      {chores.length > 0 && (
-        <details className="mt-4 rounded-lg border border-line px-3 py-2 text-xs">
-          <summary className="cursor-pointer font-semibold">Gérer les corvées ({chores.length})</summary>
-          <ul className="mt-2 flex flex-col gap-1">{chores.map((c) => (
-            <li key={c.id} className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate">{c.name} · {c.recurrence === "daily" ? "chaque jour" : c.recurrence === "once" ? (c.due_on ? fmtDate(c.due_on) : "une fois") : `${c.recurrence === "weekly" ? "chaque" : "une semaine sur deux,"} ${DAYS_LONG[c.day].toLowerCase()}`}</span>
-              {(c.created_by === flat.me || owner) && <button className="text-muted hover:text-bad" aria-label="Supprimer la corvée" onClick={() => { if (window.confirm(`Supprimer la corvée « ${c.name} » ?`)) void act(() => api.removeChore(sb, c.id), "Corvée supprimée"); }}><Trash2 size={12} /></button>}</li>))}</ul>
-        </details>)}
-      {add && <ChoreDialog flat={flat} onClose={() => setAdd(false)} onSubmit={async (c) => { await act(() => api.addChore(sb, c), "Corvée ajoutée"); setAdd(false); }} />}
-    </div>
-  );
-};
-
-const ChoreDialog: React.FC<{ flat: Flat; onClose: () => void; onSubmit: (c: { name: string; recurrence: FlatChore["recurrence"]; day: number; due: string | null; minutes: number; rotation: string[] }) => Promise<void> }> = ({ flat, onClose, onSubmit }) => {
-  const active = flat.members.filter((m) => !m.left);
-  const [name, setName] = useState(""), [rec, setRec] = useState<FlatChore["recurrence"]>("weekly"), [day, setDay] = useState((weekday(new Date()) + 1) % 7);
-  const [due, setDue] = useState(todayISO()), [minutes, setMinutes] = useState("20"), [who, setWho] = useState(active.map((m) => m.user_id)), [working, setWorking] = useState(false);
-  const mins = Math.min(600, Math.max(1, parseInt(minutes, 10) || 20));
-  return (
-    <Dialog title="Nouvelle corvée commune" onClose={onClose}>
-      <div className="flex flex-col gap-2">
-        <Field label="Nom" htmlFor="fc-name"><Input id="fc-name" placeholder="Ex. Sortir les poubelles" maxLength={80} value={name} onChange={(e) => setName(e.target.value)} /></Field>
-        <div className="grid grid-cols-2 gap-2">
-          <Field label="Fréquence" htmlFor="fc-rec"><Select id="fc-rec" value={rec} onChange={(e) => setRec(e.target.value as FlatChore["recurrence"])}><option value="daily">Chaque jour</option><option value="weekly">Chaque semaine</option><option value="biweekly">Une semaine sur deux</option><option value="once">Une seule fois</option></Select></Field>
-          {rec === "once" ? <Field label="Date" htmlFor="fc-due"><Input id="fc-due" type="date" min={todayISO()} value={due} onChange={(e) => setDue(e.target.value)} /></Field>
-            : rec === "daily" ? <Field label="Durée (min)" htmlFor="fc-min"><Input id="fc-min" inputMode="numeric" value={minutes} onChange={(e) => setMinutes(e.target.value)} /></Field>
-            : <Field label="Jour" htmlFor="fc-day"><Select id="fc-day" value={day} onChange={(e) => setDay(Number(e.target.value))}>{DAYS_LONG.map((d, i) => <option key={d} value={i}>{d}</option>)}</Select></Field>}
-        </div>
-        {rec !== "daily" && <Field label="Durée (min)" htmlFor="fc-min2"><Input id="fc-min2" inputMode="numeric" value={minutes} onChange={(e) => setMinutes(e.target.value)} /></Field>}
-        <fieldset><legend className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted">{rec === "once" ? "Qui la fait" : "Rotation entre"}</legend>
-          <div className="flex flex-wrap gap-2">{active.map((m) => (
-            <label key={m.user_id} className={cx("flex cursor-pointer items-center gap-1.5 rounded-full border-2 px-3 py-1 text-xs font-semibold", who.includes(m.user_id) ? "border-fg bg-hi/60" : "border-line text-muted")}>
-              <input type="checkbox" className="sr-only" checked={who.includes(m.user_id)} onChange={() => setWho(rec === "once" ? [m.user_id] : who.includes(m.user_id) ? who.filter((x) => x !== m.user_id) : [...who, m.user_id])} />{m.display_name}</label>))}</div>
-          {rec !== "once" && <p className="mt-1 text-[11px] text-muted">Les personnes cochées se relaient dans l'ordre de la liste.</p>}
-        </fieldset>
-        <div className="mt-2 flex justify-end gap-2">
-          <Btn variant="ghost" onClick={onClose}>Annuler</Btn>
-          <Btn variant="primary" data-testid="fc-submit" disabled={!name.trim() || working || (rec === "once" && !due)} onClick={async () => { setWorking(true); try { await onSubmit({ name: name.trim(), recurrence: rec, day, due: rec === "once" ? due : null, minutes: mins, rotation: active.map((m) => m.user_id).filter((u) => who.includes(u)) }); } finally { setWorking(false); } }}>Ajouter</Btn>
-        </div>
-      </div>
-    </Dialog>
   );
 };

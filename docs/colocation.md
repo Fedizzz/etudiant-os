@@ -7,7 +7,7 @@
 **Dans un appartement seulement**, les onglets existants gagnent un choix **Perso | nom de l'appartement** (mémorisé par onglet) :
 - **Courses** : liste commune (tout le monde ajoute, coche, supprime). « Valider les achats » crée la dépense partagée et retire les articles cochés (une seule opération côté base).
 - **Budget** : dépenses partagées (qui a payé, partagé entre qui, parts égales en centimes, le reste va aux premiers), historique, **« qui doit combien à qui »** (virements minimaux), « Marquer remboursé ».
-- **Ménage** : corvées communes (chaque jour, chaque semaine, une semaine sur deux, une fois) avec rotation entre colocataires ; tout le monde voit la semaine, coche, et voit « fait par X ». Un ancien membre est retiré de la rotation.
+- **Ménage** : **le même écran que le ménage personnel** (composant partagé) : suggestions de corvées par thème, matrice de la semaine, récurrence (chaque jour / semaine / une semaine sur deux / une fois), heure fixe ou durée, **checklist d'étapes** (la corvée est marquée faite quand toutes les étapes le sont), « reporter » un jour, déplacer une corvée vers un autre jour (glisser), compteur « à l'heure ? », historique sur 4 semaines, répartition du temps par personne. Différence : la **rotation** se choisit parmi les membres (puces). Tout le monde voit et coche ; on voit « fait par X ». Un ancien membre est retiré de la rotation. Cocher une case enregistre l'auteur et le jour réel (coché après son jour = en retard, comme au perso).
 - **Planning et tableau de bord** : vos tours de corvée commune apparaissent dans votre journée et dans « Ménage du jour » (cochables ; la base est mise à jour, tout le monde le voit). Les corvées des autres s'affichent sur le tableau de bord avec leur nom, sans bloc dans votre planning. Fusionnées à l'affichage seulement : jamais enregistrées dans vos données personnelles, jamais exportées, jamais comptées dans vos points ni vos statistiques. Les modifier (reporter, étapes, suppression) se fait dans Ménage → Colocation.
 
 **Sans appartement (ou sans compte)** : Courses, Budget et Ménage sont exactement la version personnelle, sans sélecteur.
@@ -23,7 +23,7 @@ Les données sont relues toutes les 20 s, au retour sur l'onglet et après chaqu
 - Les identifiants d'utilisateur des dépenses ne sont pas des clés étrangères : supprimer un compte ne supprime pas l'historique des autres.
 
 ## ⚠ À faire avant de mettre en ligne
-Deux migrations : `20261019000001_flats.sql` (appartement, courses, dépenses) puis `20261020000001_flat_chores.sql` (ménage partagé). Sans la seconde, seul l'onglet Ménage de la colocation affiche « pas encore activé » ; le reste fonctionne (testé).
+Trois migrations, dans l'ordre : `20261019000001_flats.sql` (appartement, courses, dépenses), `20261020000001_flat_chores.sql` (ménage partagé) puis `20261021000001_flat_chores_full.sql` (heure fixe, checklist, report, étapes cochées). Sans les deux dernières, seul le Ménage en mode appartement affiche « pas encore activé » ; le reste fonctionne (testé).
 Une migration **non appliquée** sur votre Supabase fait afficher ce message. Tant qu'elle ne l'est pas, l'onglet affiche « La colocation n'est pas encore activée sur ce serveur ». Pour l'appliquer : `supabase db push` (ou coller le fichier dans l'éditeur SQL du tableau de bord Supabase). Sauvegardez avant (Réglages → export, et sauvegarde de la base).
 
 ## Tests
@@ -35,4 +35,5 @@ Une migration **non appliquée** sur votre Supabase fait afficher ce message. Ta
 ## Limites et suite
 - Pas de dépenses à parts inégales ni de scan de ticket vers la dépense commune : prochaines étapes.
 - Pas de notifications ni de temps réel.
+- L'heure d'une corvée sans heure fixe (placement automatique dans le planning) n'est pas figée pour les corvées communes.
 - Un propriétaire ne peut pas encore renommer l'appartement.
