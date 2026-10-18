@@ -5,7 +5,7 @@ import { MiniPdf } from "./pdf.ts";
 import { layoutLanes } from "./core.ts";
 import { DAY_WORDS, dayOf, pageGeometry, parseGrid } from "./timetable.ts";
 import { parseIcs, normalizeFeedUrl, isFeedUrl } from "./ical.ts";
-import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, choreStepsDone, choreDoneLate, choreSlotEnd, freeStart, setOnTimeMode, todoDoneLate, taskDoneLate, nowMinutes, NO_DEADLINE, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, onTimeGuess, onTimeStats, taskOnTimeStats, choreOnTimeStats, HABIT_CATS, habitOn, habitStats, habitStepsDone, habitStreak, todoOnTimeStats, TODO_KINDS, activeDays, xpOf, levelOf, globalStreak, LEVELS, pad, parseAmount, parseISO, parseReceipt, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
+import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, choreStepsDone, choreDoneLate, choreSlotEnd, freeStart, setOnTimeMode, todoDoneLate, taskDoneLate, habitDoneLate, habitTimePassed, nowMinutes, NO_DEADLINE, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, onTimeGuess, onTimeStats, taskOnTimeStats, choreOnTimeStats, HABIT_CATS, habitOn, habitStats, habitStepsDone, habitStreak, todoOnTimeStats, TODO_KINDS, activeDays, xpOf, levelOf, globalStreak, LEVELS, pad, parseAmount, parseISO, parseReceipt, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
 import type { Action, Aisle, PlanEvent, Chore, Habit, HabitCat, Todo, TodoKind, AppState, Block, Budget, Course, DayPlan, Expense, ExpenseCat, GroceryTemplate, ID, Phase, PomodoroCfg, Priority, ReceiptResult, Recurrence, EventRecurrence, CalFeed, FeedEvent, SettingsState, SleepLog, Step, Task, TaskKind, TaskStatus, TemplateItem, ViewKey } from "./core.ts";
 import type { AppEnv } from "./env.ts";
 import { LangSwitch } from "./i18n.tsx";
@@ -2879,6 +2879,7 @@ const HabitToday: React.FC<{ date: string; compact?: boolean }> = ({ date, compa
           <span className="text-base leading-none" aria-hidden>{h.emoji}</span>
           <span className={cx("min-w-0 flex-1 truncate font-medium", done && "text-muted line-through")}>{h.name}</span>
           {h.time && <span className="font-mono text-[11px] text-muted">{h.time}</span>}
+          {(habitDoneLate(h, date) || habitTimePassed(h, date)) && <Pill tone={done ? "warn" : "bad"}>{done ? "Fait en retard" : "En retard"}</Pill>}
           {streak > 1 && <span key={streak} className="streak text-[11px] font-semibold text-warn" title="Série en cours"><span className="flame">🔥</span>{streak}</span>}
           {!compact && <span className="hidden h-2 w-2 rounded-full sm:inline-block" style={{ background: catOf(h.cat).color }} title={catOf(h.cat).label} />}
           {h.note && !compact && <p className="basis-full pl-8 text-[11px] text-muted">{h.note}</p>}
@@ -3101,7 +3102,7 @@ const Routines: React.FC = () => {
           <CounterRow label="Routines" target="faites le jour prévu" a={all} m={d30} lateWord="oubliées" />
           {habits.length > 0 && <ul className="flex flex-col gap-1.5 text-[13px]">{[...habits].sort((a, b) => habitStreak(b, today) - habitStreak(a, today)).slice(0, 5).map((h) => (
             <li key={h.id} className="flex items-center gap-2"><span aria-hidden>{h.emoji}</span><span className="min-w-0 flex-1 truncate">{h.name}</span><span key={habitStreak(h, today)} className="streak font-mono text-[12px] tabular-nums text-muted"><span className="flame">🔥</span>{habitStreak(h, today)} j</span></li>))}</ul>}
-          <p className="text-[11px] text-muted">Une routine non cochée un jour prévu compte comme oubliée (à partir du jour de sa création). Aujourd'hui ne compte qu'une fois coché.</p>
+          <p className="text-[11px] text-muted">Une routine non cochée un jour prévu compte comme oubliée (à partir du jour de sa création), et une routine cochée après son jour compte en retard. Avec une heure : en retard 30 min après cette heure (réglable dans Réglages).</p>
         </div>
       </Card>
       <Card title={<span className="flex items-center gap-2"><Repeat size={15} />Semaine {isoWeek(monday)}</span>} className="md:col-span-2"
@@ -3113,7 +3114,7 @@ const Routines: React.FC = () => {
               <td className="pr-2"><p className="flex items-center gap-1.5 font-medium text-fg"><span aria-hidden>{h.emoji}</span>{h.name}</p><p className="text-[11px] text-muted">{catOf(h.cat).label}{h.time ? ` · ${h.time}` : ""}{h.every ? ` · tous les ${h.every} jours` : h.monthDay ? ` · le ${h.monthDay} du mois` : h.days.length < 7 ? ` · ${h.days.map((d) => DAYS[d]).join(", ")}` : ""}</p></td>
               {week.map((d) => { const on = habitOn(h, d), done = h.done.includes(d); return (
                 <td key={d} className="text-center">{on ? <button onClick={() => d <= today && dispatch({ type: "habit/toggle", id: h.id, date: d })} disabled={d > today} aria-label={`${h.name} le ${fmtDate(d)} : ${done ? "fait" : "non fait"}`}
-                  className={cx("flex h-9 w-full items-center justify-center rounded-md border transition", done ? "border-ok/40 bg-ok/12 text-ok" : d < today ? "border-bad/30 bg-bad/6 text-bad" : d === today ? "border-accent/40 bg-accent/8" : "border-line bg-sunken text-muted opacity-60")}>
+                  className={cx("flex h-9 w-full items-center justify-center rounded-md border transition", done && habitDoneLate(h, d) ? "border-warn/50 bg-warn/12 text-warn" : done ? "border-ok/40 bg-ok/12 text-ok" : habitTimePassed(h, d) ? "border-bad/30 bg-bad/6 text-bad" : d < today ? "border-bad/30 bg-bad/6 text-bad" : d === today ? "border-accent/40 bg-accent/8" : "border-line bg-sunken text-muted opacity-60")}>
                   {done ? <Check size={14} strokeWidth={3} /> : d < today ? <X size={12} /> : ""}</button> : <span className="block h-9 rounded-md bg-sunken/40" />}</td>); })}
               <td className="whitespace-nowrap"><button className="p-1 text-muted hover:text-accent" aria-label={`Modifier ${h.name}`} onClick={() => setForm({ habit: h })}><Pencil size={12} /></button>
                 <button className="p-1 text-muted hover:text-bad" aria-label={`Supprimer ${h.name}`} onClick={() => undoable({ type: "habit/remove", id: h.id }, `Routine « ${h.name} » supprimée`)}><Trash2 size={12} /></button></td>

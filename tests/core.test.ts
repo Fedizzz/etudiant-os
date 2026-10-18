@@ -506,3 +506,18 @@ test("coché après coup : marqué en retard (tâche perso, tâche académique)"
   assert.equal(C.taskDoneLate(task({ status: "done", deadline: "2026-10-14", doneAt: "2026-10-15" })), true);
   assert.equal(C.taskDoneLate(task({ status: "done", deadline: "2026-10-14", doneAt: "2026-10-13" })), false);
 });
+
+test("routines : cochée après coup ou heure dépassée = en retard", () => {
+  C.setOnTimeMode("time");
+  const today = C.todayISO(), y = C.iso(C.addDays(new Date(), -1));
+  const h: C.Habit = { id: "h", name: "Médocs", emoji: "💊", cat: "santé", days: [0, 1, 2, 3, 4, 5, 6], done: [], since: y };
+  let s = C.reducer({ ...base(), habits: [h] }, { type: "habit/toggle", id: "h", date: y }); // hier, coché aujourd'hui
+  assert.equal(C.habitDoneLate(s.habits![0], y), true);
+  assert.deepEqual(C.habitStats(s.habits!, today), { ok: 0, late: 1 });
+  if (C.nowMinutes() > 40) {
+    const t = { ...h, since: today, time: "00:05", done: [] as string[] };
+    assert.equal(C.habitTimePassed(t, today), true);
+    assert.deepEqual(C.habitStats([t], today), { ok: 0, late: 1 });
+    C.setOnTimeMode("day"); assert.deepEqual(C.habitStats([t], today), { ok: 0, late: 0 }); C.setOnTimeMode(undefined);
+  }
+});

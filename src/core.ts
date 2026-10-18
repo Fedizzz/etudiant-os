@@ -61,7 +61,7 @@ export interface PlanEvent { id: ID; title: string; date: string; start: string;
 /** bedOk / wakeOk : couché / levé à l'heure prévue (coché par l'utilisateur ; absent = non renseigné). */
 export type HabitCat = "soin" | "santé" | "sport" | "bien-être" | "maison" | "autre";
 /** Routine quotidienne : days = jours de la semaine (0 = lundi) ; done = dates faites ; stepsDone = étapes cochées par date. */
-export interface Habit { id: ID; name: string; emoji: string; cat: HabitCat; time?: string; days: number[]; done: string[]; steps?: Step[]; stepsDone?: Record<string, ID[]>; note?: string; since: string; /** Tous les N jours (depuis « since »). */ every?: number; /** Chaque mois, ce jour-là (1-31). */ monthDay?: number }
+export interface Habit { id: ID; name: string; emoji: string; cat: HabitCat; time?: string; days: number[]; done: string[]; steps?: Step[]; stepsDone?: Record<string, ID[]>; note?: string; since: string; /** Jour et heure où chaque occurrence a été cochée. */ doneOn?: Record<string, string>; doneTime?: Record<string, string>; /** Tous les N jours (depuis « since »). */ every?: number; /** Chaque mois, ce jour-là (1-31). */ monthDay?: number }
 export type TodoKind = "admin" | "rdv" | "appel" | "achat" | "santé" | "perso" | "autre";
 /** Tâche perso ponctuelle : due = jour prévu ; start/end = horaire précis (« HH:MM ») ; priority 1 basse → 3 haute. */
 export interface Todo { id: ID; text: string; done: boolean; due?: string; start?: string; end?: string; priority?: Priority; kind?: TodoKind; note?: string; steps?: Step[]; doneAt?: string; doneTime?: string; createdAt: string }
@@ -356,7 +356,11 @@ export function reducer(s: AppState, a: Action): AppState {
     case "habit/add": return { ...s, habits: [...(s.habits ?? []), a.habit] };
     case "habit/update": return { ...s, habits: (s.habits ?? []).map((h) => (h.id === a.id ? { ...h, ...a.patch } : h)) };
     case "habit/remove": return { ...s, habits: (s.habits ?? []).filter((h) => h.id !== a.id) };
-    case "habit/toggle": return { ...s, habits: (s.habits ?? []).map((h) => (h.id !== a.id ? h : { ...h, done: h.done.includes(a.date) ? h.done.filter((d) => d !== a.date) : [...h.done, a.date].sort() })) };
+    case "habit/toggle": return { ...s, habits: (s.habits ?? []).map((h) => (h.id !== a.id ? h : (() => {
+      const was = h.done.includes(a.date), doneOn = { ...(h.doneOn ?? {}) }, doneTime = { ...(h.doneTime ?? {}) };
+      if (was) { delete doneOn[a.date]; delete doneTime[a.date]; } else { doneOn[a.date] = todayISO(); doneTime[a.date] = nowHHMM(); }
+      return { ...h, done: was ? h.done.filter((d) => d !== a.date) : [...h.done, a.date].sort(), doneOn, doneTime };
+    })())) };
     case "habit/step": return { ...s, habits: (s.habits ?? []).map((h) => {
       if (h.id !== a.id) return h;
       const cur = h.stepsDone?.[a.date] ?? [];
@@ -504,6 +508,8 @@ export function validateState(x: unknown): { ok: true; state: AppState; repaired
       const sd = h.stepsDone && typeof h.stepsDone === "object" ? Object.fromEntries(Object.entries(h.stepsDone).filter(([k, v]) => isDate(k) && Array.isArray(v)).map(([k, v]) => [k, (v as unknown[]).filter(isStr)]).slice(-120)) : {};
       return { id: h.id, name: h.name.slice(0, 80), emoji: isStr(h.emoji) ? h.emoji.slice(0, 8) : "✨", cat: (HABIT_CATS.some((c) => c.k === h.cat) ? h.cat : "autre") as HabitCat,
         ...(isNum(h.every) && h.every >= 2 && h.every <= 60 ? { every: Math.round(h.every) } : {}), ...(isNum(h.monthDay) && h.monthDay >= 1 && h.monthDay <= 31 ? { monthDay: Math.round(h.monthDay) } : {}),
+        doneOn: h.doneOn && typeof h.doneOn === "object" ? Object.fromEntries(Object.entries(h.doneOn).filter(([k, v]) => isDate(k) && isDate(v)).slice(-400)) : {},
+        doneTime: h.doneTime && typeof h.doneTime === "object" ? Object.fromEntries(Object.entries(h.doneTime).filter(([k, v]) => isDate(k) && isTime(v)).slice(-400)) : {},
         days: days.length ? days : [0, 1, 2, 3, 4, 5, 6], done: h.done.filter(isDate), since: isDate(h.since) ? h.since : todayISO(),
         ...(isTime(h.time) ? { time: h.time } : {}), ...(st.length ? { steps: st, stepsDone: sd } : {}), ...(isStr(h.note) && h.note.trim() ? { note: h.note.slice(0, 200) } : {}) };
     }),
@@ -1036,13 +1042,25 @@ export function habitOn(h: Habit, date: string): boolean {
 }
 export const habitStepsDone = (h: Habit, date: string) => (h.stepsDone?.[date] ?? []).filter((id) => h.steps?.some((x) => x.id === id));
 /** Faites / manquées (jours passés prévus non faits) depuis la création, sur `days` jours max. Aujourd'hui n'est jamais « manqué ». */
+/** Heure limite d'une routine (heure prévue + 30 min de marge), en minutes ; null si pas d'heure ou si le réglage est « jour seulement ». */
+export const habitDeadline = (h: Habit): number | null => (h.time && ON_TIME_BY_TIME ? toMin(h.time) + 30 : null);
+/** Routine d'aujourd'hui non faite dont l'heure limite est passée. */
+export const habitTimePassed = (h: Habit, date: string): boolean => { const e = habitDeadline(h); return date === todayISO() && !h.done.includes(date) && e !== null && nowMinutes() > e; };
+/** Routine cochée trop tard (après son jour, ou après son heure limite). */
+export function habitDoneLate(h: Habit, date: string): boolean {
+  if (!h.done.includes(date) || !h.doneOn?.[date]) return false;
+  if (h.doneOn[date] > date) return true;
+  const e = habitDeadline(h), t = h.doneTime?.[date];
+  return h.doneOn[date] === date && e !== null && !!t && toMin(t) > e;
+}
 export function habitStats(habits: Habit[], today: string, days = 365): OnTimeCount {
   let ok = 0, late = 0;
   const t0 = parseISO(today);
   for (const h of habits) for (let i = 0; i < days; i++) {
     const k = iso(addDays(t0, -i)); if (k < h.since) break;
     if (!habitOn(h, k)) continue;
-    if (h.done.includes(k)) ok++; else if (i > 0) late++;
+    if (h.done.includes(k)) { if (habitDoneLate(h, k)) late++; else ok++; }
+    else if (i > 0 || habitTimePassed(h, k)) late++;
   }
   return { ok, late };
 }
