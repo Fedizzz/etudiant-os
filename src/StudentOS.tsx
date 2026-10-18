@@ -2633,10 +2633,11 @@ function useDrag(opts: { onMove?: (dx: number, dy: number, x: number, y: number)
     if (Math.hypot(dx, dy) > 4) s.moved = true;
     o.current.onMove?.(dx, dy, e.clientX, e.clientY);
   };
-  const onPointerDown = (e: React.PointerEvent) => {
+  const onPointerDown = (e: React.PointerEvent, immediate = false) => {
     if (e.button !== 0) return;
-    st.current = { x: e.clientX, y: e.clientY, active: false, moved: false, pointer: e.pointerType };
-    if (e.pointerType !== "mouse") st.current.timer = window.setTimeout(() => { if (st.current) { st.current.active = true; navigator.vibrate?.(15); o.current.onMove?.(0, 0, st.current.x, st.current.y); } }, 350);
+    st.current = { x: e.clientX, y: e.clientY, active: immediate, moved: false, pointer: e.pointerType };
+    if (immediate) { try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* facultatif */ } o.current.onMove?.(0, 0, e.clientX, e.clientY); }
+    else if (e.pointerType !== "mouse") st.current.timer = window.setTimeout(() => { if (st.current) { st.current.active = true; navigator.vibrate?.(15); o.current.onMove?.(0, 0, st.current.x, st.current.y); } }, 350);
     window.addEventListener("pointermove", move); window.addEventListener("pointerup", end); window.addEventListener("pointercancel", cancel);
     window.addEventListener("touchmove", block, { passive: false });
   };
@@ -2655,7 +2656,7 @@ function moveChoreTo(dispatch: (a: Action) => void, chore: Chore, from: string, 
 }
 
 /** Case de corvée déplaçable (tableau de la semaine). */
-const ChoreDragCell: React.FC<{ chore: Chore; date: string; children: (drag: { onPointerDown: (e: React.PointerEvent) => void; wasDrag: () => boolean; dragging: boolean }) => React.ReactNode }> = ({ chore, date, children }) => {
+const ChoreDragCell: React.FC<{ chore: Chore; date: string; children: (drag: { onPointerDown: (e: React.PointerEvent, immediate?: boolean) => void; wasDrag: () => boolean; dragging: boolean }) => React.ReactNode }> = ({ chore, date, children }) => {
   const { dispatch, toast } = useStore();
   const [dragging, setDragging] = useState(false);
   const [hover, setHover] = useState<string | null>(null);
@@ -2713,10 +2714,12 @@ const Chores: React.FC = () => {
                         {skipped ? (
                           <button onClick={() => { dispatch({ type: "chore/skip", id: c.id, date: k }); toast("Report annulé", "info"); }} title="Reportée · cliquer pour annuler le report"
                             className="flex h-10 w-full flex-col items-center justify-center rounded-md border border-dashed border-line text-[10px] text-muted">reportée</button>
-                        ) : <ChoreDragCell chore={c} date={k}>{(dg) => <button onPointerDown={!done && k >= today ? dg.onPointerDown : undefined} style={{ touchAction: "pan-x pan-y" }} onClick={() => { if (dg.wasDrag()) return; dispatch({ type: "chore/toggle", id: c.id, date: k, who }); if (!done) toast(solo ? `${c.name} : faite` : `${c.name} : fait par ${who}`); }} title={done ? `Faite par ${by} · cliquer pour annuler` : `À faire par ${who} · cliquer quand c'est fait`}
+                        ) : <ChoreDragCell chore={c} date={k}>{(dg) => <><button onPointerDown={!done ? (e) => dg.onPointerDown(e) : undefined} style={{ WebkitTouchCallout: "none", userSelect: "none" } as React.CSSProperties} onContextMenu={(e) => e.preventDefault()} onClick={() => { if (dg.wasDrag()) return; dispatch({ type: "chore/toggle", id: c.id, date: k, who }); if (!done) toast(solo ? `${c.name} : faite` : `${c.name} : fait par ${who}`); }} title={done ? `Faite par ${by} · cliquer pour annuler` : `À faire par ${who} · cliquer quand c'est fait`}
                           className={cx(dg.dragging && "dragging-src", "flex h-10 w-full flex-col items-center justify-center rounded-md border text-[11px] transition", done && choreDoneLate(c, k) ? "border-warn/50 bg-warn/12 text-warn" : done ? "border-ok/40 bg-ok/12 text-ok" : k < today || (k === today && (choreSlotEnd(c, k) ?? 1e9) < nowMinutes()) ? "border-bad/30 bg-bad/6 text-bad" : who === "Moi" ? "border-accent/40 bg-accent/8 text-fg" : "border-line bg-sunken text-fg hover:border-accent/50")}>
                           {done ? <><Check size={14} />{choreDoneLate(c, k) ? <span className="text-[9px]">en retard</span> : !solo && by !== who && <span className="text-[9px]">{by}</span>}</> : <span className="font-medium">{solo ? "à faire" : who}</span>}
-                        </button>}</ChoreDragCell>}
+                        </button>
+                          <span role="button" aria-label={`Déplacer ${c.name} vers un autre jour`} title="Glisser vers un autre jour" onPointerDown={(e) => { e.stopPropagation(); dg.onPointerDown(e, true); }}
+                            className="absolute bottom-1 left-1 z-10 grid h-6 w-6 cursor-grab touch-none select-none place-items-center rounded-md bg-fg/10 text-[13px] leading-none text-fg/70 active:cursor-grabbing" style={{ touchAction: "none" }}>⠿</span></>}</ChoreDragCell>}
                         {!done && !skipped && k >= iso(addDays(parseISO(today), -7)) && <button aria-label={`Reporter ${c.name}`} title="Reporter (non faite, sans pénalité)" onClick={() => { dispatch({ type: "chore/skip", id: c.id, date: k }); toast(`${c.name} reportée`, "info"); }}
                           className="absolute right-1 top-1 rounded px-0.5 text-[9px] leading-none text-muted opacity-60 hover:text-fg hover:opacity-100">↷</button>}
                       </>) : <span className="block h-10 rounded-md bg-sunken/40" />}</td>); })}
@@ -2726,7 +2729,7 @@ const Chores: React.FC = () => {
             </table>
           </div>)}
         {solo ? <p className="mt-2 text-xs text-muted">Cliquez une case quand la corvée est faite. Les corvées non faites sont ajoutées à votre planning du jour, à l'heure choisie ou dans un créneau libre. ↷ reporte une corvée sans la marquer faite. Glissez une case vers un autre jour pour la déplacer (appui long sur iPhone/iPad).</p> :
-        <p className="mt-2 text-xs text-muted">La rotation avance automatiquement : chaque jour pour les tâches quotidiennes, chaque semaine (ou toutes les deux semaines) pour les autres. Les cases « Moi » non faites sont injectées dans le planning du jour. ↷ reporte une corvée sans la marquer faite. Les données restent sur cet appareil (pas de partage entre colocataires).</p>}
+        <p className="mt-2 text-xs text-muted">La rotation avance automatiquement : chaque jour pour les tâches quotidiennes, chaque semaine (ou toutes les deux semaines) pour les autres. Les cases « Moi » non faites sont injectées dans le planning du jour. ↷ reporte une corvée sans la marquer faite. Glissez ⠿ (ou appui long sur la case) vers un autre jour pour la déplacer. Les données restent sur cet appareil (pas de partage entre colocataires).</p>}
       </Card>
       <div className={cx("grid grid-cols-1 gap-4 md:grid-cols-2", !solo && "xl:grid-cols-3")}>
         {!solo && <Card title={<span className="flex items-center gap-2"><Users size={15} />Répartition de la semaine</span>} action={<span className="text-[11px] text-muted">temps prévu</span>}>
