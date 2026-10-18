@@ -12,7 +12,7 @@ export const NO_DEADLINE = "9999-12-31";
 export type Priority = 1 | 2 | 3;
 export type Recurrence = "daily" | "weekly" | "biweekly" | "once";
 export type Aisle = "Frais" | "Fruits & légumes" | "Épicerie" | "Boissons" | "Surgelés" | "Hygiène" | "Entretien";
-export type ViewKey = "dashboard" | "planning" | "academic" | "focus" | "groceries" | "budget" | "chores" | "todos" | "routines" | "sleep" | "settings";
+export type ViewKey = "dashboard" | "planning" | "academic" | "focus" | "groceries" | "budget" | "chores" | "flat" | "todos" | "routines" | "sleep" | "settings";
 /** Catégories intégrées ; l'utilisateur peut en ajouter (settings.customCats). */
 export type ExpenseCat = "Courses" | "Logement" | "Transport" | "Études" | "Restauration" | "Loisirs" | "Santé" | "Autre" | (string & {});
 

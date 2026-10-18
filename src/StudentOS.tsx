@@ -10,6 +10,7 @@ import type { Action, Aisle, PlanEvent, Chore, Habit, HabitCat, Todo, TodoKind, 
 import type { AppEnv } from "./env.ts";
 import { LangSwitch } from "./i18n.tsx";
 import { OcrError, scanReceipt } from "./ocr.ts";
+import { FlatView } from "./flatView.tsx";
 import type { OcrOutput, OcrProgress } from "./ocr.ts";
 
 /* ============================================================================
@@ -197,7 +198,7 @@ export const X = sketch("X", [{ d: "M5.6 5.4c4.4 4.2 8.6 8.6 12.8 13.1M18.3 5.6c
 export const Check = sketch("Check", [{ d: "M4.2 12.8c1.6 1.4 3.2 3 4.6 4.6 3.3-4.1 6.8-7.9 10.8-11.3" }]);
 export const ChevronLeft = sketch("ChevronLeft", [{ d: "M14.8 5.2c-2.3 2.2-4.6 4.5-6.6 6.9 2.1 2.3 4.3 4.5 6.7 6.6" }]);
 export const ChevronRight = sketch("ChevronRight", [{ d: "M9.2 5.3c2.4 2.1 4.6 4.3 6.6 6.7-2 2.4-4.2 4.6-6.6 6.7" }]);
-const Trash2 = sketch("Trash2", [
+export const Trash2 = sketch("Trash2", [
   { d: "M3.6 6.3c5.6-.3 11.2-.3 16.8 0M9.1 6.1c0-1.1.1-2.1.3-3.1 1.7-.2 3.5-.2 5.2 0 .2 1 .3 2 .3 3.1" },
   { d: "M5.6 6.4c.3 4.3.6 8.6 1.1 12.9.1.9.8 1.5 1.7 1.5h7.2c.9 0 1.6-.6 1.7-1.5.5-4.3.8-8.6 1.1-12.9", f: true },
   { d: "M10.1 10.6c.1 2.4.2 4.8.4 7.1M13.9 10.6c-.1 2.4-.2 4.8-.4 7.1" },
@@ -302,7 +303,7 @@ interface Ctx {
   env: AppEnv;
 }
 const StoreCtx = createContext<Ctx | null>(null);
-const useStore = () => { const c = useContext(StoreCtx); if (!c) throw new Error("StoreCtx manquant"); return c; };
+export const useStore = () => { const c = useContext(StoreCtx); if (!c) throw new Error("StoreCtx manquant"); return c; };
 
 export const Card: React.FC<{ title?: React.ReactNode; action?: React.ReactNode; className?: string; children: React.ReactNode }> = ({ title, action, className, children }) => (
   <section className={cx("inked min-w-0 rounded-[20px] bg-panel", className)}>
@@ -2232,7 +2233,7 @@ const GUESS: [RegExp, Aisle][] = [
   [/savon|shampo|dentifrice|déo|gel douche|coton|rasoir|papier toilette/i, "Hygiène"],
   [/lessive|éponge|vaisselle|javel|sac poubelle|sacs poubelle|nettoy|essuie/i, "Entretien"],
 ];
-const guessAisle = (name: string): Aisle => GUESS.find(([re]) => re.test(name))?.[1] ?? "Épicerie";
+export const guessAisle = (name: string): Aisle => GUESS.find(([re]) => re.test(name))?.[1] ?? "Épicerie";
 
 // Base de produits courante (prix moyens indicatifs en France) : complétée par vos propres achats.
 const CATALOG: TemplateItem[] = ([
@@ -3714,6 +3715,7 @@ const NAV: { key: ViewKey; label: string; icon: React.FC<{ size?: number }>; sho
   { key: "groceries", label: "Courses", icon: ShoppingCart, short: "5" },
   { key: "budget", label: "Budget", icon: Wallet, short: "6" },
   { key: "chores", label: "Ménage", icon: Home, short: "7" },
+  { key: "flat", label: "Colocation", icon: Users, short: "" },
   { key: "todos", label: "Tâches perso", icon: ListChecks, short: "" },
   { key: "routines", label: "Routines", icon: Sparkles, short: "0" },
   { key: "sleep", label: "Sommeil", icon: Moon, short: "8" },
@@ -3949,6 +3951,7 @@ export default function StudentOS({ state, dispatch, env, view, onView, notice, 
             {view === "groceries" && <Groceries />}
             {view === "budget" && <BudgetView />}
             {view === "chores" && <Chores />}
+            {view === "flat" && <FlatView />}
             {view === "routines" && <Routines />}
             {view === "todos" && <Perso />}
             {view === "sleep" && <Sleep />}
