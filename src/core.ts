@@ -843,7 +843,13 @@ export function planDay(state: AppState, date: string, remaining?: Map<ID, numbe
   // Tâches à créneau précis : bloc fixe le jour choisi.
   for (const t of tasks) if (t.slot && t.status !== "done" && t.slot.date === date && toMin(t.slot.end) > toMin(t.slot.start))
     fixed.push({ start: toMin(t.slot.start), end: toMin(t.slot.end), kind: "task", label: t.kind === "examen" ? `Révision · ${t.title}` : t.title, color: courses.find((c) => c.id === t.courseId)?.color, refId: t.id });
-  for (const c of timedChores) { const t = toMin(slotOf(c)!); fixed.push({ start: t, end: t + c.minutes, kind: "chore", label: c.name, refId: c.id }); }
+  // Heure choisie par l'utilisateur : jamais déplacée. Heure figée automatiquement : décalée si elle chevauche un autre bloc.
+  const byTime = [...timedChores].sort((a, b) => Number(!!b.time) - Number(!!a.time) || toMin(slotOf(a)!) - toMin(slotOf(b)!));
+  for (const c of byTime) {
+    let t = toMin(slotOf(c)!);
+    if (!c.time) t = freeStart(t, c.minutes, fixed.filter((b) => b.kind !== "meal" && b.kind !== "sleep"));
+    fixed.push({ start: t, end: t + c.minutes, kind: "chore", label: c.name, refId: c.id });
+  }
   // Chevauchements entre cours et indisponibilités (jamais déplacés automatiquement : seulement signalés).
   const hard = fixed.filter((b) => isHard(b.kind)).sort((x, y) => x.start - y.start);
   const conflicts: Conflict[] = [];
@@ -1111,4 +1117,16 @@ export function globalStreak(days: Set<string>, today: string): { current: numbe
   const sorted = [...days].sort(); let best = 0, run = 0, prev = "";
   for (const d of sorted) { run = prev && daysBetween(prev, d) === 1 ? run + 1 : 1; best = Math.max(best, run); prev = d; }
   return { current, best: Math.max(best, current), todayDone };
+}
+
+/** Premier début possible ≥ `start` (sinon le plus proche avant) pour un bloc de `len` min sans chevaucher `others` ; 5 min de marge ignorées. */
+export function freeStart(start: number, len: number, others: { start: number; end: number }[], limit = 24 * 60): number {
+  const list = [...others].sort((a, b) => a.start - b.start);
+  let t = Math.max(0, start), moved = true, guard = 0;
+  while (moved && guard++ < 50) { moved = false; for (const o of list) if (t < o.end && t + len > o.start) { t = o.end; moved = true; } }
+  if (t + len <= limit) return t;
+  // Pas de place après : on cherche avant.
+  t = Math.min(start, limit - len); moved = true; guard = 0;
+  while (moved && guard++ < 50) { moved = false; for (const o of [...list].reverse()) if (t < o.end && t + len > o.start) { t = o.start - len; moved = true; } }
+  return Math.max(0, t);
 }

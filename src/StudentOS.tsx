@@ -4,7 +4,7 @@ import { MiniPdf } from "./pdf.ts";
 import { layoutLanes } from "./core.ts";
 import { DAY_WORDS, dayOf, pageGeometry, parseGrid } from "./timetable.ts";
 import { parseIcs, normalizeFeedUrl, isFeedUrl } from "./ical.ts";
-import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, choreStepsDone, choreDoneLate, choreSlotEnd, nowMinutes, NO_DEADLINE, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, onTimeGuess, onTimeStats, taskOnTimeStats, choreOnTimeStats, HABIT_CATS, habitOn, habitStats, habitStepsDone, habitStreak, todoOnTimeStats, TODO_KINDS, activeDays, xpOf, levelOf, globalStreak, LEVELS, pad, parseAmount, parseISO, parseReceipt, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
+import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, choreStepsDone, choreDoneLate, choreSlotEnd, freeStart, nowMinutes, NO_DEADLINE, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, onTimeGuess, onTimeStats, taskOnTimeStats, choreOnTimeStats, HABIT_CATS, habitOn, habitStats, habitStepsDone, habitStreak, todoOnTimeStats, TODO_KINDS, activeDays, xpOf, levelOf, globalStreak, LEVELS, pad, parseAmount, parseISO, parseReceipt, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
 import type { Action, Aisle, PlanEvent, Chore, Habit, HabitCat, Todo, TodoKind, AppState, Block, Budget, Course, DayPlan, Expense, ExpenseCat, GroceryTemplate, ID, Phase, PomodoroCfg, Priority, ReceiptResult, Recurrence, EventRecurrence, CalFeed, FeedEvent, SettingsState, SleepLog, Step, Task, TaskKind, TaskStatus, TemplateItem, ViewKey } from "./core.ts";
 import type { AppEnv } from "./env.ts";
 import { LangSwitch } from "./i18n.tsx";
@@ -1606,7 +1606,10 @@ const Planning: React.FC = () => {
     onDrop: (_dx, dy) => {
       const i = dragRef.current; setDragI(null); dragRef.current = null; if (i === null) return;
       const b = plan.blocks[i]; const delta = snap(dy); if (!delta) return;
-      const start = Math.max(0, Math.min(23 * 60 + 55 - (b.end - b.start), b.start + delta)), t = toHHMM(start), len = b.end - b.start;
+      const len = b.end - b.start, wanted = Math.max(0, Math.min(23 * 60 + 55 - len, b.start + delta));
+      // Chorés et tâches : jamais par-dessus un autre bloc (on glisse au plus proche créneau libre). Les événements restent libres.
+      const start = b.kind === "event" ? wanted : freeStart(wanted, len, plan.blocks.filter((x, j) => j !== i && x.kind !== "meal" && x.kind !== "sleep")), t = toHHMM(start);
+      if (start !== wanted) toast("Créneau occupé : placé juste à côté.", "info");
       if (b.kind === "chore" && b.refId) { const c = state.chores.find((x) => x.id === b.refId); if (c) moveChoreTo(dispatch, c, date, date, t); }
       else if (b.kind === "task" && b.refId) { const tk = state.tasks.find((x) => x.id === b.refId); if (tk) { const l = tk.slot ? toMin(tk.slot.end) - toMin(tk.slot.start) : Math.max(len, 15); dispatch({ type: "task/update", id: tk.id, patch: { slot: { date, start: t, end: toHHMM(Math.min(23 * 60 + 59, start + l)) }, doDates: undefined, noPlan: undefined } }); } }
       else if (b.kind === "event" && b.refId) { const ev = state.events.find((x) => x.id === b.refId); if (ev) { const e = toHHMM(start + len);

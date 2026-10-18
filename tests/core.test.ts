@@ -478,3 +478,14 @@ test("routines : tous les N jours et chaque mois", () => {
   const m: C.Habit = { ...h, every: undefined, monthDay: 31 };
   assert.deepEqual(["2026-10-31", "2026-11-30", "2026-11-29"].map((d) => C.habitOn(m, d)), [true, true, false]); // 31 → dernier jour des mois courts
 });
+
+test("freeStart : pas de chevauchement, décalage avant/après", () => {
+  const o = [{ start: 600, end: 660 }, { start: 660, end: 700 }];
+  assert.equal(C.freeStart(610, 30, o), 700);            // pousse après les deux blocs
+  assert.equal(C.freeStart(540, 30, o), 540);            // déjà libre
+  assert.equal(C.freeStart(1430, 30, [{ start: 1400, end: 1440 }]), 1370); // plus de place après : avant
+  const c1: C.Chore = { id: "a", name: "A", recurrence: "daily", day: 0, minutes: 30, assignees: ["Moi"], done: [], time: "14:00" };
+  const c2: C.Chore = { id: "b", name: "B", recurrence: "daily", day: 0, minutes: 30, assignees: ["Moi"], done: [], pinned: { [C.todayISO()]: "14:10" } };
+  const bl = C.planFor({ ...base(), chores: [c1, c2] }, C.todayISO(), C.todayISO()).blocks.filter((b) => b.kind === "chore").sort((x, y) => x.start - y.start);
+  assert.ok(bl[0].end <= bl[1].start, "corvées sans chevauchement");
+});
