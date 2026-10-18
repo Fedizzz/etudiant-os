@@ -969,8 +969,8 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
         <Card title={<span className="flex items-center gap-2"><ListChecks size={15} />Tâches à l'heure ?</span>} action={<Btn size="sm" variant="ghost" onClick={() => go("academic")}>Tâches</Btn>}>
           <div className="flex flex-col gap-3" data-testid="task-ontime">
             <CounterRow label="Tâches" target="avant l'échéance" a={tt.all} m={tt.d30} />
-            {state.chores.length > 0 && <CounterRow label="Ménage" target="le jour prévu" a={tt.call} m={tt.c30} lateWord="oubliées" />}
-            {(state.todos ?? []).some((t) => t.due) && <CounterRow label="Tâches perso" target="le jour prévu" a={todoOnTimeStats(state.todos ?? [], today)} m={todoOnTimeStats(state.todos ?? [], today, 30)} />}
+            {state.chores.length > 0 && <CounterRow label="Ménage" target={((state.settings.onTimeMode ?? "time") === "time") ? "à l'heure prévue" : "le jour prévu"} a={tt.call} m={tt.c30} lateWord="oubliées" />}
+            {(state.todos ?? []).some((t) => t.due) && <CounterRow label="Tâches perso" target={((state.settings.onTimeMode ?? "time") === "time") ? "à l'heure prévue" : "le jour prévu"} a={todoOnTimeStats(state.todos ?? [], today)} m={todoOnTimeStats(state.todos ?? [], today, 30)} />}
             {(state.habits ?? []).length > 0 && <CounterRow label="Routines" target="le jour prévu" a={ht.all} m={ht.d30} lateWord="oubliées" />}
             <p className="text-[11px] text-muted">✓ terminée au plus tard le jour de l'échéance · ✗ terminée après, ou encore ouverte et en retard. Ménage : vos corvées faites le jour prévu ; les reportées ne comptent pas.</p>
           </div>
@@ -2724,14 +2724,14 @@ const Chores: React.FC = () => {
         </Card>}
         <Card title={<span className="flex items-center gap-2"><Check size={15} />À l'heure ?</span>}>
           <div className="flex flex-col gap-3" data-testid="chore-ontime">
-            <CounterRow label={solo ? "Mes corvées" : "Mes corvées (Moi)"} target="faites le jour prévu" a={onTime.all} m={onTime.d30} lateWord="en retard ou oubliées" />
+            <CounterRow label={solo ? "Mes corvées" : "Mes corvées (Moi)"} target={((state.settings.onTimeMode ?? "time") === "time") ? "faites à l'heure prévue" : "faites le jour prévu"} a={onTime.all} m={onTime.d30} lateWord="en retard ou oubliées" />
             <p className="text-[12px]">Cette semaine (7 j) : <b className="text-ok">{onTime.d7.ok} à l'heure</b> · <b className="text-bad">{onTime.d7.late} en retard</b></p>
             <ul className="flex flex-col gap-1 text-[11px] text-muted">
-              <li><span className="mr-1 inline-block h-2.5 w-2.5 rounded-sm border border-ok/40 bg-ok/12 align-middle" />Faite le jour prévu</li>
-              <li><span className="mr-1 inline-block h-2.5 w-2.5 rounded-sm border border-warn/50 bg-warn/12 align-middle" />Faite, mais cochée après le jour prévu</li>
-              <li><span className="mr-1 inline-block h-2.5 w-2.5 rounded-sm border border-bad/30 bg-bad/6 align-middle" />Jour passé, pas faite</li>
+              <li><span className="mr-1 inline-block h-2.5 w-2.5 rounded-sm border border-ok/40 bg-ok/12 align-middle" />{((state.settings.onTimeMode ?? "time") === "time") ? "Faite à l'heure prévue" : "Faite le jour prévu"}</li>
+              <li><span className="mr-1 inline-block h-2.5 w-2.5 rounded-sm border border-warn/50 bg-warn/12 align-middle" />{((state.settings.onTimeMode ?? "time") === "time") ? "Faite, mais cochée après l'heure prévue" : "Faite, mais cochée après le jour prévu"}</li>
+              <li><span className="mr-1 inline-block h-2.5 w-2.5 rounded-sm border border-bad/30 bg-bad/6 align-middle" />{((state.settings.onTimeMode ?? "time") === "time") ? "Heure passée, pas faite" : "Jour passé, pas faite"}</li>
             </ul>
-            <p className="text-[11px] text-muted">Une corvée avec un créneau compte « en retard » dès que son heure de fin est passée sans être cochée. Comptées à partir de la première corvée cochée ou reportée ; les reportées (↷) ne comptent pas.</p>
+            <p className="text-[11px] text-muted">{((state.settings.onTimeMode ?? "time") === "time") ? "Une corvée avec un créneau compte « en retard » dès que son heure de fin est passée sans être cochée. Comptées à partir de la première corvée cochée ou reportée ; les reportées (↷) ne comptent pas." : "Une corvée compte « en retard » si elle n'est pas cochée le jour prévu (jugée le lendemain). Comptées à partir de la première corvée cochée ou reportée ; les reportées (↷) ne comptent pas."} (Réglable dans Réglages.)</p>
           </div>
         </Card>
         <Card title="Historique · 4 semaines">
@@ -3042,7 +3042,7 @@ const Perso: React.FC = () => {
       </Card>
       <Card title="Bilan">
         <div className="flex flex-col gap-3">
-          <CounterRow label="Tâches perso" target="faites le jour prévu" a={all} m={d30} />
+          <CounterRow label="Tâches perso" target={((state.settings.onTimeMode ?? "time") === "time") ? "faites à l'heure prévue" : "faites le jour prévu"} a={all} m={d30} />
           <ul className="flex flex-col gap-1.5 text-[13px]">{TODO_KINDS.map((k) => { const n = todos.filter((t) => !t.done && t.kind === k.k).length; return n ? <li key={k.k} className="flex items-center gap-2"><span aria-hidden>{k.emoji}</span><span className="flex-1">{k.label}</span><span className="font-mono text-[12px] tabular-nums text-muted">{n}</span></li> : null; })}</ul>
           <p className="text-[11px] text-muted">Touchez une tâche pour la modifier (priorité, type, horaire, checklist). Les tâches avec un horaire précis apparaissent dans le planning.</p>
         </div>
