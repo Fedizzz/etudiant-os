@@ -5,7 +5,7 @@ import { MiniPdf } from "./pdf.ts";
 import { layoutLanes } from "./core.ts";
 import { DAY_WORDS, dayOf, pageGeometry, parseGrid } from "./timetable.ts";
 import { parseIcs, normalizeFeedUrl, isFeedUrl } from "./ical.ts";
-import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, choreStepsDone, choreDoneLate, choreSlotEnd, freeStart, setOnTimeMode, todoDoneLate, taskDoneLate, habitDoneLate, habitTimePassed, nowMinutes, NO_DEADLINE, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, onTimeGuess, onTimeStats, taskOnTimeStats, choreOnTimeStats, HABIT_CATS, habitOn, habitStats, habitStepsDone, habitStreak, todoOnTimeStats, TODO_KINDS, activeDays, xpOf, levelOf, globalStreak, LEVELS, pad, pantryItems, parseAmount, parseISO, parseReceipt, parseReceiptItems, receiptFingerprint, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
+import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, choreStepsDone, choreDoneLate, choreSlotEnd, freeStart, setOnTimeMode, todoDoneLate, taskDoneLate, habitDoneLate, habitTimePassed, nowMinutes, NO_DEADLINE, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, onTimeGuess, onTimeStats, taskOnTimeStats, choreOnTimeStats, HABIT_CATS, habitOn, habitStats, habitStepsDone, habitStreak, todoOnTimeStats, TODO_KINDS, activeDays, xpOf, levelOf, globalStreak, LEVELS, applyReceiptToGroceries, pad, pantryItems, parseAmount, parseISO, parseReceipt, parseReceiptItems, receiptFingerprint, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
 import type { Action, Aisle, PlanEvent, Chore, Habit, HabitCat, Todo, TodoKind, AppState, Block, Budget, Course, DayPlan, Expense, ExpenseCat, GroceryTemplate, ID, Phase, PomodoroCfg, Priority, ReceiptItem, ReceiptResult, Recurrence, EventRecurrence, CalFeed, FeedEvent, SettingsState, SleepLog, Step, Task, TaskKind, TaskStatus, TemplateItem, ViewKey } from "./core.ts";
 import type { AppEnv } from "./env.ts";
 import { LangSwitch } from "./i18n.tsx";
@@ -2314,10 +2314,12 @@ const Groceries: React.FC = () => {
   /** Ticket relu et confirmé : coche/ajoute les articles (sans doublon), pré-remplit le montant payé. Rien n'est enregistré avant « Valider les achats ». */
   const onTicket = (c: ReceiptConfirm) => {
     const lines = c.items.filter((i) => i.kind === "item" && i.name && i.price >= 0).map((i) => ({ name: i.name, price: i.price, qty: i.qty, aisle: guessAisle(i.name) }));
+    const r = applyReceiptToGroceries(state.groceries, lines, uid);
     if (lines.length) dispatch({ type: "grocery/fromReceipt", lines });
     if (c.amount) setPaid(c.amount.toFixed(2).replace(".", ","));
     setTicketFp(c.allowDuplicate ? "" : c.fingerprint);
-    toast(lines.length ? `Ticket lu : ${lines.length} ligne(s) cochée(s) ou ajoutée(s). Vérifiez le montant puis validez les achats.` : "Montant du ticket repris. La liste n'a pas été modifiée.", "ok");
+    const left = r.groceries.filter((g) => !g.checked).length;
+    toast(lines.length ? `Ticket lu : ${r.matched} article(s) de la liste cochés, ${r.added} ajouté(s), ${left} pas sur le ticket. Vérifiez puis validez les achats.` : "Montant du ticket repris. La liste n'a pas été modifiée.", "ok");
   };
   const checkout = () => {
     const amount = paid.trim() ? parseAmount(paid) : cartTotal;
@@ -2366,9 +2368,9 @@ const Groceries: React.FC = () => {
           <div className="mt-4 flex flex-wrap items-end gap-3 border-t border-line pt-4">
             <div className="mr-auto"><p className="text-[11px] uppercase tracking-wider text-muted">Panier coché · liste estimée</p>
               <p className="font-mono text-lg font-semibold tabular-nums">{money(cartTotal, cur)} <span className="text-sm font-normal text-muted">/ {money(estTotal, cur)}</span></p></div>
+            <ReceiptScanner label="Scanner le ticket de caisse" withItems known={knownTickets} onConfirm={onTicket} />
             {state.groceries.some((g) => g.checked) && <>
               <Field label="Montant payé" htmlFor="gr-paid"><Input id="gr-paid" inputMode="decimal" className="w-28" placeholder={cartTotal ? cartTotal.toFixed(2).replace(".", ",") : "0,00"} value={paid} onChange={(e) => setPaid(e.target.value)} /></Field>
-              <ReceiptScanner label="Scanner le ticket" withItems known={knownTickets} onConfirm={onTicket} />
               <Btn variant="primary" onClick={checkout}><Receipt size={14} />Valider les achats</Btn>
               <Btn variant="ghost" onClick={() => undoable({ type: "grocery/clearChecked" }, "Articles cochés retirés sans dépense")}><Trash2 size={13} />Retirer sans dépense</Btn></>}
           </div>)}

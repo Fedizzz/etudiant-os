@@ -79,6 +79,22 @@ try {
   await p.locator("button", { hasText: "Annuler" }).last().click(); await sleep(200);
   ok(p.errs.length === 0, "aucune erreur JavaScript : " + p.errs.join(" | "));
 
+  // liste préparée AVANT les courses, rien de coché : le ticket coche ce qui a été acheté
+  console.log("Courses : liste préparée, ticket scanné après les achats");
+  await p.fill("#gr-name", "Lait demi-écrémé"); await p.keyboard.press("Enter"); await sleep(150);
+  await p.fill("#gr-name", "Dentifrice"); await p.keyboard.press("Enter"); await sleep(150);
+  for (const b of await p.locator("button[aria-label=Décocher]").all()) await b.click();
+  await sleep(150);
+  ok(await p.locator("button[aria-label=Décocher]").count() === 0 && await p.locator("[data-testid=receipt-file]").count() > 0, "le scanner est disponible même sans article coché");
+  await scan(p, "carrefour_clean.jpg"); await waitReview(p);
+  await p.fill("#rv-amount", "6,91"); // total différent : pas de doublon avec le ticket déjà enregistré
+  await p.locator("[data-testid=receipt-confirm]").click(); await sleep(500);
+  s = await state(p);
+  const byName = (n) => s.groceries.find((g) => g.name.toLowerCase().startsWith(n));
+  ok(byName("lait")?.checked === true && s.groceries.filter((g) => /^lait/i.test(g.name)).length === 1, "« Lait » de la liste coché par le ticket, sans doublon");
+  ok(byName("dentifrice")?.checked === false, "« Dentifrice » (absent du ticket) reste à acheter");
+  ok(await p.locator("button:has-text('Valider les achats')").count() === 1, "« Valider les achats » proposé ensuite");
+
   // ------------------------------------------------------------ Budget
   console.log("Budget : nouvelle dépense depuis un ticket");
   await p.click("nav >> text=Budget"); await sleep(500);
