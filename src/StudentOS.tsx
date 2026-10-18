@@ -718,26 +718,6 @@ const UpcomingCard: React.FC<{ days: DayPlan[]; kind: "class" | "event"; go: (v:
     </Card>
   );
 };
-/** Horloge style cartoon (en-tête) : petit cadran qui tourne + chiffres épais. */
-const CartoonClock: React.FC = () => {
-  const [now, setNow] = useState(() => new Date());
-  useEffect(() => { const id = window.setInterval(() => setNow(new Date()), 10_000); return () => window.clearInterval(id); }, []);
-  const h = now.getHours(), m = now.getMinutes();
-  const ha = ((h % 12) + m / 60) * 30, ma = m * 6;
-  return (
-    <div className="flex shrink-0 items-center gap-1.5 rounded-2xl border-2 border-fg bg-hi px-2 py-1 text-[rgb(24_22_46)] shadow-[2px_2px_0_0_rgb(var(--ink))] -rotate-2" aria-label={`Il est ${pad(h)} h ${pad(m)}`} data-testid="cartoon-clock">
-      <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden className="shrink-0">
-        <circle cx="12" cy="12" r="10" fill="#fff" stroke="rgb(24 22 46)" strokeWidth="2.2" />
-        {[0, 90, 180, 270].map((a) => <line key={a} x1="12" y1="3.6" x2="12" y2="5.4" stroke="rgb(24 22 46)" strokeWidth="1.8" strokeLinecap="round" transform={`rotate(${a} 12 12)`} />)}
-        <line x1="12" y1="12" x2="12" y2="7.4" stroke="rgb(24 22 46)" strokeWidth="2.4" strokeLinecap="round" transform={`rotate(${ha} 12 12)`} />
-        <line x1="12" y1="12" x2="12" y2="5" stroke="#e0453a" strokeWidth="1.8" strokeLinecap="round" transform={`rotate(${ma} 12 12)`} />
-        <circle cx="12" cy="12" r="1.6" fill="rgb(24 22 46)" />
-      </svg>
-      <span className="font-display text-[17px] font-extrabold leading-none tabular-nums tracking-tight">{pad(h)}<span className="colon-blink">:</span>{pad(m)}</span>
-    </div>
-  );
-};
-
 /** Carte « Série » façon appli de streak : flamme animée, semaine, niveau et points. */
 const StreakHero: React.FC = () => {
   const { state, toast } = useStore();
@@ -3768,7 +3748,7 @@ export default function StudentOS({ state, dispatch, env, view, onView, notice, 
               {headerExtra}
               <span className="hidden lg:inline-flex"><Pill tone={levelTone(plan.level)}>Journée {plan.level}</Pill></span>
               <Btn variant="ghost" size="sm" className="hidden lg:inline-flex" onClick={() => setHelp(true)} aria-label="Raccourcis"><Keyboard size={15} /></Btn>
-              <span className="mr-auto flex items-center gap-1.5 sm:mr-0"><CartoonClock /><StreakChip /></span>
+              <span className="mr-auto flex items-center gap-1.5 sm:mr-0"><StreakChip /></span>
               <LangSwitch className="px-1.5 sm:px-2" />
               <Btn variant="ghost" size="sm" onClick={toggleTheme} aria-label="Changer de thème" className="hidden sm:inline-flex">{isDark ? <Sun size={15} /> : <Moon size={15} />}</Btn>
               <Btn variant="primary" size="sm" onClick={() => setNewTask(true)} aria-label="Nouvelle tâche"><Plus size={14} /><span className="hidden sm:inline">Tâche</span></Btn>
