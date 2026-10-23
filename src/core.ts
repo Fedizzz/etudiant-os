@@ -33,12 +33,24 @@ export interface Task {
   noPlan?: boolean;
   /** Checklist (sous-étapes cochables). */
   steps?: Step[];
+  /** Heure précise de l'échéance (« HH:MM ») : matin, midi, soir ou personnalisée. Absent = toute la journée. */
+  dueTime?: string;
+  /** Ne pas afficher l'heure de fin du créneau (seul le début est montré). */
+  hideEnd?: boolean;
+  /** Historique des reports d'échéance : les retards passés ne sont jamais effacés. */
+  postponed?: Postponement[];
+  /** Plan de révision détaillé (examen) : séances datées avec thème et durée. */
+  revision?: RevisionSession[];
 }
+export interface Postponement { from: string; to: string; at: string }
+export interface RevisionSession { id: ID; date: string; topic: string; minutes: number; done?: boolean }
+export interface Recipe { id: ID; name: string; servings?: number; ingredients: string[]; steps: string[] }
 /** Étape d'une checklist. Pour une corvée, `done` n'est pas utilisé : l'avancement est noté par date dans `stepsDone`. */
 export interface Step { id: ID; text: string; done?: boolean }
 export interface GroceryItem { id: ID; name: string; aisle: Aisle; qty: string; checked: boolean; price: number }
+/** received === false : achat commandé / en livraison, pas encore reçu (donc pas encore « à la maison »). */
 /** source et recurringId permettent de savoir d'où vient une dépense et d'éviter les doublons. */
-export interface Expense { id: ID; date: string; amount: number; category: ExpenseCat; label: string; source?: "manuel" | "courses" | "recurrente" | "ticket" | "colocation"; recurringId?: ID; /** Ma part d'une dépense de la colocation, ajoutée à l'affichage seulement (jamais enregistrée dans l'état personnel). */ shared?: boolean; items?: string[]; /** Empreinte « date|centimes » d'un ticket lu par le scanner (détecte un ticket déjà enregistré). */ ticket?: string }
+export interface Expense { id: ID; received?: boolean; date: string; amount: number; category: ExpenseCat; label: string; source?: "manuel" | "courses" | "recurrente" | "ticket" | "colocation"; recurringId?: ID; /** Ma part d'une dépense de la colocation, ajoutée à l'affichage seulement (jamais enregistrée dans l'état personnel). */ shared?: boolean; items?: string[]; /** Empreinte « date|centimes » d'un ticket lu par le scanner (détecte un ticket déjà enregistré). */ ticket?: string }
 /** Dépense récurrente mensuelle (loyer, abonnement…) : ajoutée une seule fois par mois, au jour indiqué. */
 export interface RecurringExpense { id: ID; label: string; amount: number; category: ExpenseCat; day: number; active: boolean; since: string; skipMonths?: string[] }
 /** Argent reçu (paye, bourse, famille, ami…). */
@@ -48,7 +60,10 @@ export interface SavingMove { id: ID; date: string; amount: number; label: strin
 export interface Budget {
   monthly: number; limits: Partial<Record<ExpenseCat, number>>; expenses: Expense[]; recurring: RecurringExpense[];
   incomes?: Income[]; savings?: SavingMove[]; savingsGoal?: { name: string; target: number } | null;
+  /** Argent de poche : enveloppe pour les dépenses « plaisir » (par semaine ou par mois), prise sur le budget mensuel. */
+  pocket?: PocketCfg | null;
 }
+export interface PocketCfg { amount: number; period: "week" | "month"; cats: string[] }
 /** done : dates faites · doneBy : qui l'a faite ce jour-là · skipped : dates reportées. */
 /** recurrence « once » : une seule fois, le jour `date`. */
 export interface Chore { id: ID; name: string; /** Corvée de la colocation (base de données) fusionnée dans l'affichage ; jamais enregistrée dans l'état personnel ni comptée dans vos statistiques. */ shared?: boolean; recurrence: Recurrence; date?: string; day: number; minutes: number; assignees: string[]; done: string[]; doneBy?: Record<string, string>; skipped?: string[]; /** Heure fixe « HH:MM » (sinon placée automatiquement dans un créneau libre). */ time?: string; /** Checklist, et étapes cochées par date. */ steps?: Step[]; stepsDone?: Record<string, ID[]>; /** Jour où chaque occurrence a été cochée. */ doneOn?: Record<string, string>; /** Heure fixée par le planning pour une date (le bloc ne bouge plus ensuite). */ pinned?: Record<string, string>; /** Heure où chaque occurrence a été cochée. */ doneTime?: Record<string, string> }
@@ -58,14 +73,14 @@ export interface CalFeed { id: ID; name: string; url: string; color: string; las
 export interface FeedEvent { feedId: ID; uid: string; title: string; room: string; date: string; start: string; end: string; allDay: boolean }
 export type EventRecurrence = "none" | "daily" | "weekly" | "biweekly" | "monthly";
 /** Événement personnel du planning (rendez-vous, sport, job…) à heure précise, ponctuel ou récurrent. */
-export interface PlanEvent { id: ID; title: string; date: string; start: string; end: string; recurrence: EventRecurrence; until: string | null; color?: string; skipped?: string[] }
+export interface PlanEvent { id: ID; title: string; date: string; start: string; end: string; recurrence: EventRecurrence; until: string | null; color?: string; skipped?: string[]; /** Lieu, note, checklist et rappel (minutes avant le début) de l'événement. */ place?: string; note?: string; steps?: Step[]; remind?: number }
 /** bedOk / wakeOk : couché / levé à l'heure prévue (coché par l'utilisateur ; absent = non renseigné). */
 export type HabitCat = "soin" | "santé" | "sport" | "bien-être" | "maison" | "autre";
 /** Routine quotidienne : days = jours de la semaine (0 = lundi) ; done = dates faites ; stepsDone = étapes cochées par date. */
-export interface Habit { id: ID; name: string; emoji: string; cat: HabitCat; time?: string; days: number[]; done: string[]; steps?: Step[]; stepsDone?: Record<string, ID[]>; note?: string; since: string; /** Jour et heure où chaque occurrence a été cochée. */ doneOn?: Record<string, string>; doneTime?: Record<string, string>; /** Tous les N jours (depuis « since »). */ every?: number; /** Chaque mois, ce jour-là (1-31). */ monthDay?: number }
+export interface Habit { id: ID; name: string; emoji: string; cat: HabitCat; time?: string; days: number[]; done: string[]; steps?: Step[]; stepsDone?: Record<string, ID[]>; note?: string; /** Afficher dans le calendrier (créneau à l'heure de la routine, ou dans un créneau libre sans heure). */ inCalendar?: boolean; /** Durée (min) du créneau calendrier. */ duration?: number; since: string; /** Jour et heure où chaque occurrence a été cochée. */ doneOn?: Record<string, string>; doneTime?: Record<string, string>; /** Tous les N jours (depuis « since »). */ every?: number; /** Chaque mois, ce jour-là (1-31). */ monthDay?: number }
 export type TodoKind = "admin" | "rdv" | "appel" | "achat" | "santé" | "perso" | "autre";
 /** Tâche perso ponctuelle : due = jour prévu ; start/end = horaire précis (« HH:MM ») ; priority 1 basse → 3 haute. */
-export interface Todo { id: ID; text: string; done: boolean; due?: string; start?: string; end?: string; priority?: Priority; kind?: TodoKind; note?: string; steps?: Step[]; doneAt?: string; doneTime?: string; createdAt: string }
+export interface Todo { id: ID; text: string; done: boolean; due?: string; /** Heure limite du jour (« HH:MM »), sans horaire de travail. */ dueTime?: string; hideEnd?: boolean; postponed?: Postponement[]; /** Rappel : minutes avant `start` (ou `dueTime`). */ remind?: number; start?: string; end?: string; priority?: Priority; kind?: TodoKind; note?: string; steps?: Step[]; doneAt?: string; doneTime?: string; createdAt: string }
 export interface SleepLog { date: string; bed: string; wake: string; quality: 1 | 2 | 3 | 4 | 5; bedOk?: boolean; wakeOk?: boolean }
 /** id = identifiant de session : un même id n'est jamais enregistré deux fois. */
 export interface FocusEntry { id?: ID; date: string; minutes: number; taskId: ID | null; courseId?: ID | null; interrupted?: boolean }
@@ -76,7 +91,7 @@ export interface Unavailability { id: ID; day: number; start: string; end: strin
 export interface PomodoroCfg { work: number; short: number; long: number; longEvery: number }
 export interface SettingsState {
   name: string; sleepGoal: number; wakeDefault: string; bedDefault: string; prepMinutes: number;
-  fallAsleep: number; maxBlock: number; theme: "system" | "light" | "dark"; pomodoro: PomodoroCfg;
+  fallAsleep: number; maxBlock: number; theme: "system" | "light" | "dark" | "auto"; pomodoro: PomodoroCfg;
   onboarded: boolean; roommates: string[]; currency: string;
   accent: string; hiddenViews: ViewKey[]; quickExpenses: QuickExpense[];
   /** « À l'heure » : jugé sur l'heure du créneau (« time », défaut) ou seulement sur le jour prévu (« day »). */
@@ -91,6 +106,12 @@ export interface SettingsState {
   feeds?: CalFeed[];
   /** Couleurs choisies pour les cours d'un calendrier abonné (clé : intitulé normalisé). */
   feedColors?: Record<string, string>;
+  /** Occurrences de calendriers abonnés masquées par l'utilisateur (clé « uid|date »). */
+  hiddenFeed?: string[];
+  /** Thème automatique (theme = « auto ») : nuit de `from` à `to` (heure locale). */
+  autoDark?: { from: string; to: string };
+  /** Tutoriel de premier lancement : false = à montrer, true = terminé ou passé. */
+  tutorialDone?: boolean;
 }
 export interface QuickExpense { label: string; amount: number; category: ExpenseCat }
 export interface TemplateItem { name: string; aisle: Aisle; qty: string; price: number }
@@ -111,6 +132,8 @@ export interface AppState {
   notes?: { text: string; ink?: string };
   /** Achats (clé « idDépense|n° ») marqués comme consommés dans « À la maison ». */
   pantryUsed?: string[];
+  /** Recettes (mode cuisine). */
+  recipes?: Recipe[];
   templates: GroceryTemplate[]; products: Product[]; timer: TimerState;
 }
 
@@ -236,7 +259,7 @@ export type Action =
   | { type: "task/add"; task: Task } | { type: "task/update"; id: ID; patch: Partial<Task> } | { type: "task/remove"; id: ID }
   | { type: "course/add"; course: Course } | { type: "course/update"; id: ID; patch: Partial<Course> } | { type: "course/remove"; id: ID }
   | { type: "class/add"; session: ClassSession } | { type: "class/remove"; id: ID }
-  | { type: "grocery/add"; item: GroceryItem } | { type: "grocery/update"; id: ID; patch: Partial<GroceryItem> } | { type: "grocery/checkout"; amount: number; date: string; ticket?: string } | { type: "grocery/fromReceipt"; lines: ReceiptLine[] } | { type: "pantry/use"; key: string } | { type: "pantry/restore"; key: string } | { type: "grocery/toggle"; id: ID } | { type: "grocery/remove"; id: ID } | { type: "grocery/clearChecked" }
+  | { type: "grocery/add"; item: GroceryItem } | { type: "grocery/update"; id: ID; patch: Partial<GroceryItem> } | { type: "grocery/checkout"; amount: number; date: string; ticket?: string; pending?: boolean } | { type: "grocery/fromReceipt"; lines: ReceiptLine[] } | { type: "pantry/use"; key: string } | { type: "pantry/restore"; key: string } | { type: "grocery/toggle"; id: ID } | { type: "grocery/remove"; id: ID } | { type: "grocery/clearChecked" }
   | { type: "chore/add"; chore: Chore } | { type: "chore/toggle"; id: ID; date: string; who?: string } | { type: "chore/remove"; id: ID }
   | { type: "sleep/upsert"; log: SleepLog } | { type: "sleep/remove"; date: string }
   | { type: "focus/log"; entry: FocusEntry }
@@ -251,6 +274,9 @@ export type Action =
   | { type: "chore/skip"; id: ID; date: string }
   | { type: "chore/update"; id: ID; patch: Partial<Chore> } | { type: "chore/pin"; id: ID; date: string; time: string } | { type: "chore/step"; id: ID; date: string; stepId: ID }
   | { type: "task/step"; id: ID; stepId: ID }
+  | { type: "task/postpone"; id: ID; to: string } | { type: "todo/postpone"; id: ID; to: string }
+  | { type: "expense/received"; id: ID } | { type: "event/step"; id: ID; stepId: ID }
+  | { type: "recipe/save"; recipe: Recipe } | { type: "recipe/remove"; id: ID }
   | { type: "notes/set"; patch: { text?: string; ink?: string | undefined } }
   | { type: "todo/add"; todo: Todo } | { type: "todo/toggle"; id: ID } | { type: "todo/remove"; id: ID } | { type: "todo/update"; id: ID; patch: Partial<Todo> } | { type: "todo/clearDone" }
   | { type: "habit/add"; habit: Habit } | { type: "habit/update"; id: ID; patch: Partial<Habit> } | { type: "habit/remove"; id: ID }
@@ -294,6 +320,12 @@ export function reducer(s: AppState, a: Action): AppState {
       }),
     };
     case "task/remove": return { ...s, tasks: s.tasks.filter((t) => t.id !== a.id), timer: s.timer.taskId === a.id ? { ...s.timer, taskId: null } : s.timer };
+    case "task/postpone": return { ...s, tasks: s.tasks.map((t) => (t.id !== a.id || a.to === t.deadline ? t : { ...t, deadline: a.to, postponed: [...(t.postponed ?? []), { from: t.deadline, to: a.to, at: todayISO() }].slice(-30) })) };
+    case "todo/postpone": return { ...s, todos: (s.todos ?? []).map((t) => (t.id !== a.id || a.to === t.due ? t : { ...t, due: a.to, postponed: [...(t.postponed ?? []), { from: t.due ?? t.createdAt, to: a.to, at: todayISO() }].slice(-30) })) };
+    case "expense/received": return { ...s, budget: { ...s.budget, expenses: s.budget.expenses.map((e) => (e.id === a.id ? { ...e, received: true } : e)) } };
+    case "event/step": return { ...s, events: (s.events ?? []).map((e) => (e.id !== a.id ? e : { ...e, steps: (e.steps ?? []).map((x) => (x.id === a.stepId ? { ...x, done: !x.done } : x)) })) };
+    case "recipe/save": return { ...s, recipes: [...(s.recipes ?? []).filter((r) => r.id !== a.recipe.id), a.recipe] };
+    case "recipe/remove": return { ...s, recipes: (s.recipes ?? []).filter((r) => r.id !== a.id) };
     case "course/add": return { ...s, courses: [...s.courses, a.course] };
     case "course/update": return { ...s, courses: s.courses.map((c) => (c.id === a.id ? { ...c, ...a.patch } : c)) };
     case "course/remove": return {
@@ -316,7 +348,7 @@ export function reducer(s: AppState, a: Action): AppState {
       const n = s.groceries.filter((g) => g.checked).length;
       if (!n || !(a.amount > 0)) return s; // rien de coché ou montant invalide : aucune dépense (évite les doublons)
       const bought = s.groceries.filter((g) => g.checked);
-      const expense: Expense = { id: uid(), date: a.date, amount: Math.round(a.amount * 100) / 100, category: "Courses", label: `Courses (${n} article${n > 1 ? "s" : ""})`, source: "courses", items: bought.map((g) => g.name), ...(a.ticket ? { ticket: a.ticket } : {}) };
+      const expense: Expense = { id: uid(), date: a.date, amount: Math.round(a.amount * 100) / 100, category: "Courses", label: `Courses (${n} article${n > 1 ? "s" : ""})`, source: "courses", ...(a.pending ? { received: false } : {}), items: bought.map((g) => g.name), ...(a.ticket ? { ticket: a.ticket } : {}) };
       const products = bought.reduce((ps, g) => learnProduct(ps, { name: g.name, aisle: g.aisle, price: g.price }, true), s.products);
       return { ...s, groceries: s.groceries.filter((g) => !g.checked), budget: { ...s.budget, expenses: [...s.budget.expenses, expense] }, products };
     }
@@ -459,6 +491,13 @@ const isTime = (x: unknown): x is string => isStr(x) && /^\d{1,2}:\d{2}$/.test(x
  * plutôt que de casser l'application, et le nombre d'éléments retirés est signalé.
  * Compatible avec les sauvegardes des versions précédentes (champs ajoutés complétés).
  */
+const cleanPostponed = (v: unknown): Postponement[] => (Array.isArray(v) ? (v as Postponement[]).filter((x) => x && isDate(x.from) && isDate(x.to) && isDate(x.at)).slice(-30).map((x) => ({ from: x.from, to: x.to, at: x.at })) : []);
+function cleanTaskExtra(t: Task): Task {
+  const { dueTime, hideEnd, postponed, revision, ...rest } = t;
+  const rev = Array.isArray(revision) ? revision.filter((r) => r && isStr(r.id) && isDate(r.date) && isNum(r.minutes) && r.minutes > 0).slice(0, 120).map((r) => ({ id: r.id, date: r.date, topic: isStr(r.topic) ? r.topic.slice(0, 120) : "", minutes: Math.min(600, Math.round(r.minutes)), ...(r.done ? { done: true } : {}) })) : [];
+  const pp = cleanPostponed(postponed);
+  return { ...rest, ...(isTime(dueTime) ? { dueTime } : {}), ...(hideEnd === true ? { hideEnd: true } : {}), ...(pp.length ? { postponed: pp } : {}), ...(rev.length ? { revision: rev } : {}) };
+}
 export function validateState(x: unknown): { ok: true; state: AppState; repaired: string | null } | { ok: false; error: string } {
   if (!isAppState(x)) return { ok: false, error: "Ce fichier n'est pas une sauvegarde Étudiant OS (version 1)." };
   const p = x as AppState & Record<string, unknown>;
@@ -472,6 +511,10 @@ export function validateState(x: unknown): { ok: true; state: AppState; repaired
   if (!isTime(settings.bedDefault)) settings.bedDefault = DEFAULT_SETTINGS.bedDefault;
   settings.roommates = Array.isArray(settings.roommates) ? settings.roommates.filter(isStr) : [];
   if (settings.onTimeMode !== "day") delete settings.onTimeMode;
+  settings.hiddenFeed = Array.isArray(settings.hiddenFeed) ? settings.hiddenFeed.filter((x) => isStr(x) && x.length < 600).slice(-500) : [];
+  if (!["system", "light", "dark", "auto"].includes(settings.theme)) settings.theme = "system";
+  { const ad = settings.autoDark as { from?: unknown; to?: unknown } | undefined; if (ad && isTime(ad.from) && isTime(ad.to)) settings.autoDark = { from: ad.from, to: ad.to }; else delete settings.autoDark; }
+  if (typeof settings.tutorialDone !== "boolean") delete settings.tutorialDone;
   settings.hiddenViews = Array.isArray(settings.hiddenViews) ? settings.hiddenViews : [];
   { const dl = settings.dashLayout as unknown as { order?: unknown; hidden?: unknown } | undefined; const ids = (v: unknown) => (Array.isArray(v) ? [...new Set(v.filter(isStr))].slice(0, 40) : []);
     if (dl && typeof dl === "object") settings.dashLayout = { order: ids(dl.order), hidden: ids(dl.hidden) }; else delete settings.dashLayout; }
@@ -494,7 +537,7 @@ export function validateState(x: unknown): { ok: true; state: AppState; repaired
       const ok = Array.isArray(dates) ? dates.filter((r) => Array.isArray(r) && isDate(r[0]) && isDate(r[1]) && r[0] <= r[1]) : [];
       return ok.length ? { ...c, dates: ok } : c;
     }),
-    tasks: keep<Task>("tâches", p.tasks, (t) => isStr(t.id) && isStr(t.title) && isDate(t.deadline)).map((t) => ({ ...t, estimate: isNum(t.estimate) && t.estimate > 0 ? t.estimate : 60, spent: isNum(t.spent) && t.spent >= 0 ? t.spent : 0, priority: ([1, 2, 3].includes(t.priority) ? t.priority : 2) as Priority, status: (["todo", "doing", "review", "done"].includes(t.status) ? t.status : "todo") as TaskStatus, slot: t.slot && isDate(t.slot.date) && isTime(t.slot.start) && isTime(t.slot.end) && toMin(t.slot.end) > toMin(t.slot.start) ? t.slot : undefined })).map(({ slot, steps, doDates, ...t }) => { const st = cleanSteps(steps, true); const dd = Array.isArray(doDates) ? [...new Set(doDates.filter(isDate))].sort().slice(0, 60) : []; return { ...t, ...(slot ? { slot } : {}), ...(st.length ? { steps: st } : {}), ...(dd.length ? { doDates: dd } : {}), ...(t.noPlan === true ? { noPlan: true } : {}) }; }),
+    tasks: keep<Task>("tâches", p.tasks, (t) => isStr(t.id) && isStr(t.title) && isDate(t.deadline)).map((t) => ({ ...t, estimate: isNum(t.estimate) && t.estimate > 0 ? t.estimate : 60, spent: isNum(t.spent) && t.spent >= 0 ? t.spent : 0, priority: ([1, 2, 3].includes(t.priority) ? t.priority : 2) as Priority, status: (["todo", "doing", "review", "done"].includes(t.status) ? t.status : "todo") as TaskStatus, slot: t.slot && isDate(t.slot.date) && isTime(t.slot.start) && isTime(t.slot.end) && toMin(t.slot.end) > toMin(t.slot.start) ? t.slot : undefined })).map(({ slot, steps, doDates, ...t }) => { const st = cleanSteps(steps, true); const dd = Array.isArray(doDates) ? [...new Set(doDates.filter(isDate))].sort().slice(0, 60) : []; return { ...t, ...(slot ? { slot } : {}), ...(st.length ? { steps: st } : {}), ...(dd.length ? { doDates: dd } : {}), ...(t.noPlan === true ? { noPlan: true } : {}) }; }).map((t) => cleanTaskExtra(t)),
     groceries: keep<GroceryItem>("articles", p.groceries, (g) => isStr(g.id) && isStr(g.name)).map((g) => ({ ...g, price: isNum(g.price) && g.price >= 0 ? g.price : 0, checked: !!g.checked, qty: isStr(g.qty) ? g.qty : "" })),
     chores: keep<Chore>("corvées", p.chores, (c) => isStr(c.id) && isStr(c.name) && Array.isArray(c.assignees) && (c.recurrence !== "once" || isDate(c.date))).map((c) => {
       const { time, steps, stepsDone, doneOn: dOn, pinned: pin, doneTime: dT, ...rest } = c;
@@ -512,6 +555,7 @@ export function validateState(x: unknown): { ok: true; state: AppState; repaired
       ...(isDate(t.due) ? { due: t.due } : {}), ...(t.done && isDate(t.doneAt) ? { doneAt: t.doneAt } : {}), ...(t.done && isTime(t.doneTime) ? { doneTime: t.doneTime } : {}),
       // « time » (ancienne version) devient l'heure de début.
       ...((() => { const st = isTime(t.start) ? t.start : isTime((t as { time?: unknown }).time) ? (t as unknown as { time: string }).time : undefined; return st ? { start: st, ...(isTime(t.end) && toMin(t.end) > toMin(st) ? { end: t.end } : {}) } : {}; })()),
+      ...(isTime(t.dueTime) ? { dueTime: t.dueTime } : {}), ...(isNum(t.remind) && t.remind >= 0 && t.remind <= 10080 ? { remind: Math.round(t.remind) } : {}), ...(t.hideEnd === true ? { hideEnd: true } : {}), ...(cleanPostponed(t.postponed).length ? { postponed: cleanPostponed(t.postponed) } : {}),
       ...([1, 2, 3].includes(t.priority as number) ? { priority: t.priority } : {}), ...(TODO_KINDS.some((k) => k.k === t.kind) ? { kind: t.kind } : {}),
       ...(isStr(t.note) && t.note.trim() ? { note: t.note.slice(0, 300) } : {}), ...((() => { const st = cleanSteps(t.steps, true); return st.length ? { steps: st } : {}; })()) })),
     habits: keep<Habit>("routines", Array.isArray(p.habits) ? p.habits : [], (h) => isStr(h.id) && isStr(h.name) && Array.isArray(h.done)).map((h) => {
@@ -523,12 +567,14 @@ export function validateState(x: unknown): { ok: true; state: AppState; repaired
         doneOn: h.doneOn && typeof h.doneOn === "object" ? Object.fromEntries(Object.entries(h.doneOn).filter(([k, v]) => isDate(k) && isDate(v)).slice(-400)) : {},
         doneTime: h.doneTime && typeof h.doneTime === "object" ? Object.fromEntries(Object.entries(h.doneTime).filter(([k, v]) => isDate(k) && isTime(v)).slice(-400)) : {},
         days: days.length ? days : [0, 1, 2, 3, 4, 5, 6], done: h.done.filter(isDate), since: isDate(h.since) ? h.since : todayISO(),
-        ...(isTime(h.time) ? { time: h.time } : {}), ...(st.length ? { steps: st, stepsDone: sd } : {}), ...(isStr(h.note) && h.note.trim() ? { note: h.note.slice(0, 200) } : {}) };
+        ...(isTime(h.time) ? { time: h.time } : {}), ...(h.inCalendar === true ? { inCalendar: true } : {}), ...(isNum(h.duration) && h.duration >= 5 && h.duration <= 480 ? { duration: Math.round(h.duration) } : {}), ...(st.length ? { steps: st, stepsDone: sd } : {}), ...(isStr(h.note) && h.note.trim() ? { note: h.note.slice(0, 200) } : {}) };
     }),
+    recipes: Array.isArray(p.recipes) ? keep<Recipe>("recettes", p.recipes, (r) => isStr(r.id) && isStr(r.name) && r.name.trim() !== "").map((r) => ({ id: r.id, name: r.name.slice(0, 80), ...(isNum(r.servings) && r.servings > 0 ? { servings: Math.round(r.servings) } : {}),
+      ingredients: Array.isArray(r.ingredients) ? r.ingredients.filter(isStr).map((x) => x.slice(0, 120)).slice(0, 80) : [], steps: Array.isArray(r.steps) ? r.steps.filter(isStr).map((x) => x.slice(0, 400)).slice(0, 80) : [] })).slice(0, 200) : [],
     pantryUsed: Array.isArray(p.pantryUsed) ? (p.pantryUsed as unknown[]).filter(isStr).slice(-2000) : [],
     feedEvents: Array.isArray(p.feedEvents) ? (p.feedEvents as FeedEvent[]).filter((e) => e && isStr(e.feedId) && isDate(e.date) && isTime(e.start) && isTime(e.end)).slice(0, 5000) : [],
     events: keep<PlanEvent>("événements", Array.isArray(p.events) ? p.events : [], (e) => isStr(e.id) && isStr(e.title) && isDate(e.date) && isTime(e.start) && isTime(e.end))
-      .map((e) => ({ ...e, recurrence: (["none", "daily", "weekly", "biweekly", "monthly"].includes(e.recurrence) ? e.recurrence : "none") as EventRecurrence, until: isDate(e.until) ? e.until : null, skipped: Array.isArray(e.skipped) ? e.skipped.filter(isDate) : [] })),
+      .map((e) => ({ ...e, recurrence: (["none", "daily", "weekly", "biweekly", "monthly"].includes(e.recurrence) ? e.recurrence : "none") as EventRecurrence, until: isDate(e.until) ? e.until : null, skipped: Array.isArray(e.skipped) ? e.skipped.filter(isDate) : [], ...((() => { const st = cleanSteps(e.steps, true); return st.length ? { steps: st } : { steps: undefined }; })()), ...(isNum(e.remind) && e.remind >= 0 && e.remind <= 10080 ? { remind: Math.round(e.remind) } : { remind: undefined }) })),
     sleep: keep<SleepLog>("nuits", p.sleep, (l) => isDate(l.date) && isTime(l.bed) && isTime(l.wake)).map(({ bedOk, wakeOk, ...l }) => ({ ...l, ...(typeof bedOk === "boolean" ? { bedOk } : {}), ...(typeof wakeOk === "boolean" ? { wakeOk } : {}) })),
     focus: keep<FocusEntry>("sessions de focus", p.focus, (f) => isDate(f.date) && isNum(f.minutes) && f.minutes > 0 && f.minutes < 24 * 60).map((f, i) => ({ ...f, id: f.id ?? `legacy-${i}-${f.date}` })),
     budget: {
@@ -537,6 +583,7 @@ export function validateState(x: unknown): { ok: true; state: AppState; repaired
       recurring: keep<RecurringExpense>("dépenses récurrentes", Array.isArray(b.recurring) ? b.recurring : [], (r) => isStr(r.id) && isNum(r.amount) && isNum(r.day)),
       incomes: keep<Income>("revenus", Array.isArray(b.incomes) ? b.incomes : [], (x) => isStr(x.id) && isDate(x.date) && isNum(x.amount) && x.amount > 0).map((x) => ({ ...x, source: isStr(x.source) ? x.source : "Autre", label: isStr(x.label) ? x.label : "" })),
       savings: keep<SavingMove>("épargne", Array.isArray(b.savings) ? b.savings : [], (x) => isStr(x.id) && isDate(x.date) && isNum(x.amount) && x.amount !== 0).map((x) => ({ ...x, label: isStr(x.label) ? x.label : "" })),
+      pocket: b.pocket && isNum(b.pocket.amount) && b.pocket.amount > 0 && (b.pocket.period === "week" || b.pocket.period === "month") ? { amount: b.pocket.amount, period: b.pocket.period, cats: Array.isArray(b.pocket.cats) ? b.pocket.cats.filter(isStr).slice(0, 40) : [] } : null,
       savingsGoal: b.savingsGoal && isStr(b.savingsGoal.name) && isNum(b.savingsGoal.target) && b.savingsGoal.target > 0 ? { name: b.savingsGoal.name.slice(0, 40), target: b.savingsGoal.target } : null,
     },
     settings,
@@ -749,12 +796,12 @@ export function choreHistory(chores: Chore[], people: string[], today: string, w
 }
 
 // ---------------------------------------------------------------- Moteur de planification
-export interface Block { start: number; end: number; kind: "class" | "task" | "chore" | "meal" | "sleep" | "busy" | "event"; label: string; color?: string; refId?: ID; /** Bloc venant d'un calendrier abonné. */ feedId?: ID }
+export interface Block { start: number; end: number; kind: "class" | "task" | "chore" | "meal" | "sleep" | "busy" | "event" | "habit"; /** Ne pas afficher l'heure de fin. */ noEnd?: boolean; label: string; color?: string; refId?: ID; /** Bloc venant d'un calendrier abonné. */ feedId?: ID }
 export interface Conflict { a: string; b: string; start: number; end: number }
 export interface DayPlan {
   date: string; wake: number; bed: number; blocks: Block[]; classMin: number; taskMin: number; choreMin: number;
   awakeMin: number; load: number; overflow: { task: Task; minutes: number }[]; level: "calme" | "équilibré" | "chargé" | "surcharge";
-  busyMin: number; conflicts: Conflict[]; overdue: Task[]; past: boolean;
+  busyMin: number; conflicts: Conflict[]; overdue: Task[]; past: boolean; habitMin?: number;
 }
 /** Jours de rattrapage pour une tâche en retard : son reste est réparti sur cette fenêtre au lieu d'être tout mis aujourd'hui. */
 export const OVERDUE_SPREAD = 3;
@@ -783,6 +830,8 @@ export function layoutLanes<T extends { start: number; end: number }>(blocks: T[
  */
 export function dailyQuota(t: Task, date: string, remaining = Math.max(0, t.estimate - t.spent), today = date): number {
   if (!(remaining > 0) || t.noPlan) return 0;
+  // Plan de révision détaillé : les minutes des séances du jour (et rien les autres jours).
+  if (t.revision?.length) return Math.min(remaining, revisionOn(t, date).reduce((n, r) => n + r.minutes, 0));
   // Jours de travail / de révision choisis : le travail n'est placé que ces jours-là (à parts égales).
   const dd = (t.doDates ?? []).filter((d) => d >= today && d <= t.deadline);
   if (dd.length) {
@@ -831,7 +880,7 @@ export function planDay(state: AppState, date: string, remaining?: Map<ID, numbe
   const isHard = (k: Block["kind"]) => k === "class" || k === "busy" || k === "event";
   const dayEvents = (state.events ?? []).filter((e) => eventOn(e, date) && toMin(e.end) > toMin(e.start));
   const feedColor = new Map((settings.feeds ?? []).map((f) => [f.id, f.color]));
-  const dayFeed = (state.feedEvents ?? []).filter((e) => e.date === date && !e.allDay && feedColor.has(e.feedId) && toMin(e.end) > toMin(e.start));
+  const dayFeed = (state.feedEvents ?? []).filter((e) => e.date === date && !e.allDay && !(settings.hiddenFeed ?? []).includes(`${e.uid}|${e.date}`) && feedColor.has(e.feedId) && toMin(e.end) > toMin(e.start));
   const wd = weekday(d);
   const dayClasses = classes.filter((c) => classOn(c, date)).sort((a, b) => toMin(a.start) - toMin(b.start));
   const nextDay = addDays(d, 1);
@@ -854,8 +903,11 @@ export function planDay(state: AppState, date: string, remaining?: Map<ID, numbe
     ...dayFeed.map((e): Block => ({ start: toMin(e.start), end: toMin(e.end), kind: "class", label: e.room ? `${e.title} · ${e.room}` : e.title, color: settings.feedColors?.[norm(e.title)] ?? feedColor.get(e.feedId), refId: e.uid, feedId: e.feedId })),
     ...dayEvents.map((e): Block => ({ start: toMin(e.start), end: toMin(e.end), kind: "event", label: e.title, color: e.color, refId: e.id })),
     // Tâches perso avec horaire précis : bloc fixe (comme un rendez-vous).
-    ...(state.todos ?? []).filter((t) => !t.done && t.due === date && t.start && t.end && toMin(t.end) > toMin(t.start))
-      .map((t): Block => ({ start: toMin(t.start!), end: toMin(t.end!), kind: "event", label: `✓ ${t.text}`, color: "#7a5af5" })),
+    ...(state.todos ?? []).filter((t) => !t.done && t.due === date && t.start && (!t.end || toMin(t.end) > toMin(t.start)))
+      .map((t): Block => ({ start: toMin(t.start!), end: t.end ? toMin(t.end) : toMin(t.start!) + 30, kind: "event", label: `✓ ${t.text}`, color: "#7a5af5", refId: t.id, ...(!t.end || t.hideEnd ? { noEnd: true } : {}) })),
+    // Routines affichées dans le calendrier, à leur heure (sans heure : placées plus bas, dans un créneau libre).
+    ...(date < today ? [] : (state.habits ?? []).filter((h) => h.inCalendar && h.time && habitOn(h, date) && !h.done.includes(date))
+      .map((h): Block => ({ start: toMin(h.time!), end: toMin(h.time!) + (h.duration ?? 15), kind: "habit", label: `${h.emoji} ${h.name}`, color: HABIT_CATS.find((c) => c.k === h.cat)?.color, refId: h.id }))),
   ];
   const hardSpans = fixed.filter((b) => isHard(b.kind)).map((b) => [b.start, b.end]);
   for (let i = fixed.length - 1; i >= 0; i--) if (fixed[i].kind === "meal" && hardSpans.some(([s0, e0]) => s0 < fixed[i].end && e0 > fixed[i].start)) fixed.splice(i, 1);
@@ -864,7 +916,7 @@ export function planDay(state: AppState, date: string, remaining?: Map<ID, numbe
   const timedChores = date < today ? [] : chores.filter((c) => slotOf(c) && choreScheduledOn(c, d) && choreAssignee(c, d) === "Moi" && !c.done.includes(date) && !(c.skipped ?? []).includes(date));
   // Tâches à créneau précis : bloc fixe le jour choisi.
   for (const t of tasks) if (t.slot && t.status !== "done" && t.slot.date === date && toMin(t.slot.end) > toMin(t.slot.start))
-    fixed.push({ start: toMin(t.slot.start), end: toMin(t.slot.end), kind: "task", label: t.kind === "examen" ? `Révision · ${t.title}` : t.title, color: courses.find((c) => c.id === t.courseId)?.color, refId: t.id });
+    fixed.push({ start: toMin(t.slot.start), end: toMin(t.slot.end), kind: "task", label: t.kind === "examen" ? `Révision · ${t.title}` : t.title, color: courses.find((c) => c.id === t.courseId)?.color, refId: t.id, ...(t.hideEnd ? { noEnd: true } : {}) });
   // Heure choisie par l'utilisateur : jamais déplacée. Heure figée automatiquement : décalée si elle chevauche un autre bloc.
   const byTime = [...timedChores].sort((a, b) => Number(!!b.time) - Number(!!a.time) || toMin(slotOf(a)!) - toMin(slotOf(b)!));
   for (const c of byTime) {
@@ -913,12 +965,18 @@ export function planDay(state: AppState, date: string, remaining?: Map<ID, numbe
     }
     return Math.max(0, left);
   };
+  let habitMin = fixed.filter((b) => b.kind === "habit").reduce((n, b) => n + b.end - b.start, 0);
+  if (!past) for (const h of state.habits ?? []) if (h.inCalendar && !h.time && habitOn(h, date) && !h.done.includes(date)) {
+    const len = h.duration ?? 15, rest = place(len, (s0, e0) => ({ start: s0, end: e0, kind: "habit", label: `${h.emoji} ${h.name}`, color: HABIT_CATS.find((c) => c.k === h.cat)?.color, refId: h.id }));
+    habitMin += len - rest;
+  }
   let choreMin = timedChores.reduce((n, c) => n + c.minutes, 0);
   for (const c of due) { const rest = place(c.minutes, (s, e) => ({ start: s, end: e, kind: "chore", label: c.name, refId: c.id })); choreMin += c.minutes - rest; }
   const overflow: DayPlan["overflow"] = [];
   let taskMin = fixed.filter((b) => b.kind === "task").reduce((n, b) => n + b.end - b.start, 0);
   for (const { t, q } of queue) {
-    const rest = place(q, (s, e) => ({ start: s, end: e, kind: "task", label: t.kind === "examen" ? `Révision · ${t.title}` : t.title, color: color(t.courseId), refId: t.id }));
+    const topic = revisionOn(t, date).map((r) => r.topic).filter(Boolean).join(", ");
+    const rest = place(q, (s, e) => ({ start: s, end: e, kind: "task", label: t.kind === "examen" ? `Révision · ${t.title}${topic ? ` — ${topic}` : ""}` : t.title, color: color(t.courseId), refId: t.id }));
     taskMin += q - rest;
     if (rest > 0) overflow.push({ task: t, minutes: rest });
   }
@@ -930,9 +988,9 @@ export function planDay(state: AppState, date: string, remaining?: Map<ID, numbe
   const awakeMin = Math.max(1, bed - wake);
   const overflowMin = overflow.reduce((n, o) => n + o.minutes, 0);
   // Saturation : temps engagé / temps éveillé « productif » (on réserve 30 % à la récupération).
-  const load = (classMin + busyMin + taskMin + choreMin + overflowMin) / (awakeMin * 0.7);
+  const load = (classMin + busyMin + taskMin + choreMin + habitMin + overflowMin) / (awakeMin * 0.7);
   const level = load > 1 ? "surcharge" : load > 0.85 ? "chargé" : load > 0.5 ? "équilibré" : "calme";
-  return { date, wake, bed, blocks, classMin, taskMin, choreMin, awakeMin, load, overflow, level, busyMin, conflicts, overdue, past };
+  return { date, wake, bed, blocks, classMin, taskMin, choreMin, awakeMin, load, overflow, level, busyMin, conflicts, overdue, past, habitMin };
 }
 /**
  * Plans de `n` jours à partir de `start`, en simulant l'avancement : ce qui est planifié un jour
@@ -969,10 +1027,14 @@ export function pantryItems(state: AppState, today: string, days = 21): PantryIt
   const used = new Set(state.pantryUsed ?? []);
   const from = iso(addDays(parseISO(today), -days));
   return state.budget.expenses
-    .filter((e) => e.items?.length && e.date >= from && e.date <= today && (e.source === "courses" || e.source === "ticket"))
+    .filter((e) => e.items?.length && e.received !== false && e.date >= from && e.date <= today && (e.source === "courses" || e.source === "ticket"))
     .flatMap((e) => e.items!.map((name, i) => ({ key: `${e.id}|${i}`, name, date: e.date, expenseId: e.id })))
     .filter((x) => !used.has(x.key))
     .sort((a, b) => b.date.localeCompare(a.date));
+}
+/** Achats commandés / en livraison, pas encore reçus : à confirmer avant d'être « à la maison ». */
+export function pendingReceipts(state: AppState): { expenseId: ID; date: string; label: string; items: string[] }[] {
+  return state.budget.expenses.filter((e) => e.received === false && e.items?.length).map((e) => ({ expenseId: e.id, date: e.date, label: e.label, items: e.items! })).sort((a, b) => b.date.localeCompare(a.date));
 }
 /** Ligne de ticket confirmée par l'utilisateur, prête à être rapprochée de la liste de courses. */
 export interface ReceiptLine { name: string; price: number; qty: number; aisle: Aisle }
@@ -1031,8 +1093,10 @@ export function taskOnTimeStats(tasks: Task[], today: string, days?: number): On
       else if (inWin(d) && (d < today || (d === today && nowMinutes() > endM))) late++;
       continue;
     }
-    if (t.status === "done" && t.doneAt) { if (!inWin(t.doneAt)) continue; if (t.doneAt <= t.deadline) ok++; else late++; }
-    else if (t.status !== "done" && t.deadline < today && inWin(t.deadline)) late++;
+    // Échéance reportée après coup : le retard d'origine reste compté (historique conservé).
+    const missed = missedDeadline(t);
+    if (t.status === "done" && t.doneAt) { if (!inWin(t.doneAt)) continue; if (missed === null && t.doneAt <= t.deadline && !dueTimePassed(t)) ok++; else late++; }
+    else if (t.status !== "done" && (missed !== null || t.deadline < today) && inWin(missed ?? t.deadline)) late++;
   }
   return { ok, late };
 }
@@ -1196,5 +1260,49 @@ export function todoDoneLate(t: Todo): boolean {
 export function taskDoneLate(t: Task): boolean {
   if (t.status !== "done" || !t.doneAt || t.deadline === NO_DEADLINE) return false;
   if (t.slot) { const endM = ON_TIME_BY_TIME ? toMin(t.slot.end) : 24 * 60; return t.doneAt > t.slot.date || (t.doneAt === t.slot.date && !!t.doneTime && toMin(t.doneTime) > endM); }
-  return t.doneAt > t.deadline;
+  return t.doneAt > t.deadline || dueTimePassed(t) || missedDeadline(t) !== null;
+}
+/** Première échéance manquée puis reportée (report fait après la date prévue) ; null si jamais reportée en retard. */
+export function missedDeadline(t: { postponed?: Postponement[] }): string | null {
+  const m = (t.postponed ?? []).find((p) => p.at > p.from);
+  return m ? m.from : null;
+}
+/** Terminée le jour de l'échéance mais après l'heure limite choisie (selon le réglage « à l'heure »). */
+export function dueTimePassed(t: Task): boolean {
+  return ON_TIME_BY_TIME && !!t.dueTime && t.doneAt === t.deadline && !!t.doneTime && toMin(t.doneTime) > toMin(t.dueTime);
+}
+/** Heures proposées pour une échéance : matin, midi, soir. */
+export const DUE_PRESETS: { k: string; label: string; time: string }[] = [{ k: "matin", label: "Matin", time: "09:00" }, { k: "midi", label: "Midi", time: "12:00" }, { k: "soir", label: "Soir", time: "20:00" }];
+/** Séances de révision d'un jour donné (plan détaillé d'un examen). */
+export const revisionOn = (t: Task, date: string) => (t.revision ?? []).filter((r) => r.date === date && !r.done);
+/** Répartit `total` minutes en séances sur les `dates` données (pas de 5 min), thèmes pris dans la liste (cycliquement). */
+export function buildRevisionPlan(dates: string[], total: number, topics: string[], newId: () => ID = uid): RevisionSession[] {
+  const ds = [...new Set(dates)].sort(); if (!ds.length || !(total > 0)) return [];
+  const per = Math.max(5, Math.ceil(total / ds.length / 5) * 5);
+  let left = total;
+  return ds.map((date, i) => { const minutes = Math.min(per, left); left -= minutes; return { id: newId(), date, topic: topics.length ? topics[i % topics.length] : "", minutes: Math.max(0, minutes) }; }).filter((r) => r.minutes > 0);
+}
+/** Est-on dans la plage de nuit [from, to[ (peut passer minuit) ? Sert au thème automatique. */
+export function isNightTime(nowMin: number, from: string, to: string): boolean {
+  const f = toMin(from), t = toMin(to);
+  return f === t ? false : f < t ? nowMin >= f && nowMin < t : nowMin >= f || nowMin < t;
+}
+
+// ---------------------------------------------------------------- Recettes (mode cuisine)
+const QTY_PREFIX = /^(\d+(?:[.,]\d+)?(?:\s?\/\s?\d+)?\s*(?:kg|g|mg|l|cl|ml|dl|c\.?\s?à\s?[cs]\.?|cuill?ères?(?:\s+à\s+(?:soupe|café))?|pincées?|tranches?|gousses?|boîtes?|sachets?|verres?|tasses?)?\b\.?)\s*(?:de\s+|d['’]\s*)?(.+)$/i;
+/** « 200 g de farine » → { qty: "200 g", name: "farine" } ; sans quantité : tout est le nom. */
+export function parseIngredient(line: string): { qty: string; name: string } {
+  const t = line.trim(); const m = QTY_PREFIX.exec(t);
+  if (!m || !m[2].trim()) return { qty: "", name: t };
+  return { qty: m[1].trim(), name: m[2].trim() };
+}
+/** Multiplie la quantité du début de ligne (« 200 g de farine » × 1,5 → « 300 g de farine »). */
+export function scaleIngredient(line: string, factor: number): string {
+  if (!(factor > 0) || Math.abs(factor - 1) < 1e-9) return line;
+  return line.replace(/^(\s*)(\d+(?:[.,]\d+)?)/, (_, sp: string, n: string) => { const v = Number(n.replace(",", ".")) * factor; const r = Math.round(v * 100) / 100; return sp + String(r).replace(".", ","); });
+}
+/** Durée (minutes) citée dans une étape de recette (« laisser mijoter 15 min »), sinon null. */
+export function stepMinutes(step: string): number | null {
+  const m = /(\d+)\s*(?:min(?:ute)?s?\b|mn\b)/i.exec(step); if (m) return Number(m[1]);
+  const h = /(\d+)\s*h(?:eures?)?\b(?:\s*(\d+))?/i.exec(step); return h ? Number(h[1]) * 60 + Number(h[2] ?? 0) : null;
 }

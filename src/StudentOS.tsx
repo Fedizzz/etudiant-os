@@ -2,7 +2,9 @@ import { createPortal } from "react-dom";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { MiniPdf } from "./pdf.ts";
-import { layoutLanes } from "./core.ts";
+import { eventOn, layoutLanes, parseIngredient, scaleIngredient, stepMinutes, DUE_PRESETS, buildRevisionPlan, isNightTime, pendingReceipts, revisionOn, missedDeadline } from "./core.ts";
+import type { Postponement, Recipe, RevisionSession } from "./core.ts";
+import { DEFAULT_POCKET_CATS, buildBudgetPdf, budgetInsights, categoryBreakdown, flatDebts, pocketStats } from "./finance.ts";
 import { DAY_WORDS, dayOf, pageGeometry, parseGrid } from "./timetable.ts";
 import { parseIcs, normalizeFeedUrl, isFeedUrl } from "./ical.ts";
 import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, choreStepsDone, choreDoneLate, choreSlotEnd, freeStart, setOnTimeMode, todoDoneLate, taskDoneLate, habitDoneLate, habitTimePassed, nowMinutes, NO_DEADLINE, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, onTimeGuess, onTimeStats, taskOnTimeStats, choreOnTimeStats, HABIT_CATS, habitOn, habitStats, habitStepsDone, habitStreak, todoOnTimeStats, TODO_KINDS, activeDays, withoutShared, xpOf, levelOf, globalStreak, LEVELS, applyReceiptToGroceries, pad, pantryItems, parseAmount, parseISO, parseReceipt, parseReceiptItems, receiptFingerprint, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
@@ -196,6 +198,8 @@ export const Settings = sketch("Settings", [
 ]);
 export const Plus = sketch("Plus", [{ d: "M12.1 4.6c-.2 5-.2 9.9.1 14.8M4.7 12.2c4.9-.3 9.8-.3 14.7 0" }]);
 export const X = sketch("X", [{ d: "M5.6 5.4c4.4 4.2 8.6 8.6 12.8 13.1M18.3 5.6c-4.3 4.2-8.5 8.5-12.6 12.9" }]);
+export const Package = sketch("Package", [{ d: "M3.6 7.6 12 3.4l8.4 4.2v8.8L12 20.6 3.6 16.4V7.6Z", f: true }, { d: "M3.6 7.6 12 11.8l8.4-4.2M12 11.8v8.8" }]);
+export const ChefHat = sketch("ChefHat", [{ d: "M7 14.6c-2.4-.2-4-2-4-4.1 0-2.3 1.8-4 4-4 .5-2 2.2-3.3 4.4-3.3s4 1.4 4.6 3.4c2.3-.2 4 1.6 4 3.9 0 2.2-1.7 4-4 4.2", f: true }, { d: "M7 14.6v5.8h10v-5.8M7 17.6h10" }]);
 export const Check = sketch("Check", [{ d: "M4.2 12.8c1.6 1.4 3.2 3 4.6 4.6 3.3-4.1 6.8-7.9 10.8-11.3" }]);
 export const ChevronLeft = sketch("ChevronLeft", [{ d: "M14.8 5.2c-2.3 2.2-4.6 4.5-6.6 6.9 2.1 2.3 4.3 4.5 6.7 6.6" }]);
 export const ChevronRight = sketch("ChevronRight", [{ d: "M9.2 5.3c2.4 2.1 4.6 4.3 6.6 6.7-2 2.4-4.2 4.6-6.6 6.7" }]);
@@ -446,6 +450,94 @@ export const StepsEditor: React.FC<{ id: string; steps: Step[]; onChange: (s: St
   );
 };
 
+/** Rappel avant un rendez-vous (minutes avant le début). */
+const REMIND_OPTIONS: [number, string][] = [[0, "À l'heure du rendez-vous"], [10, "10 min avant"], [30, "30 min avant"], [60, "1 h avant"], [120, "2 h avant"], [1440, "La veille"]];
+const RemindSelect: React.FC<{ id: string; value: number | undefined; onChange: (v: number | undefined) => void; className?: string }> = ({ id, value, onChange, className }) => (
+  <Field label="Rappel" htmlFor={id} className={className}><Select id={id} value={value === undefined ? "" : String(value)} onChange={(e) => onChange(e.target.value === "" ? undefined : Number(e.target.value))}>
+    <option value="">Aucun rappel</option>{REMIND_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Select></Field>
+);
+/** Reporter une échéance sans perdre l'historique : +1 jour, +1 semaine ou une date précise. */
+const PostponeMenu: React.FC<{ current: string | undefined; label: string; onPick: (to: string) => void; small?: boolean }> = ({ current, label, onPick, small }) => {
+  const [open, setOpen] = useState(false); const [d, setD] = useState("");
+  const today = todayISO(), base = !current || current < today ? today : current;
+  const go = (to: string) => { if (!/^\d{4}-\d{2}-\d{2}$/.test(to)) return; setOpen(false); onPick(to); };
+  return (
+    <span className="relative inline-block">
+      <Btn type="button" size="sm" variant="ghost" aria-label={`Reporter ${label}`} aria-expanded={open} title="Reporter l'échéance (l'historique est conservé)" onClick={() => setOpen(!open)} className={small ? "px-1.5" : ""}>↷{!small && " Reporter"}</Btn>
+      {open && <span className="absolute right-0 top-full z-30 mt-1 flex w-56 flex-col gap-2 rounded-xl border-2 border-fg bg-panel p-2.5 text-[12px] shadow-[3px_3px_0_0_rgb(var(--ink))]" role="dialog" aria-label="Reporter">
+        <span className="flex gap-1.5"><Btn type="button" size="sm" onClick={() => go(iso(addDays(parseISO(base), 1)))}>+1 jour</Btn><Btn type="button" size="sm" onClick={() => go(iso(addDays(parseISO(base), 7)))}>+1 semaine</Btn></span>
+        <span className="flex gap-1.5"><Input type="date" aria-label="Nouvelle date" min={today} value={d} onChange={(e) => setD(e.target.value)} className="h-8 py-0 text-[12px]" /><Btn type="button" size="sm" variant="primary" disabled={!d} onClick={() => go(d)}>OK</Btn></span>
+      </span>}
+    </span>
+  );
+};
+/** Historique de reports : « Reportée 2× » avec les dates en infobulle. */
+const PostponedPill: React.FC<{ list?: Postponement[] }> = ({ list }) => list?.length ? <Pill tone={missedDeadline({ postponed: list }) ? "warn" : "muted"}><span title={list.map((p) => `${fmtDate(p.from)} → ${fmtDate(p.to)} (décidé le ${fmtDate(p.at)})`).join("\n")}>↷ Reportée {list.length}×</span></Pill> : null;
+/** Sélecteur de durée unique pour toute l'application : durées usuelles + « Autre… » (minutes libres). */
+const DUR_PRESETS = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 75, 90, 105, 120, 150, 180, 210, 240, 300, 360];
+export const DurationPicker: React.FC<{ id: string; value: number; onChange: (n: number) => void; min?: number; max?: number; className?: string; label?: string }> = ({ id, value, onChange, min = 5, max = 600, className, label }) => {
+  const presets = DUR_PRESETS.filter((d) => d >= min && d <= max);
+  const [custom, setCustom] = useState(!presets.includes(value));
+  const isCustom = custom || !presets.includes(value);
+  return (
+    <div className={cx("flex min-w-0 gap-1.5", className)}>
+      <Select id={id} aria-label={label ?? "Durée"} value={isCustom ? "custom" : String(value)} onChange={(e) => { if (e.target.value === "custom") setCustom(true); else { setCustom(false); onChange(Number(e.target.value)); } }}>
+        {presets.map((d) => <option key={d} value={d}>{fmtDur(d)}</option>)}<option value="custom">Autre…</option>
+      </Select>
+      {isCustom && <Input id={`${id}-custom`} type="number" inputMode="numeric" min={min} max={max} step={5} aria-label="Durée personnalisée (min)" className="w-20 shrink-0" value={value || ""} onChange={(e) => onChange(Math.max(0, Math.min(max, Math.round(Number(e.target.value)))))} />}
+    </div>
+  );
+};
+/** Heure limite d'une échéance : toute la journée, matin, midi, soir ou une heure précise. */
+export const DueTimePicker: React.FC<{ id: string; value: string | undefined; onChange: (t: string | undefined) => void; className?: string }> = ({ id, value, onChange, className }) => {
+  const preset = DUE_PRESETS.find((p) => p.time === value);
+  const [custom, setCustom] = useState(!!value && !preset);
+  const choose = (t: string | undefined, c = false) => { setCustom(c); onChange(t); };
+  const opts: [string, string | undefined, boolean][] = [["Journée", undefined, false], ...DUE_PRESETS.map((p): [string, string | undefined, boolean] => [`${p.label} ${p.time}`, p.time, false]), ["Heure…", value && !preset ? value : "18:00", true]];
+  return (
+    <div className={className}>
+      <p id={id} className="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted">Heure limite</p>
+      <div className="flex flex-wrap items-center gap-1.5" role="group" aria-labelledby={id}>
+        {opts.map(([l, t, c]) => { const on = c ? (custom || (!!value && !preset)) : (t === value && !custom); return (
+          <button key={l} type="button" aria-pressed={on} onClick={() => choose(t, c)}
+            className={cx("rounded-lg border-2 px-2.5 py-1 text-[12px] font-semibold transition", on ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-line bg-sunken text-muted hover:text-fg")}>{l}</button>); })}
+        {(custom || (!!value && !preset)) && <Input type="time" aria-label="Heure limite personnalisée" value={value ?? "18:00"} onChange={(e) => onChange(e.target.value || undefined)} className="h-8 w-28 py-0 text-[12px]" />}
+      </div>
+    </div>
+  );
+};
+/** Plan de révision détaillé d'un examen : séances datées (thème + durée), génération automatique, cases « fait ». */
+const RevisionEditor: React.FC<{ id: string; sessions: RevisionSession[]; onChange: (r: RevisionSession[]) => void; deadline: string; total: number; topics: string[] }> = ({ id, sessions, onChange, deadline, total, topics }) => {
+  const sorted = [...sessions].sort((a, b) => a.date.localeCompare(b.date));
+  const gen = () => {
+    const days = Math.max(1, Math.min(7, daysBetween(todayISO(), deadline)));
+    const dates = Array.from({ length: days }, (_, i) => iso(addDays(parseISO(deadline), -(days - i)))).filter((d) => d >= todayISO());
+    onChange(buildRevisionPlan(dates.length ? dates : [todayISO()], Math.max(30, total), topics));
+  };
+  const upd = (rid: string, patch: Partial<RevisionSession>) => onChange(sessions.map((r) => (r.id === rid ? { ...r, ...patch } : r)));
+  const sum = sessions.reduce((n, r) => n + r.minutes, 0);
+  return (
+    <div className="col-span-2 rounded-xl border-2 border-line p-3 sm:col-span-4" data-testid="revision-plan">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-[11px] font-medium uppercase tracking-wider text-muted">Plan de révision détaillé{sessions.length ? ` · ${sessions.length} séance${sessions.length > 1 ? "s" : ""} · ${fmtDur(sum)}` : ""}</p>
+        <div className="flex gap-1.5"><Btn type="button" size="sm" onClick={gen}><Zap size={12} />Générer</Btn>
+          <Btn type="button" size="sm" onClick={() => onChange([...sessions, { id: uid(), date: iso(addDays(parseISO(deadline), -1)) < todayISO() ? todayISO() : iso(addDays(parseISO(deadline), -1)), topic: "", minutes: 60 }])}><Plus size={12} />Séance</Btn></div>
+      </div>
+      {sorted.length ? <ul className="flex flex-col gap-2">{sorted.map((r, i) => (
+        <li key={r.id} className="grid grid-cols-[auto_1fr_auto] items-center gap-2 text-[13px]">
+          <button type="button" aria-label={r.done ? "Marquer non faite" : "Marquer faite"} aria-pressed={!!r.done} onClick={() => upd(r.id, { done: !r.done })} className={cx("grid h-5 w-5 place-items-center rounded border-2", r.done ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-fg/40")}>{r.done && <Check size={11} strokeWidth={3} />}</button>
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            <Input type="date" aria-label={`Date de la séance ${i + 1}`} value={r.date} max={deadline} onChange={(e) => upd(r.id, { date: e.target.value })} className="h-8 w-40 text-[12px]" />
+            <Input aria-label={`Thème de la séance ${i + 1}`} placeholder="Thème (chapitre, exercices…)" value={r.topic} onChange={(e) => upd(r.id, { topic: e.target.value })} className="h-8 min-w-[10rem] flex-1 text-[12px]" />
+            <DurationPicker id={`${id}-d${i}`} label={`Durée de la séance ${i + 1}`} value={r.minutes} min={15} onChange={(n) => upd(r.id, { minutes: n })} className="w-44 [&_input]:h-8 [&_select]:h-8 [&_select]:text-[12px]" />
+          </div>
+          <button type="button" aria-label={`Supprimer la séance ${i + 1}`} className="p-1 text-muted hover:text-bad" onClick={() => onChange(sessions.filter((x) => x.id !== r.id))}><X size={13} /></button>
+        </li>))}</ul>
+        : <p className="text-[12px] text-muted">Aucune séance : le temps de révision est réparti selon les jours choisis ci-dessus. « Générer » répartit la durée estimée sur les jours précédant l'examen (thèmes pris dans la checklist).</p>}
+    </div>
+  );
+};
+
 const TaskForm: React.FC<{ onDone: () => void; task?: Task }> = ({ onDone, task }) => {
   const { state, dispatch, toast } = useStore();
   const [f, setF] = useState(task
@@ -454,6 +546,9 @@ const TaskForm: React.FC<{ onDone: () => void; task?: Task }> = ({ onDone, task 
   const [mode, setMode] = useState<"duration" | "slot">(task?.slot ? "slot" : "duration");
   const [slot, setSlot] = useState(task?.slot ?? { date: todayISO(), start: "14:00", end: "16:00" });
   const [steps, setSteps] = useState<Step[]>(task?.steps ?? []);
+  const [dueTime, setDueTime] = useState<string | undefined>(task?.dueTime);
+  const [hideEnd, setHideEnd] = useState(!!task?.hideEnd);
+  const [revision, setRevision] = useState<RevisionSession[]>(task?.revision ?? []);
   const [doDates, setDoDates] = useState<string[]>(task?.doDates ?? []);
   const [doPick, setDoPick] = useState(todayISO());
   const [doMode, setDoMode] = useState<"auto" | "pick" | "none">(task?.noPlan ? "none" : task?.doDates?.length ? "pick" : "auto");
@@ -477,7 +572,11 @@ const TaskForm: React.FC<{ onDone: () => void; task?: Task }> = ({ onDone, task 
     } else if (!(f.estimate >= 5)) { toast("L'estimation doit être d'au moins 5 minutes.", "bad"); return; }
     if (!(f.spent >= 0)) { toast("Le temps passé ne peut pas être négatif.", "bad"); return; }
     if (!task && f.deadline < todayISO()) toast("Échéance déjà passée : la tâche apparaîtra en retard.", "info");
-    const data = { ...f, estimate, title: f.title.trim(), courseId: f.courseId || null, slot: chosen, steps: steps.map((x) => ({ ...x, text: x.text.trim() })).filter((x) => x.text), doDates: mode === "duration" && pickDays && doDates.length ? [...doDates].sort() : undefined, noPlan: mode === "duration" && doMode === "none" ? true : undefined };
+    const rev = isExam && mode === "duration" ? revision.filter((r) => r.minutes > 0) : [];
+    if (rev.some((r) => !/^\d{4}-\d{2}-\d{2}$/.test(r.date) || r.date > f.deadline)) { toast("Les séances de révision doivent avoir lieu au plus tard le jour de l'examen.", "bad"); return; }
+    const revTotal = rev.reduce((n, r) => n + r.minutes, 0);
+    if (rev.length && revTotal > estimate) estimate = revTotal;
+    const data = { ...f, estimate, dueTime: isPerso ? undefined : dueTime, hideEnd: mode === "slot" && hideEnd ? true : undefined, revision: rev.length ? rev : undefined, title: f.title.trim(), courseId: f.courseId || null, slot: chosen, steps: steps.map((x) => ({ ...x, text: x.text.trim() })).filter((x) => x.text), doDates: mode === "duration" && pickDays && doDates.length ? [...doDates].sort() : undefined, noPlan: mode === "duration" && doMode === "none" ? true : undefined };
     if (data.doDates?.some((d) => d > f.deadline)) { toast(isExam ? "Les jours de révision doivent être avant l'examen." : "Les jours de travail doivent être avant l'échéance.", "bad"); return; }
     if (task) { dispatch({ type: "task/update", id: task.id, patch: data }); toast("Tâche mise à jour"); }
     else { const { slot: sl, ...rest } = data; dispatch({ type: "task/add", task: { id: uid(), ...rest, ...(sl ? { slot: sl } : {}), status: "todo", createdAt: todayISO() } }); toast(sl ? `Tâche ajoutée : ${fmtDate(sl.date)}, ${sl.start}–${sl.end}` : "Tâche ajoutée et planifiée"); }
@@ -502,13 +601,14 @@ const TaskForm: React.FC<{ onDone: () => void; task?: Task }> = ({ onDone, task 
             <Input type="date" aria-label="Jour de travail" value={doPick} min={todayISO()} onChange={(e) => setDoPick(e.target.value)} className="h-8 w-auto py-0 text-[12px]" />
             <Btn type="button" size="sm" onClick={() => { if (doPick && !doDates.includes(doPick)) setDoDates([...doDates, doPick]); }}><Plus size={12} />Ajouter</Btn>
           </div>
-          <Field label="Durée estimée (min)" htmlFor="tf-pest"><Input id="tf-pest" type="number" min={15} step={15} value={f.estimate} onChange={(e) => setF({ ...f, estimate: Math.max(15, Number(e.target.value)) })} /></Field>
+          <Field label="Durée estimée" htmlFor="tf-pest"><DurationPicker id="tf-pest" min={15} value={f.estimate} onChange={(n) => setF({ ...f, estimate: Math.max(15, n) })} /></Field>
         </>}
       </div> : <>
       <Field label={isExam ? "Date de l'examen" : "Échéance (à rendre)"} htmlFor="tf-dl" className="col-span-2"><Input id="tf-dl" type="date" value={f.deadline} onChange={(e) => setF({ ...f, deadline: e.target.value })} /></Field>
       <TimeMode id="tf-mode" value={mode} onChange={setMode} className="col-span-2" />
+      <DueTimePicker id="tf-duetime" value={dueTime} onChange={setDueTime} className="col-span-2 sm:col-span-4" />
       {mode === "duration" ? <>
-        <Field label="Durée estimée (min)" htmlFor="tf-est" className="col-span-2"><Input id="tf-est" type="number" min={15} step={15} value={f.estimate} onChange={(e) => setF({ ...f, estimate: Math.max(15, Number(e.target.value)) })} /></Field>
+        <Field label="Durée estimée" htmlFor="tf-est" className="col-span-2"><DurationPicker id="tf-est" min={15} value={f.estimate} onChange={(n) => setF({ ...f, estimate: Math.max(15, n) })} /></Field>
         <p className="col-span-2 self-end pb-2 text-[11px] text-muted">{doMode === "none" ? "Non placée dans le planning." : doDates.length ? `Répartie sur ${doDates.length} jour${doDates.length > 1 ? "s" : ""} choisi${doDates.length > 1 ? "s" : ""}.` : "Répartie automatiquement dans vos créneaux libres avant l'échéance."}</p>
         <div className="col-span-2 sm:col-span-4" data-testid="do-dates">
           <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">{isExam ? "Jours de révision" : "Jours de travail (do date)"}</p>
@@ -529,7 +629,9 @@ const TaskForm: React.FC<{ onDone: () => void; task?: Task }> = ({ onDone, task 
         <Field label="Jour" htmlFor="tf-sday" className="col-span-2"><Input id="tf-sday" type="date" value={slot.date} onChange={(e) => setSlot({ ...slot, date: e.target.value })} /></Field>
         <Field label="Début" htmlFor="tf-sstart"><Input id="tf-sstart" type="time" value={slot.start} onChange={(e) => setSlot({ ...slot, start: e.target.value })} /></Field>
         <Field label="Fin" htmlFor="tf-send"><Input id="tf-send" type="time" value={slot.end} onChange={(e) => setSlot({ ...slot, end: e.target.value })} /></Field>
+        <label className="col-span-2 flex items-center gap-2 text-[12px] sm:col-span-4"><input type="checkbox" checked={hideEnd} onChange={(e) => setHideEnd(e.target.checked)} />Masquer l'heure de fin (seul le début est affiché dans le planning)</label>
       </>}
+      {isExam && mode === "duration" && <RevisionEditor id="tf-rev" sessions={revision} onChange={setRevision} deadline={f.deadline} total={f.estimate} topics={steps.map((x) => x.text).filter(Boolean)} />}
       </>}
       <StepsEditor id="tf-steps" steps={steps} onChange={setSteps} checkable className="col-span-2 sm:col-span-4" placeholder="Ex. Lire le chapitre, faire les exercices…" />
       {task && <Field label="Temps déjà passé (min)" htmlFor="tf-spent" className="col-span-2"><Input id="tf-spent" type="number" min={0} step={5} value={f.spent} onChange={(e) => setF({ ...f, spent: Math.max(0, Number(e.target.value)) })} /></Field>}
@@ -564,7 +666,7 @@ function loadScript(src: string): Promise<void> {
 }
 const PDFJS = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/";
 const hexRgb = (h?: string): [number, number, number] | null => { const m = /^#?([0-9a-f]{6})$/i.exec(h ?? ""); if (!m) return null; const n = parseInt(m[1], 16); return [n >> 16, (n >> 8) & 255, n & 255]; };
-const KIND_RGB: Record<Block["kind"], [number, number, number]> = { class: [52, 72, 240], task: [52, 72, 240], chore: [217, 140, 20], meal: [160, 156, 180], sleep: [120, 120, 140], busy: [130, 126, 150], event: [233, 60, 130] };
+const KIND_RGB: Record<Block["kind"], [number, number, number]> = { class: [52, 72, 240], task: [52, 72, 240], chore: [217, 140, 20], meal: [160, 156, 180], sleep: [120, 120, 140], busy: [130, 126, 150], event: [233, 60, 130], habit: [0, 150, 105] };
 
 /** Planning de la semaine en PDF (A4 paysage, grille horaire), généré dans le navigateur, sans connexion. */
 async function exportWeekPdf(week: DayPlan[], name: string): Promise<"shared" | "downloaded"> {
@@ -981,7 +1083,7 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
   const courseOf = (id: ID | null) => state.courses.find((c) => c.id === id);
   const startFocus = (t: Task) => { dispatch({ type: "timer/task", taskId: t.id }); if (!state.timer.running) dispatch({ type: "timer/start", now: Date.now() }); go("focus"); toast(`Focus lancé sur « ${t.title} »`); };
   const finish = (t: Task) => { dispatch({ type: "task/update", id: t.id, patch: { status: "done" } }); toast(`« ${t.title} » terminé`); };
-  const postpone = (t: Task, n: number) => { const from = t.deadline < today ? today : t.deadline; dispatch({ type: "task/update", id: t.id, patch: { deadline: iso(addDays(parseISO(from), n)) } }); toast(`Échéance reportée au ${fmtDate(iso(addDays(parseISO(from), n)))}`, "info"); };
+  const postpone = (t: Task, n: number) => { const from = t.deadline < today ? today : t.deadline; dispatch({ type: "task/postpone", id: t.id, to: iso(addDays(parseISO(from), n)) }); toast(`Échéance reportée au ${fmtDate(iso(addDays(parseISO(from), n)))}`, "info"); };
 
   const steps: { done: boolean; label: string; run: () => void }[] = [
     { done: state.courses.length > 0, label: "Ajouter vos modules", run: () => go("academic") },
@@ -1154,7 +1256,7 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
 
 // ---------------------------------------------------------------- Module : Planning / Time-blocking
 const BLOCK_STYLE: Record<Block["kind"], string> = {
-  class: "border-l-[3px] bg-sunken", task: "border-l-[3px] bg-accent/8", chore: "border-l-[3px] border-l-warn bg-warn/10", meal: "border-l-[3px] border-l-line bg-transparent text-muted", sleep: "", event: "border-l-[3px] border-l-pink bg-pink/10", busy: "border-l-[3px] border-l-muted bg-sunken/60 text-muted [background-image:repeating-linear-gradient(135deg,transparent_0_6px,rgb(var(--line)/.6)_6px_8px)]",
+  habit: "border-l-[3px] border-l-ok bg-ok/10", class: "border-l-[3px] bg-sunken", task: "border-l-[3px] bg-accent/8", chore: "border-l-[3px] border-l-warn bg-warn/10", meal: "border-l-[3px] border-l-line bg-transparent text-muted", sleep: "", event: "border-l-[3px] border-l-pink bg-pink/10", busy: "border-l-[3px] border-l-muted bg-sunken/60 text-muted [background-image:repeating-linear-gradient(135deg,transparent_0_6px,rgb(var(--line)/.6)_6px_8px)]",
 };
 // ---------------------------------------------------------------- Import d'emploi du temps PDF
 /** « 9 sept. → 30 sept., 21 oct. → 18 nov., 2 déc. » */
@@ -1452,7 +1554,7 @@ const BLOCK_COLORS: { k: string; label: string; hex: string }[] = [
   { k: "vert", label: "Vert", hex: "#2f9e44" }, { k: "bleu", label: "Bleu", hex: "#2f6fed" }, { k: "violet", label: "Violet", hex: "#7a5af5" },
   { k: "rose", label: "Rose", hex: "#d6457a" }, { k: "turquoise", label: "Turquoise", hex: "#1d9bb5" }, { k: "gris", label: "Gris", hex: "#6b7280" },
 ];
-const KIND_NAME: Record<Block["kind"], string> = { class: "Cours", task: "Travail planifié", chore: "Ménage", meal: "Repas", sleep: "Sommeil", busy: "Indisponibilité", event: "Événement" };
+const KIND_NAME: Record<Block["kind"], string> = { habit: "Routine", class: "Cours", task: "Travail planifié", chore: "Ménage", meal: "Repas", sleep: "Sommeil", busy: "Indisponibilité", event: "Événement" };
 const durText = (min: number) => fmtDur(min);
 /** Fiche détaillée d'un créneau (toucher un bloc du planning) : tout le texte, la salle, les dates, et sa couleur. */
 /** Déplacer une occurrence de corvée (autre jour et/ou autre heure) depuis le planning. */
@@ -1551,7 +1653,7 @@ const EventMove: React.FC<{ ev: PlanEvent; date: string; onDone: () => void }> =
           {([[false, "Heure de fin"], [true, "Durée"]] as [boolean, string][]).map(([v, l]) => <button key={l} type="button" aria-pressed={byDur === v} onClick={() => setByDur(v)}
             className={cx("flex-1 rounded-lg border-2 px-2 py-1.5 text-[12px] font-semibold", byDur === v ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-line bg-sunken text-muted")}>{l}</button>)}
         </div>
-        {byDur ? <Field label="Durée (min)" htmlFor="event-move-dur" className="col-span-2"><Input id="event-move-dur" type="number" min={5} step={5} value={dur} onChange={(e) => setDur(Number(e.target.value))} /></Field>
+        {byDur ? <Field label="Durée" htmlFor="event-move-dur" className="col-span-2"><DurationPicker id="event-move-dur" value={dur} onChange={setDur} /></Field>
           : <Field label="Fin" htmlFor="event-move-end" className="col-span-2"><Input id="event-move-end" type="time" value={end} onChange={(e) => setEnd(e.target.value)} /></Field>}
       </div>
       <div className="mt-2 flex items-center justify-between gap-2">
@@ -1562,7 +1664,68 @@ const EventMove: React.FC<{ ev: PlanEvent; date: string; onDone: () => void }> =
   );
 };
 
-const BlockDetail: React.FC<{ b: Block; date: string; onClose: () => void }> = ({ b, date, onClose }) => {
+/** Confirmation avant une suppression (calendrier). */
+const ConfirmModal: React.FC<{ title: string; text: React.ReactNode; confirm: string; onYes: () => void; onClose: () => void }> = ({ title, text, confirm, onYes, onClose }) => (
+  <Modal title={title} onClose={onClose}>
+    <div className="flex flex-col gap-4" data-testid="confirm-dialog"><p className="text-[13.5px] leading-relaxed">{text}</p>
+      <div className="flex justify-end gap-2"><Btn variant="ghost" onClick={onClose}>Annuler</Btn><Btn variant="danger" data-testid="confirm-yes" onClick={() => { onYes(); onClose(); }}><Trash2 size={13} />{confirm}</Btn></div></div>
+  </Modal>
+);
+/** Écran de détail d'un événement : lieu, note, durée, couleur, checklist, rappel, répétition ; création ou modification. */
+const EventEditor: React.FC<{ ev?: PlanEvent; init?: { title?: string; date?: string; start?: string; dur?: number }; onClose: () => void }> = ({ ev, init, onClose }) => {
+  const { dispatch, toast } = useStore();
+  const [title, setTitle] = useState(ev?.title ?? init?.title ?? ""), [date, setDate] = useState(ev?.date ?? init?.date ?? todayISO());
+  const [start, setStart] = useState(ev?.start ?? init?.start ?? "18:00"), [dur, setDur] = useState(ev ? Math.max(5, toMin(ev.end) - toMin(ev.start)) : init?.dur ?? 60);
+  const [rec, setRec] = useState<EventRecurrence>(ev?.recurrence ?? "none"), [until, setUntil] = useState(ev?.until ?? "");
+  const [place, setPlace] = useState(ev?.place ?? ""), [note, setNote] = useState(ev?.note ?? ""), [steps, setSteps] = useState<Step[]>(ev?.steps ?? []);
+  const [remind, setRemind] = useState<number | undefined>(ev?.remind), [color, setColor] = useState(ev?.color ?? "");
+  const [askDel, setAskDel] = useState(false);
+  const end = toHHMM(Math.min(23 * 60 + 59, toMin(start) + dur));
+  const perm = typeof Notification !== "undefined" ? Notification.permission : "denied";
+  const save = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title.trim()) { toast("Donne un nom à l'événement.", "bad"); return; }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { toast("Choisis une date.", "bad"); return; }
+    if (!/^\d{2}:\d{2}$/.test(start) || toMin(end) <= toMin(start)) { toast("Choisis une heure de début qui laisse la place à la durée.", "bad"); return; }
+    if (rec !== "none" && until && until < date) { toast("La fin de la répétition doit suivre la première date.", "bad"); return; }
+    const clean = steps.map((x) => ({ ...x, text: x.text.trim() })).filter((x) => x.text);
+    const data = { title: title.trim(), date, start, end, recurrence: rec, until: rec !== "none" && until ? until : null, place: place.trim() || undefined, note: note.trim() || undefined, steps: clean.length ? clean : undefined, remind, color: color || undefined };
+    if (ev) { dispatch({ type: "event/update", id: ev.id, patch: data }); toast("Événement mis à jour"); }
+    else { dispatch({ type: "event/add", event: { id: uid(), ...data } }); toast(remind !== undefined ? "Événement ajouté, rappel programmé" : "Événement ajouté au planning"); }
+    onClose();
+  };
+  return (<>
+    <Modal title={ev ? "Détails de l'événement" : "Nouvel événement"} onClose={onClose}>
+      <form onSubmit={save} className="grid grid-cols-2 gap-3" data-testid="event-editor">
+        <Field label="Nom" htmlFor="ee-title" className="col-span-2"><Input id="ee-title" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ex. Dentiste, Foot, Anniversaire" /></Field>
+        <Field label="Date" htmlFor="ee-date" className="col-span-2 sm:col-span-1"><Input id="ee-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+        <Field label="Début" htmlFor="ee-start"><Input id="ee-start" type="time" value={start} onChange={(e) => setStart(e.target.value)} /></Field>
+        <Field label="Durée" htmlFor="ee-dur"><DurationPicker id="ee-dur" value={dur} onChange={setDur} /></Field>
+        <p className="self-end pb-2 font-mono text-[12px] text-muted">{start} → {end}</p>
+        <Field label="Lieu" htmlFor="ee-place" className="col-span-2"><Input id="ee-place" value={place} onChange={(e) => setPlace(e.target.value)} placeholder="Adresse, salle, lien visio…" /></Field>
+        <Field label="Note" htmlFor="ee-note" className="col-span-2"><Input id="ee-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Documents à prendre, numéro, contexte…" /></Field>
+        <Field label="Répétition" htmlFor="ee-rec" className={rec === "none" ? "col-span-2" : ""}><Select id="ee-rec" value={rec} onChange={(e) => setRec(e.target.value as EventRecurrence)}>{(Object.keys(EVENT_REC_LABEL) as EventRecurrence[]).map((r) => <option key={r} value={r}>{EVENT_REC_LABEL[r]}</option>)}</Select></Field>
+        {rec !== "none" && <Field label="Jusqu'au (facultatif)" htmlFor="ee-until"><Input id="ee-until" type="date" min={date} value={until} onChange={(e) => setUntil(e.target.value)} /></Field>}
+        <RemindSelect id="ee-remind" value={remind} onChange={setRemind} className="col-span-2" />
+        {remind !== undefined && perm === "default" && <p className="col-span-2 -mt-1 text-[12px] text-muted">Le rappel s'affiche dans l'application. <button type="button" className="text-accent hover:underline" onClick={() => void Notification.requestPermission().then((r) => toast(r === "granted" ? "Notifications du navigateur activées" : "Notifications refusées : les rappels restent dans l'application", r === "granted" ? "ok" : "info"))}>Activer aussi les notifications du navigateur</button></p>}
+        <div className="col-span-2"><p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">Couleur</p>
+          <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Couleur">
+            <button type="button" role="radio" aria-checked={!color} aria-label="Par défaut" onClick={() => setColor("")} className={cx("h-8 rounded-full border-2 px-2.5 text-[11px] font-semibold", !color ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-line text-muted")}>Défaut</button>
+            {BLOCK_COLORS.map((c) => <button key={c.k} type="button" role="radio" aria-checked={color.toLowerCase() === c.hex} aria-label={c.label} onClick={() => setColor(c.hex)} className={cx("h-8 w-8 rounded-full border-2 transition", color.toLowerCase() === c.hex ? "scale-110 border-fg" : "border-transparent")} style={{ background: c.hex }} />)}
+          </div></div>
+        <StepsEditor id="ee-steps" steps={steps} onChange={setSteps} checkable className="col-span-2" placeholder="Ex. Apporter la carte vitale, ordonnance…" />
+        <div className="col-span-2 flex flex-wrap items-center justify-between gap-2">
+          {ev ? <Btn type="button" variant="danger" onClick={() => setAskDel(true)}><Trash2 size={13} />Supprimer</Btn> : <span />}
+          <span className="flex gap-2"><Btn type="button" variant="ghost" onClick={onClose}>Annuler</Btn><Btn type="submit" variant="primary"><Check size={14} />{ev ? "Enregistrer" : "Ajouter"}</Btn></span>
+        </div>
+        {ev && rec !== "none" && <p className="col-span-2 text-[11px] text-muted">Les modifications s'appliquent à toutes les occurrences de cet événement répétitif.</p>}
+      </form>
+    </Modal>
+    {askDel && ev && <ConfirmModal title="Supprimer l'événement ?" text={<>« {ev.title} » sera supprimé{ev.recurrence !== "none" ? " (toutes ses occurrences)" : ""}.</>} confirm="Supprimer" onYes={() => { dispatch({ type: "event/remove", id: ev.id }); toast(`« ${ev.title} » supprimé`); onClose(); }} onClose={() => setAskDel(false)} />}
+  </>);
+};
+
+const BlockDetail: React.FC<{ b: Block; date: string; onClose: () => void; onEditEvent?: (ev: PlanEvent) => void }> = ({ b, date, onClose, onEditEvent }) => {
   const { state, dispatch, toast, openTask, undoable } = useStore();
   const cls = b.kind === "class" && !b.feedId ? state.classes.find((c) => c.id === b.refId) : undefined;
   const course = cls ? state.courses.find((c) => c.id === cls.courseId) : undefined;
@@ -1571,7 +1734,23 @@ const BlockDetail: React.FC<{ b: Block; date: string; onClose: () => void }> = (
   const ev = b.kind === "event" ? state.events.find((e) => e.id === b.refId) : undefined;
   const task = b.kind === "task" ? state.tasks.find((t) => t.id === b.refId) : undefined;
   const chore = b.kind === "chore" ? state.chores.find((c) => c.id === b.refId) : undefined;
-  const title = course?.name ?? fe?.title ?? ev?.title ?? task?.title ?? chore?.name ?? b.label;
+  const todoB = b.kind === "event" && !ev ? (state.todos ?? []).find((t) => t.id === b.refId) : undefined;
+  const habitB = b.kind === "habit" ? (state.habits ?? []).find((h) => h.id === b.refId) : undefined;
+  const busyU = b.kind === "busy" ? state.settings.unavailable.find((u) => u.id === b.refId) : undefined;
+  const [askDel, setAskDel] = useState<{ label: string; text: string; run: () => void } | null>(null);
+  const dels: { label: string; text: string; run: () => void }[] = [];
+  if (ev) { if (ev.recurrence !== "none") dels.push({ label: "Retirer ce jour-là", text: `« ${ev.title} » sera retiré le ${fmtDate(date)} seulement ; les autres occurrences restent.`, run: () => dispatch({ type: "event/skip", id: ev.id, date }) });
+    dels.push({ label: ev.recurrence === "none" ? "Supprimer" : "Supprimer la série", text: `« ${ev.title} » sera supprimé${ev.recurrence !== "none" ? " (toutes ses occurrences)" : ""}.`, run: () => dispatch({ type: "event/remove", id: ev.id }) }); }
+  if (cls) dels.push({ label: "Supprimer le créneau", text: `Ce créneau de ${course?.name ?? "cours"} (${cls.start}–${cls.end}) sera retiré de l'emploi du temps, toutes les semaines.`, run: () => dispatch({ type: "class/remove", id: cls.id }) });
+  if (fe) dels.push({ label: "Masquer cette occurrence", text: `« ${fe.title} » sera masqué le ${fmtDate(date)} (il reste dans votre calendrier source).`, run: () => dispatch({ type: "settings", patch: { hiddenFeed: [...(state.settings.hiddenFeed ?? []), `${fe.uid}|${fe.date}`] } }) });
+  if (task) dels.push(task.slot ? { label: "Retirer le créneau", text: `Le créneau précis de « ${task.title} » sera retiré ; la tâche reste dans votre liste et sera replacée automatiquement.`, run: () => dispatch({ type: "task/update", id: task.id, patch: { slot: undefined } }) }
+    : { label: "Ne plus planifier", text: `« ${task.title} » ne sera plus placée dans le planning (elle reste dans votre liste).`, run: () => dispatch({ type: "task/update", id: task.id, patch: { noPlan: true, doDates: undefined } }) });
+  if (chore) { dels.push({ label: "Passer cette fois", text: `« ${chore.name} » sera reportée pour le ${fmtDate(date)} (sans pénalité).`, run: () => dispatch({ type: "chore/skip", id: chore.id, date }) });
+    dels.push({ label: "Supprimer la corvée", text: `« ${chore.name} » sera supprimée${chore.shared ? " pour tout l'appartement" : ""}.`, run: () => dispatch({ type: "chore/remove", id: chore.id }) }); }
+  if (busyU) dels.push({ label: "Supprimer", text: `L'indisponibilité « ${busyU.label || "Indisponible"} » sera supprimée (chaque semaine).`, run: () => dispatch({ type: "settings", patch: { unavailable: state.settings.unavailable.filter((u) => u.id !== busyU.id) } }) });
+  if (habitB) dels.push({ label: "Retirer du calendrier", text: `« ${habitB.name} » ne sera plus affichée dans le calendrier (la routine est conservée).`, run: () => dispatch({ type: "habit/update", id: habitB.id, patch: { inCalendar: undefined } }) });
+  if (todoB) dels.push({ label: "Supprimer", text: `La tâche « ${todoB.text} » sera supprimée.`, run: () => dispatch({ type: "todo/remove", id: todoB.id }) });
+  const title = course?.name ?? fe?.title ?? ev?.title ?? task?.title ?? chore?.name ?? habitB?.name ?? todoB?.text ?? b.label;
   const room = cls?.room ?? fe?.room ?? "";
   const color = b.color ?? (b.kind === "chore" ? "#d4a017" : b.kind === "event" ? "#d6457a" : "#6b7280");
   const canColor = !!course || !!fe || !!ev;
@@ -1582,7 +1761,7 @@ const BlockDetail: React.FC<{ b: Block; date: string; onClose: () => void }> = (
     toast(course ? `Couleur de « ${course.name} » mise à jour (tous ses créneaux)` : fe ? `Couleur de « ${fe.title} » mise à jour` : "Couleur mise à jour");
   };
   const rows: [string, React.ReactNode][] = [
-    ["Quand", <>{fmtDate(date)} · <b className="font-mono">{toHHMM(b.start)} – {toHHMM(b.end)}</b> <span className="text-muted">({durText(b.end - b.start)})</span></>],
+    ["Quand", <>{fmtDate(date)} · <b className="font-mono">{toHHMM(b.start)}{b.noEnd ? "" : ` – ${toHHMM(b.end)}`}</b> {!b.noEnd && <span className="text-muted">({durText(b.end - b.start)})</span>}</>],
     ["Type", KIND_NAME[b.kind] + (/\((TP|TD|Labo)\)/.exec(b.label)?.[0] ? ` ${/\((TP|TD|Labo)\)/.exec(b.label)![0]}` : "")],
   ];
   if (room) rows.push(["Salle", room]);
@@ -1592,6 +1771,11 @@ const BlockDetail: React.FC<{ b: Block; date: string; onClose: () => void }> = (
   if (ev) rows.push(["Répétition", EVENT_REC_LABEL[ev.recurrence] + (ev.until ? ` jusqu'au ${fmtDate(ev.until)}` : "")]);
   if (task) rows.push(["Échéance", `${task.deadline === NO_DEADLINE ? "Sans échéance" : fmtDate(task.deadline)} · reste ${durText(Math.max(0, task.estimate - task.spent))}`]);
   if (chore) rows.push(["Récurrence", REC_LABEL[chore.recurrence]]);
+  if (ev?.place) rows.push(["Lieu", ev.place]);
+  if (ev?.note) rows.push(["Note", ev.note]);
+  if (ev?.steps?.length) rows.push(["Checklist", `${ev.steps.filter((x) => x.done).length}/${ev.steps.length}`]);
+  if (ev?.remind !== undefined) rows.push(["Rappel", REMIND_OPTIONS.find(([v]) => v === ev.remind)?.[1] ?? `${ev.remind} min avant`]);
+  if (habitB) rows.push(["Routine", `${habitB.emoji} ${habitB.cat}`]);
   return (
     <Modal title={KIND_NAME[b.kind]} onClose={onClose}>
       <div className="flex flex-col gap-4" data-testid="block-detail">
@@ -1606,6 +1790,7 @@ const BlockDetail: React.FC<{ b: Block; date: string; onClose: () => void }> = (
         {chore && <ChoreMove chore={chore} date={date} start={b.start} onDone={onClose} />}
         {task && <TaskMove task={task} date={date} b={b} onDone={onClose} />}
         {ev && <EventMove ev={ev} date={date} onDone={onClose} />}
+        {ev?.steps?.length ? <div><p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted">Checklist</p><StepsCheck steps={ev.steps} done={(id) => !!ev.steps?.find((x) => x.id === id)?.done} onToggle={(stepId) => dispatch({ type: "event/step", id: ev.id, stepId })} label={`Checklist de ${ev.title}`} /></div> : null}
         {canColor && (
           <div>
             <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">Couleur{course ? " de la matière" : ""}</p>
@@ -1617,10 +1802,14 @@ const BlockDetail: React.FC<{ b: Block; date: string; onClose: () => void }> = (
           </div>)}
         <div className="flex flex-wrap justify-end gap-2">
           {task && <Btn onClick={() => { onClose(); openTask(task.id); }}><Pencil size={13} />Modifier la tâche</Btn>}
-          {ev && <Btn variant="danger" onClick={() => { onClose(); if (ev.recurrence === "none") undoable({ type: "event/remove", id: ev.id }, `« ${ev.title} » supprimé`); else undoable({ type: "event/skip", id: ev.id, date }, `« ${ev.title} » retiré ce jour-là`); }}>{ev.recurrence === "none" ? "Supprimer" : "Retirer ce jour-là"}</Btn>}
+          {ev && onEditEvent && <Btn onClick={() => { onClose(); onEditEvent(ev); }}><Pencil size={13} />Détails et modification</Btn>}
+          {habitB && <Btn onClick={() => { dispatch({ type: "habit/toggle", id: habitB.id, date }); toast(`${habitB.emoji} ${habitB.name} : fait ✓`); onClose(); }}><Check size={13} />Marquer fait</Btn>}
+          {todoB && <Btn onClick={() => { dispatch({ type: "todo/toggle", id: todoB.id }); toast(`« ${todoB.text} » fait ✓`); onClose(); }}><Check size={13} />Marquer fait</Btn>}
+          {dels.map((d) => <Btn key={d.label} variant="danger" data-testid="block-delete" onClick={() => setAskDel(d)}><Trash2 size={13} />{d.label}</Btn>)}
           <Btn variant="primary" onClick={onClose}>Fermer</Btn>
         </div>
       </div>
+      {askDel && <ConfirmModal title="Confirmer" text={askDel.text} confirm={askDel.label} onYes={() => { askDel.run(); toast(`« ${title} » : ${askDel.label.toLowerCase()} ✓`, "info"); onClose(); }} onClose={() => setAskDel(null)} />}
     </Modal>
   );
 };
@@ -1664,7 +1853,29 @@ const RoutineStrip: React.FC<{ date: string }> = ({ date }) => {
   );
 };
 
-const WeekGrid: React.FC<{ week: DayPlan[]; today: string; onPick: (b: Block, date: string) => void; onDay: (date: string) => void }> = ({ week, today, onPick, onDay }) => {
+/** Tâches sans horaire du jour (tâches perso, devoirs hors planning), en pastilles comme les routines. */
+const UntimedStrip: React.FC<{ date: string }> = ({ date }) => {
+  const { state, dispatch, toast, openTask } = useStore();
+  const todos = (state.todos ?? []).filter((t) => t.due === date && !t.start && (!t.done || date <= todayISO())).sort((a, b) => Number(a.done) - Number(b.done) || (a.dueTime ?? "99").localeCompare(b.dueTime ?? "99"));
+  const tasks = state.tasks.filter((t) => t.noPlan && t.deadline === date && t.status !== "done" && !t.slot);
+  if (!todos.length && !tasks.length) return null;
+  return (
+    <div className="flex flex-wrap gap-1.5" data-testid="untimed-strip">
+      <span className="self-center text-[11px] font-semibold uppercase tracking-wider text-muted">Sans horaire</span>
+      {todos.map((t) => (
+        <button key={t.id} onClick={() => { dispatch({ type: "todo/toggle", id: t.id }); if (!t.done) toast(`« ${t.text} » fait ✓`); }} title={t.done ? "Rouvrir" : "Marquer fait"}
+          className={cx("inline-flex items-center gap-1.5 rounded-full border-2 px-2.5 py-1 text-[12px] font-medium transition", t.done ? "border-ok/60 bg-ok/12 text-ok line-through" : "border-line bg-sunken hover:border-fg/60")}>
+          <span aria-hidden>{t.done ? "✓" : kindOf(t.kind).emoji}</span>{t.text}{t.dueTime && <span className="font-mono text-[10px] text-muted">avant {t.dueTime}</span>}
+        </button>))}
+      {tasks.map((t) => (
+        <button key={t.id} onClick={() => openTask(t.id)} title="Ouvrir la tâche" className="inline-flex items-center gap-1.5 rounded-full border-2 border-line bg-sunken px-2.5 py-1 text-[12px] font-medium transition hover:border-fg/60"><span aria-hidden>📌</span>{t.title}{t.dueTime && <span className="font-mono text-[10px] text-muted">avant {t.dueTime}</span>}</button>))}
+    </div>
+  );
+};
+
+const slotMinutes = (e: { clientY: number }, el: HTMLElement, startMin: number, px: number) => { const r = el.getBoundingClientRect(); return Math.max(0, Math.min(23 * 60 + 45, Math.round((startMin + ((e.clientY - r.top) / px) * 60) / 15) * 15)); };
+
+const WeekGrid: React.FC<{ week: DayPlan[]; today: string; onPick: (b: Block, date: string) => void; onDay: (date: string) => void; onSlot?: (date: string, min: number) => void; onDropText?: (date: string, min: number, text: string) => void }> = ({ week, today, onPick, onDay, onSlot, onDropText }) => {
   const shown = week.map((d) => d.blocks.filter((b) => b.kind !== "sleep" && b.kind !== "meal"));
   const all = shown.flat();
   const startH = Math.min(8, ...all.map((b) => Math.floor(b.start / 60))), endH = Math.max(19, ...all.map((b) => Math.ceil(b.end / 60)));
@@ -1682,7 +1893,10 @@ const WeekGrid: React.FC<{ week: DayPlan[]; today: string; onPick: (b: Block, da
           {Array.from({ length: endH - startH }, (_, i) => <span key={i} className="absolute left-0 font-mono text-[9.5px] text-muted" style={{ top: i * PX }}>{pad(startH + i)}:00</span>)}
         </div>
         {week.map((d, di) => { const ln = layoutLanes(shown[di]); return (
-          <div key={d.date} className="relative rounded-md border border-line/70" style={{ height: (endH - startH) * PX, backgroundImage: `repeating-linear-gradient(to bottom, transparent 0 ${PX - 1}px, rgb(var(--line) / .5) ${PX - 1}px ${PX}px)` }}>
+          <div key={d.date} className="relative cursor-cell rounded-md border border-line/70" data-testid={`week-col-${d.date}`}
+            onClick={(e) => { if (!onSlot || (e.target as HTMLElement).closest("button")) return; onSlot(d.date, slotMinutes(e, e.currentTarget, startH * 60, PX)); }}
+            onDragOver={(e) => { if (onDropText) e.preventDefault(); }} onDrop={(e) => { const t = e.dataTransfer.getData("text/plain").trim(); if (!onDropText || !t) return; e.preventDefault(); onDropText(d.date, slotMinutes(e, e.currentTarget, startH * 60, PX), t); }}
+            style={{ height: (endH - startH) * PX, backgroundImage: `repeating-linear-gradient(to bottom, transparent 0 ${PX - 1}px, rgb(var(--line) / .5) ${PX - 1}px ${PX}px)` }}>
             {shown[di].map((b, i) => (
               <button key={i} onClick={() => onPick(b, d.date)} title={`${toHHMM(b.start)}–${toHHMM(b.end)} · ${b.label}`}
                 className={cx("absolute overflow-hidden rounded px-1 py-0.5 text-left text-[10px] leading-tight transition hover:brightness-95", BLOCK_STYLE[b.kind])}
@@ -1707,7 +1921,13 @@ const Planning: React.FC = () => {
   // Semaine affichée : jours passés tels quels, jours à venir simulés depuis aujourd'hui (charge cohérente avec le tableau de bord).
   const week = useMemo(() => { const mon = iso(addDays(parseISO(date), -weekday(parseISO(date)))); return Array.from({ length: 7 }, (_, i) => planFor(state, iso(addDays(parseISO(mon), i)), today)); }, [state, date, today]);
   const [unav, setUnav] = useState({ day: 0, start: "18:00", end: "21:00", label: "" });
-  const [ev, setEv] = useState({ title: "", date: today, start: "18:00", end: "19:00", recurrence: "none" as EventRecurrence, until: "" });
+  const [ev, setEv] = useState({ title: "", date: today, start: "18:00", dur: 60, recurrence: "none" as EventRecurrence, until: "" });
+  const evEnd = toHHMM(Math.min(23 * 60 + 59, toMin(ev.start) + ev.dur));
+  const [editor, setEditor] = useState<{ ev?: PlanEvent; init?: { title?: string; date?: string; start?: string; dur?: number } } | null>(null);
+  const [askDel, setAskDel] = useState<{ title: string; text: string; run: () => void } | null>(null);
+  const noteLines = (state.notes?.text ?? "").split("\n").map((l) => l.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "").trim()).filter((l) => l.length > 1).slice(0, 30);
+  const onSlot = (d: string, min: number) => setEditor({ init: { date: d, start: toHHMM(min), dur: 60 } });
+  const onDropText = (d: string, min: number, text: string) => setEditor({ init: { title: text.slice(0, 80), date: d, start: toHHMM(min), dur: 60 } });
   const upcomingEvents = [...(state.events ?? [])].filter((e) => e.recurrence !== "none" ? !e.until || e.until >= today : e.date >= today).sort((a, b) => a.date.localeCompare(b.date) || toMin(a.start) - toMin(b.start));
   const startH = Math.floor(plan.wake / 60), endH = Math.ceil(Math.min(plan.bed, 1440 + 120) / 60);
   const PX = 84; // pixels par heure (assez haut pour lire les blocs courts)
@@ -1750,7 +1970,9 @@ const Planning: React.FC = () => {
 
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
-      {sel && <BlockDetail b={sel.b} date={sel.date} onClose={() => setSel(null)} />}
+      {sel && <BlockDetail b={sel.b} date={sel.date} onClose={() => setSel(null)} onEditEvent={(e) => setEditor({ ev: e })} />}
+      {editor && <EventEditor ev={editor.ev} init={editor.init} onClose={() => setEditor(null)} />}
+      {askDel && <ConfirmModal title={askDel.title} text={askDel.text} confirm="Supprimer" onYes={askDel.run} onClose={() => setAskDel(null)} />}
       <Card title={<span className="flex items-center gap-2"><CalendarClock size={15} />{mode === "week" ? `Semaine du ${parseISO(week[0].date).toLocaleDateString("fr-FR", { day: "numeric", month: "long" })}` : `${DAYS_LONG[weekday(parseISO(date))]} ${parseISO(date).toLocaleDateString("fr-FR", { day: "numeric", month: "long" })}`}</span>}
         action={<>
           <div role="tablist" aria-label="Affichage" className="mr-1 flex gap-0.5 rounded-xl bg-sunken p-0.5 text-[12px] font-semibold">
@@ -1773,9 +1995,12 @@ const Planning: React.FC = () => {
           </div>)}
         </>}
         {plan.past && <p className="mt-3 text-xs text-muted">Journée passée : seuls les cours et indisponibilités sont affichés.</p>}
-        {mode === "week" ? <div><p className="mb-2 text-[11px] text-muted md:hidden">Glissez horizontalement pour voir toute la semaine · touchez un créneau pour le détail.</p><WeekGrid week={week} today={today} onPick={(bb, d) => setSel({ b: bb, date: d })} onDay={(d) => { setOffset(daysBetween(today, d)); setMode("day"); }} /></div> : <>
-        <div className="mt-4 flex flex-col gap-2"><DueBadges date={date} /><RoutineStrip date={date} /></div>
-        <div className="relative mt-4 overflow-hidden rounded-lg border border-line" style={{ height: (endH - startH) * PX }}>
+        {mode === "week" ? <div><p className="mb-2 text-[11px] text-muted md:hidden">Glissez horizontalement pour voir toute la semaine · touchez un créneau pour le détail, une case vide pour créer un événement.</p><WeekGrid week={week} today={today} onPick={(bb, d) => setSel({ b: bb, date: d })} onDay={(d) => { setOffset(daysBetween(today, d)); setMode("day"); }} onSlot={onSlot} onDropText={onDropText} /></div> : <>
+        <div className="mt-4 flex flex-col gap-2"><DueBadges date={date} /><RoutineStrip date={date} /><UntimedStrip date={date} /></div>
+        <p className="mt-3 text-[11px] text-muted">Touchez une plage horaire vide pour créer un événement ; glissez-y une note depuis « Notes à planifier ».</p>
+        <div className="relative mt-1 cursor-cell overflow-hidden rounded-lg border border-line" data-testid="day-grid" style={{ height: (endH - startH) * PX }}
+          onClick={(e) => { if ((e.target as HTMLElement).closest('[role="button"], button')) return; onSlot(date, slotMinutes(e, e.currentTarget, startH * 60, PX)); }}
+          onDragOver={(e) => e.preventDefault()} onDrop={(e) => { const t = e.dataTransfer.getData("text/plain").trim(); if (!t) return; e.preventDefault(); onDropText(date, slotMinutes(e, e.currentTarget, startH * 60, PX), t); }}>
           {Array.from({ length: endH - startH }, (_, i) => (
             <div key={i} className="absolute inset-x-0 border-t border-line/70" style={{ top: i * PX }}><span className="absolute left-2 top-0.5 font-mono text-[10px] text-muted">{pad((startH + i) % 24)}:00</span></div>
           ))}
@@ -1788,11 +2013,12 @@ const Planning: React.FC = () => {
               style={{ top: ((b.start - startH * 60) / 60) * PX + 1.5 + (dragI?.i === i ? (snap(dragI.dy) / 60) * PX : 0), height: h, borderLeftColor: b.color,
                 left: `calc(3.5rem + (100% - 4rem) * ${ln.lane} / ${ln.lanes})`, width: `calc((100% - 4rem) / ${ln.lanes} - 3px)` }}>
               <div className={cx("flex items-center gap-1.5", compact && "shrink-0")}>
-                <span className="font-mono text-[10px] tabular-nums text-muted">{dragI?.i === i ? <b className="text-accent">{toHHMM(b.start + snap(dragI.dy))}</b> : toHHMM(b.start)}{compact ? "" : `–${toHHMM(b.end + (dragI?.i === i ? snap(dragI.dy) : 0))}`}</span>
+                <span className="font-mono text-[10px] tabular-nums text-muted">{dragI?.i === i ? <b className="text-accent">{toHHMM(b.start + snap(dragI.dy))}</b> : toHHMM(b.start)}{compact || b.noEnd ? "" : `–${toHHMM(b.end + (dragI?.i === i ? snap(dragI.dy) : 0))}`}</span>
                 {b.kind === "task" && <Zap size={10} className="text-accent" />}{b.kind === "chore" && <Home size={10} className="text-warn" />}{b.kind === "meal" && <Coffee size={10} />}{b.kind === "event" && <CalendarClock size={10} className="text-pink" />}
-                {b.kind === "event" && b.refId && <button className="ml-auto rounded px-1 text-[10px] text-muted hover:bg-sunken hover:text-bad" aria-label={`Retirer ${b.label} ce jour-là`} title="Retirer cette occurrence"
-                  onClick={(e) => { e.stopPropagation(); const evt = state.events.find((x) => x.id === b.refId); if (!evt) return;
-                    if (evt.recurrence === "none") undoable({ type: "event/remove", id: evt.id }, `« ${evt.title} » supprimé`); else undoable({ type: "event/skip", id: evt.id, date }, `« ${evt.title} » retiré ce jour-là`); }}>✕</button>}
+                {b.kind === "event" && b.refId && <button className="ml-auto rounded px-1 text-[10px] text-muted hover:bg-sunken hover:text-bad" aria-label={`Supprimer ${b.label}`} title="Supprimer (avec confirmation)"
+                  onClick={(e) => { e.stopPropagation(); const evt = state.events.find((x) => x.id === b.refId); const td = (state.todos ?? []).find((x) => x.id === b.refId);
+                    if (evt) setAskDel(evt.recurrence === "none" ? { title: "Supprimer l'événement ?", text: `« ${evt.title} » sera supprimé.`, run: () => { dispatch({ type: "event/remove", id: evt.id }); toast(`« ${evt.title} » supprimé`); } } : { title: "Retirer cette occurrence ?", text: `« ${evt.title} » sera retiré le ${fmtDate(date)} seulement. Pour supprimer toute la série, ouvrez l'événement.`, run: () => { dispatch({ type: "event/skip", id: evt.id, date }); toast(`« ${evt.title} » retiré ce jour-là`); } });
+                    else if (td) setAskDel({ title: "Supprimer la tâche ?", text: `« ${td.text} » sera supprimée.`, run: () => { dispatch({ type: "todo/remove", id: td.id }); toast(`« ${td.text} » supprimée`); } }); }}>✕</button>}
               </div>
               <p className={cx("font-medium text-fg", compact ? "min-w-0 flex-1 truncate text-[12px]" : ln.lanes > 1 ? "break-words leading-tight [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:4] overflow-hidden" : "truncate")}>{b.label}</p>
             </div>
@@ -1806,7 +2032,7 @@ const Planning: React.FC = () => {
           <Card title={<span className="flex items-center gap-2 text-bad"><AlertTriangle size={14} />Ne tient pas {offset === 0 ? "aujourd'hui" : "ce jour-là"}</span>}>
             <ul className="flex flex-col gap-2 text-[13px]">
               {plan.overflow.map((o) => (<li key={o.task.id} className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate">{o.task.title}</span><span className="font-mono text-xs text-muted">{fmtDur(o.minutes)}</span>
-                <Btn size="sm" variant="ghost" title="Repousser l'échéance d'un jour" onClick={() => { dispatch({ type: "task/update", id: o.task.id, patch: { deadline: iso(addDays(parseISO(o.task.deadline), 1)) } }); toast("Échéance repoussée d'un jour", "info"); }}>+1 j</Btn></li>))}
+                <Btn size="sm" variant="ghost" title="Repousser l'échéance d'un jour" onClick={() => { dispatch({ type: "task/postpone", id: o.task.id, to: iso(addDays(parseISO(o.task.deadline), 1)) }); toast("Échéance repoussée d'un jour (historique conservé)", "info"); }}>+1 j</Btn></li>))}
             </ul>
           </Card>
         )}
@@ -1819,25 +2045,32 @@ const Planning: React.FC = () => {
           </div>
         </Card>
         <CalendarFeeds />
+        {noteLines.length > 0 && <Card title={<span className="flex items-center gap-2"><Pencil size={14} />Notes à planifier</span>} action={<span className="text-[11px] text-muted">glisser dans le calendrier</span>}>
+          <ul className="flex flex-col gap-1.5" data-testid="notes-tray">{noteLines.map((l, i) => (
+            <li key={i} draggable onDragStart={(e) => { e.dataTransfer.setData("text/plain", l); e.dataTransfer.effectAllowed = "copy"; }} className="group flex cursor-grab items-center gap-2 rounded-lg border-2 border-line bg-sunken px-2.5 py-1.5 text-[13px] hover:border-fg/60">
+              <span aria-hidden className="text-muted">⠿</span><span className="min-w-0 flex-1 break-words">{l}</span>
+              <Btn size="sm" variant="ghost" aria-label={`Planifier ${l}`} onClick={() => setEditor({ init: { title: l.slice(0, 80), date, start: "18:00", dur: 60 } })}><Plus size={12} />Planifier</Btn></li>))}</ul>
+          <p className="mt-2 text-[11px] text-muted">Vos notes (onglet Académique) : glissez une ligne sur une plage du calendrier, ou touchez « Planifier ».</p>
+        </Card>}
         <Card title={<span className="flex items-center gap-2"><CalendarClock size={15} />Événements</span>} action={<span className="text-[11px] text-muted">rendez-vous, sport, sorties…</span>}>
           {upcomingEvents.length ? (
             <ul className="mb-3 flex flex-col gap-1 text-xs" data-testid="events-list">{upcomingEvents.map((e) => (
               <li key={e.id} className="group flex items-center gap-2 rounded px-1 py-1 hover:bg-sunken">
                 <span className="w-16 shrink-0 text-muted">{e.recurrence === "none" ? fmtDate(e.date) : EVENT_REC_LABEL[e.recurrence]}</span>
-                <span className="font-mono tabular-nums">{e.start}–{e.end}</span><span className="min-w-0 flex-1 truncate">{e.title}</span>
-                <button className="text-muted opacity-60 hover:text-bad group-hover:opacity-100" aria-label={`Supprimer l'événement ${e.title}`} onClick={() => undoable({ type: "event/remove", id: e.id }, `« ${e.title} » supprimé${e.recurrence !== "none" ? " (toutes les occurrences)" : ""}`)}><Trash2 size={12} /></button></li>))}</ul>
+                <span className="font-mono tabular-nums">{e.start}–{e.end}</span><button className="min-w-0 flex-1 truncate text-left hover:text-accent" onClick={() => setEditor({ ev: e })} title="Détails de l'événement">{e.title}{e.steps?.length ? <span className="ml-1 font-mono text-[10px] text-muted">☑ {e.steps.filter((x) => x.done).length}/{e.steps.length}</span> : null}{e.remind !== undefined ? <span className="ml-1" title="Rappel programmé">⏰</span> : null}</button>
+                <button className="text-muted opacity-60 hover:text-bad group-hover:opacity-100" aria-label={`Supprimer l'événement ${e.title}`} onClick={() => setAskDel({ title: "Supprimer l'événement ?", text: `« ${e.title} » sera supprimé${e.recurrence !== "none" ? " (toutes les occurrences)" : ""}.`, run: () => { dispatch({ type: "event/remove", id: e.id }); toast(`« ${e.title} » supprimé`); } })}><Trash2 size={12} /></button></li>))}</ul>
           ) : <p className="mb-3 text-xs text-muted">Aucun événement à venir. Ils apparaissent dans le planning à l'heure choisie ; aucun travail n'y est placé.</p>}
           <form className="grid grid-cols-2 gap-2" onSubmit={(e) => { e.preventDefault();
             if (!ev.title.trim()) { toast("Donne un nom à l'événement.", "bad"); return; }
             if (!ev.date) { toast("Choisis une date.", "bad"); return; }
-            if (toMin(ev.end) <= toMin(ev.start)) { toast("L'heure de fin doit suivre l'heure de début.", "bad"); return; }
+            if (toMin(evEnd) <= toMin(ev.start)) { toast("Choisis une heure de début qui laisse la place à la durée.", "bad"); return; }
             if (ev.recurrence !== "none" && ev.until && ev.until < ev.date) { toast("La fin de la répétition doit suivre la première date.", "bad"); return; }
-            dispatch({ type: "event/add", event: { id: uid(), title: ev.title.trim(), date: ev.date, start: ev.start, end: ev.end, recurrence: ev.recurrence, until: ev.recurrence !== "none" && ev.until ? ev.until : null } });
+            dispatch({ type: "event/add", event: { id: uid(), title: ev.title.trim(), date: ev.date, start: ev.start, end: evEnd, recurrence: ev.recurrence, until: ev.recurrence !== "none" && ev.until ? ev.until : null } });
             toast(ev.recurrence === "none" ? "Événement ajouté au planning" : `Événement ajouté (${EVENT_REC_LABEL[ev.recurrence].toLowerCase()})`); setEv({ ...ev, title: "" }); }}>
             <Input id="ev-title" aria-label="Événement" placeholder="Ex. Dentiste, Foot, Anniversaire" className="col-span-2" value={ev.title} onChange={(e) => setEv({ ...ev, title: e.target.value })} />
             <Field label="Date" htmlFor="ev-date" className="col-span-2"><Input id="ev-date" type="date" value={ev.date} onChange={(e) => setEv({ ...ev, date: e.target.value })} /></Field>
             <Field label="Début" htmlFor="ev-start"><Input id="ev-start" type="time" value={ev.start} onChange={(e) => setEv({ ...ev, start: e.target.value })} /></Field>
-            <Field label="Fin" htmlFor="ev-end"><Input id="ev-end" type="time" value={ev.end} onChange={(e) => setEv({ ...ev, end: e.target.value })} /></Field>
+            <Field label="Durée" htmlFor="ev-dur"><DurationPicker id="ev-dur" value={ev.dur} onChange={(n) => setEv({ ...ev, dur: n })} /></Field>
             <Field label="Répétition" htmlFor="ev-rec" className={ev.recurrence === "none" ? "col-span-2" : ""}><Select id="ev-rec" value={ev.recurrence} onChange={(e) => setEv({ ...ev, recurrence: e.target.value as EventRecurrence })}>{(Object.keys(EVENT_REC_LABEL) as EventRecurrence[]).map((r) => <option key={r} value={r}>{EVENT_REC_LABEL[r]}</option>)}</Select></Field>
             {ev.recurrence !== "none" && <Field label="Jusqu'au (facultatif)" htmlFor="ev-until"><Input id="ev-until" type="date" min={ev.date} value={ev.until} onChange={(e) => setEv({ ...ev, until: e.target.value })} /></Field>}
             <Btn type="submit" className="col-span-2"><Plus size={14} />Ajouter l'événement</Btn>
@@ -1968,6 +2201,26 @@ const AcademicNotes: React.FC = () => {
   );
 };
 
+/** Examens à venir : date, heure, compte à rebours et avancement du plan de révision. */
+const ExamsCard: React.FC = () => {
+  const { state, openTask } = useStore();
+  const today = todayISO();
+  const exams = state.tasks.filter((t) => t.kind === "examen" && t.status !== "done" && t.deadline >= today).sort((a, b) => a.deadline.localeCompare(b.deadline) || (a.dueTime ?? "").localeCompare(b.dueTime ?? ""));
+  return (
+    <Card title={<span className="flex items-center gap-2"><GraduationCap size={15} />Examens à venir</span>} action={<span className="font-mono text-xs text-muted">{exams.length}</span>}>
+      {exams.length ? <ul className="flex flex-col divide-y divide-line" data-testid="exams-list">{exams.map((t) => { const c = state.courses.find((x) => x.id === t.courseId), left = daysBetween(today, t.deadline), rev = t.revision ?? [], done = rev.filter((r) => r.done).length, next = rev.filter((r) => !r.done && r.date >= today).sort((a, b) => a.date.localeCompare(b.date))[0];
+        return (<li key={t.id} className="flex flex-wrap items-center gap-2 py-2 text-[13px]">
+          <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: c?.color ?? "#e0453a" }} />
+          <button className="min-w-0 flex-1 text-left font-medium hover:text-accent" onClick={() => openTask(t.id)}>{t.title}{c ? <span className="ml-1.5 text-[11px] text-muted">{c.code || c.name}</span> : null}</button>
+          <span className="text-[12px] text-muted">{fmtDate(t.deadline)}{t.dueTime ? ` · ${t.dueTime}` : ""}</span>
+          <Pill tone={left <= 3 ? "bad" : left <= 7 ? "warn" : "muted"}>{left === 0 ? "Aujourd'hui" : `J-${left}`}</Pill>
+          <p className="basis-full pl-5 text-[11px] text-muted">{rev.length ? `Plan : ${done}/${rev.length} séances faites${next ? ` · prochaine : ${fmtDate(next.date)}${next.topic ? ` — ${next.topic}` : ""} (${fmtDur(next.minutes)})` : ""}` : "Pas de plan détaillé : modifiez l'examen pour en générer un."}</p>
+        </li>); })}</ul>
+        : <p className="text-[13px] text-muted">Aucun examen à venir. Créez une tâche de type « Examen » pour fixer la date, l'heure et un plan de révision détaillé.</p>}
+    </Card>
+  );
+};
+
 const Academic: React.FC<{ openNewTask: () => void }> = ({ openNewTask }) => {
   const { state, dispatch, toast, undoable, openTask } = useStore();
   const [filter, setFilter] = useState<string>("");
@@ -2015,6 +2268,8 @@ const Academic: React.FC<{ openNewTask: () => void }> = ({ openNewTask }) => {
                   </div>
                   <p className={cx("text-[13px] font-medium leading-snug", s === "done" && "text-muted line-through")}>{t.title}</p>
                   {taskDoneLate(t) && <p className="mt-1 text-[11px] font-semibold text-warn">⏰ Terminé en retard</p>}
+                  {!!t.postponed?.length && <p className="mt-1"><PostponedPill list={t.postponed} /></p>}
+                  {!!t.revision?.length && s !== "done" && <p className="mt-1 text-[11px] text-muted">📖 Plan de révision : {t.revision.filter((r) => r.done).length}/{t.revision.length} séances</p>}
                   {t.noPlan && s !== "done" && <p className="mt-1 text-[11px] text-muted">🚫 Pas de do date · hors planning</p>}
                   {!!t.doDates?.length && s !== "done" && <p className="mt-1 text-[11px] text-muted">{t.kind === "examen" ? "📖 Révision" : "🛠 Travail"} : {t.doDates.map((d) => fmtDate(d)).join(" · ")}</p>}
                   {!!t.steps?.length && <div className="mt-1.5" onPointerDown={(e) => e.stopPropagation()}><p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted">Checklist · {t.steps.filter((x) => x.done).length}/{t.steps.length}</p>
@@ -2022,10 +2277,11 @@ const Academic: React.FC<{ openNewTask: () => void }> = ({ openNewTask }) => {
                   <div className="mt-2 h-1 rounded-full bg-sunken"><div className="h-full rounded-full bg-accent" style={{ width: `${pct}%` }} /></div>
                   <div className="mt-2 flex items-center gap-2 text-[11px] text-muted">
                     <span className="font-mono tabular-nums">{fmtDur(t.spent)} / {fmtDur(t.estimate)}</span>
-                    <span className={cx("ml-auto", s !== "done" && left < 0 && "font-semibold text-bad", s !== "done" && left >= 0 && left <= 2 && "text-warn")}>{t.deadline === NO_DEADLINE ? "Sans échéance" : fmtDate(t.deadline)}</span>
+                    <span className={cx("ml-auto", s !== "done" && left < 0 && "font-semibold text-bad", s !== "done" && left >= 0 && left <= 2 && "text-warn")}>{t.deadline === NO_DEADLINE ? "Sans échéance" : `${fmtDate(t.deadline)}${t.dueTime ? ` · ${t.dueTime}` : ""}`}</span>
                   </div>
-                  <div className="mt-2 flex justify-between">
+                  <div className="mt-2 flex items-center justify-between">
                     <Btn size="sm" variant="ghost" disabled={s === "todo"} onClick={() => move(t, -1)} aria-label="Statut précédent"><ChevronLeft size={13} /></Btn>
+                    {s !== "done" && t.deadline !== NO_DEADLINE && <PostponeMenu current={t.deadline} label={t.title} onPick={(to) => { dispatch({ type: "task/postpone", id: t.id, to }); toast(`« ${t.title} » reportée au ${fmtDate(to)}`, "info"); }} />}
                     <Btn size="sm" variant="ghost" disabled={s === "done"} onClick={() => move(t, 1)} aria-label="Statut suivant"><ChevronRight size={13} /></Btn>
                   </div>
                 </article>); })}
@@ -2036,6 +2292,7 @@ const Academic: React.FC<{ openNewTask: () => void }> = ({ openNewTask }) => {
 
 
       {!state.tasks.length && <Empty icon={<GraduationCap size={18} />} title="Aucune tâche pour l'instant" hint="Ajoutez vos devoirs, examens et projets : ils seront répartis automatiquement dans votre planning." action={<Btn variant="primary" onClick={openNewTask}><Plus size={14} />Première tâche</Btn>} />}
+      <ExamsCard />
       <Card title="Modules" action={<span className="font-mono text-xs text-muted">{state.courses.length}</span>}>
         {state.courses.length ? (
           <ul className="flex flex-col divide-y divide-line text-[13px]">
@@ -2267,11 +2524,113 @@ const BUILTIN_TEMPLATES: GroceryTemplate[] = [
   { id: "tpl-budget", name: "Petit budget (< 20 €)", items: pick("Lentilles", "Pois chiches", "Riz basmati", "Carottes", "Oignons", "Œufs", "Thon en boîte", "Bananes") },
 ];
 
+/** Éditeur de recette : un ingrédient et une étape par ligne. */
+const RecipeEditor: React.FC<{ recipe?: Recipe; onClose: () => void }> = ({ recipe, onClose }) => {
+  const { dispatch, toast } = useStore();
+  const [name, setName] = useState(recipe?.name ?? ""), [servings, setServings] = useState(recipe?.servings ?? 2);
+  const [ing, setIng] = useState((recipe?.ingredients ?? []).join("\n")), [stp, setStp] = useState((recipe?.steps ?? []).join("\n"));
+  const lines = (t: string) => t.split("\n").map((x) => x.trim()).filter(Boolean);
+  const save = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim()) { toast("Donnez un nom à la recette.", "bad"); return; }
+    if (!lines(ing).length || !lines(stp).length) { toast("Ajoutez au moins un ingrédient et une étape (une par ligne).", "bad"); return; }
+    dispatch({ type: "recipe/save", recipe: { id: recipe?.id ?? uid(), name: name.trim(), servings: Math.max(1, Math.round(servings || 1)), ingredients: lines(ing), steps: lines(stp) } });
+    toast(`Recette « ${name.trim()} » enregistrée`); onClose();
+  };
+  return (
+    <Modal title={recipe ? "Modifier la recette" : "Nouvelle recette"} onClose={onClose}>
+      <form onSubmit={save} className="grid grid-cols-2 gap-3" data-testid="recipe-form">
+        <Field label="Nom" htmlFor="rc-name" className="col-span-2 sm:col-span-1"><Input id="rc-name" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex. Pâtes carbonara" /></Field>
+        <Field label="Nombre de personnes" htmlFor="rc-serv"><Input id="rc-serv" type="number" min={1} max={30} value={servings} onChange={(e) => setServings(Number(e.target.value))} /></Field>
+        <Field label="Ingrédients (un par ligne)" htmlFor="rc-ing" className="col-span-2"><textarea id="rc-ing" rows={6} value={ing} onChange={(e) => setIng(e.target.value)} placeholder={"200 g de pâtes\n2 œufs\n100 g de lardons"} className="w-full rounded-xl border-2 border-line bg-panel p-3 text-[13px] outline-none focus:border-accent" /></Field>
+        <Field label="Étapes (une par ligne)" htmlFor="rc-steps" className="col-span-2"><textarea id="rc-steps" rows={6} value={stp} onChange={(e) => setStp(e.target.value)} placeholder={"Faire cuire les pâtes 10 min\nFaire revenir les lardons\nMélanger hors du feu avec les œufs"} className="w-full rounded-xl border-2 border-line bg-panel p-3 text-[13px] outline-none focus:border-accent" /></Field>
+        <div className="col-span-2 flex justify-end gap-2"><Btn type="button" variant="ghost" onClick={onClose}>Annuler</Btn><Btn type="submit" variant="primary"><Check size={14} />Enregistrer</Btn></div>
+      </form>
+    </Modal>
+  );
+};
+/** Mode cuisine : plein écran, grosse police, ingrédients et étapes cochables, minuteurs détectés dans les étapes, écran maintenu allumé. */
+const CookingMode: React.FC<{ recipe: Recipe; onClose: () => void }> = ({ recipe, onClose }) => {
+  const [people, setPeople] = useState(recipe.servings ?? 2);
+  const [tab, setTab] = useState<"ing" | "steps">("steps");
+  const [ingDone, setIngDone] = useState<Set<number>>(new Set()), [stepDone, setStepDone] = useState<Set<number>>(new Set());
+  const [timer, setTimer] = useState<{ label: string; end: number } | null>(null);
+  const [tick, setTick] = useState(Date.now());
+  const factor = people / Math.max(1, recipe.servings ?? 2);
+  const cur = recipe.steps.findIndex((_, i) => !stepDone.has(i));
+  useEffect(() => {
+    let lock: { release: () => Promise<void> } | null = null;
+    try { void (navigator as Navigator & { wakeLock?: { request: (t: "screen") => Promise<{ release: () => Promise<void> }> } }).wakeLock?.request("screen").then((l) => { lock = l; }).catch(() => undefined); } catch { /* facultatif */ }
+    const k = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", k);
+    return () => { window.removeEventListener("keydown", k); void lock?.release().catch(() => undefined); };
+  }, []);
+  useEffect(() => { if (!timer) return; const id = window.setInterval(() => { setTick(Date.now()); }, 500); return () => window.clearInterval(id); }, [timer]);
+  const left = timer ? Math.max(0, Math.round((timer.end - tick) / 1000)) : 0;
+  useEffect(() => { if (timer && left === 0 && tick >= timer.end) { beep(); } }, [left, timer]);
+  const toggle = (set: Set<number>, fn: (s: Set<number>) => void, i: number) => { const n = new Set(set); if (n.has(i)) n.delete(i); else n.add(i); fn(n); };
+  const allDone = recipe.steps.length > 0 && cur === -1;
+  return createPortal(
+    <div className="fixed inset-0 z-[88] flex flex-col overflow-y-auto bg-bg text-fg" role="dialog" aria-modal="true" aria-label={`Mode cuisine : ${recipe.name}`} data-testid="cooking-mode" style={{ paddingTop: "var(--safe-top)" }}>
+      <header className="sticky top-0 z-10 flex flex-wrap items-center gap-3 border-b-2 border-line bg-bg px-4 py-3">
+        <h2 className="min-w-0 flex-1 truncate font-display text-xl font-extrabold sm:text-2xl">{recipe.name}</h2>
+        <div className="flex items-center gap-1.5 text-[15px]" aria-label="Nombre de personnes"><Btn size="sm" onClick={() => setPeople(Math.max(1, people - 1))} aria-label="Moins de personnes">−</Btn><span className="min-w-[4.5rem] text-center font-semibold">{people} pers.</span><Btn size="sm" onClick={() => setPeople(Math.min(30, people + 1))} aria-label="Plus de personnes">+</Btn></div>
+        <Btn variant="primary" onClick={onClose} data-testid="cooking-close"><X size={14} />Quitter</Btn>
+      </header>
+      {timer && <div className="mx-4 mt-3 flex items-center justify-between rounded-2xl border-2 border-fg bg-hi px-4 py-2 text-[rgb(24_22_46)]" role="timer">
+        <span className="text-[15px] font-semibold">⏱ {timer.label}</span><span className="font-mono text-3xl font-extrabold tabular-nums">{pad(Math.floor(left / 60))}:{pad(left % 60)}</span>
+        <Btn size="sm" onClick={() => setTimer(null)}>{left === 0 ? "OK" : "Arrêter"}</Btn></div>}
+      <div className="mx-4 mt-3 flex gap-1 rounded-xl bg-sunken p-1 text-[15px] font-semibold" role="tablist">
+        {([["ing", `Ingrédients ${ingDone.size}/${recipe.ingredients.length}`], ["steps", `Étapes ${stepDone.size}/${recipe.steps.length}`]] as const).map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)} className={cx("flex-1 rounded-lg px-3 py-2.5", tab === k ? "bg-panel shadow-sm" : "text-muted")}>{l}</button>)}
+      </div>
+      <div className="mx-auto w-full max-w-3xl flex-1 px-4 py-4">
+        {tab === "ing" ? <ul className="flex flex-col gap-2" aria-label="Ingrédients">{recipe.ingredients.map((x, i) => { const d = ingDone.has(i); return (
+          <li key={i}><button onClick={() => toggle(ingDone, setIngDone, i)} aria-pressed={d} className={cx("flex w-full items-center gap-4 rounded-2xl border-2 px-4 py-4 text-left text-xl leading-snug sm:text-2xl", d ? "border-line bg-sunken text-muted line-through" : "border-fg/70 bg-panel")}>
+            <span className={cx("grid h-8 w-8 shrink-0 place-items-center rounded-lg border-2", d ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-fg/50")}>{d && <Check size={18} strokeWidth={3} />}</span><span className="min-w-0 break-words">{scaleIngredient(x, factor)}</span></button></li>); })}</ul>
+        : <ol className="flex flex-col gap-3" aria-label="Étapes">{recipe.steps.map((x, i) => { const d = stepDone.has(i), isCur = i === cur, mins = stepMinutes(x); return (
+          <li key={i} className={cx("rounded-2xl border-2 px-4 py-4", isCur ? "border-fg bg-panel shadow-[4px_4px_0_0_rgb(var(--ink))]" : d ? "border-line bg-sunken" : "border-line bg-panel")}>
+            <button onClick={() => toggle(stepDone, setStepDone, i)} aria-pressed={d} className="flex w-full items-start gap-4 text-left">
+              <span className={cx("mt-1 grid h-9 w-9 shrink-0 place-items-center rounded-full border-2 font-bold", d ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-fg/50")}>{d ? <Check size={18} strokeWidth={3} /> : i + 1}</span>
+              <span className={cx("min-w-0 break-words leading-snug", isCur ? "text-2xl font-semibold sm:text-3xl" : "text-xl", d && "text-muted line-through")}>{x}</span></button>
+            {mins && !d && <Btn className="ml-[3.25rem] mt-3" onClick={() => setTimer({ label: `Étape ${i + 1} · ${fmtDur(mins)}`, end: Date.now() + mins * 60_000 })}>⏱ Lancer {fmtDur(mins)}</Btn>}
+          </li>); })}</ol>}
+        {tab === "steps" && (allDone ? <p className="mt-5 rounded-2xl bg-ok/12 p-4 text-center text-xl font-semibold text-ok">Bon appétit ! 🎉</p>
+          : <div className="mt-5 flex justify-between gap-3"><Btn disabled={stepDone.size === 0} onClick={() => { const last = [...stepDone].sort((a, b) => a - b).pop(); if (last !== undefined) toggle(stepDone, setStepDone, last); }}>‹ Étape précédente</Btn>
+            <Btn variant="primary" onClick={() => cur >= 0 && toggle(stepDone, setStepDone, cur)} data-testid="cooking-next">Étape faite ›</Btn></div>)}
+      </div>
+    </div>, document.body);
+};
+const RecipesCard: React.FC = () => {
+  const { state, dispatch, toast, undoable } = useStore();
+  const [edit, setEdit] = useState<{ recipe?: Recipe } | null>(null); const [cook, setCook] = useState<Recipe | null>(null);
+  const recipes = state.recipes ?? [];
+  const addToList = (r: Recipe) => {
+    const have = new Set(state.groceries.map((g) => norm(g.name)));
+    const items = r.ingredients.map(parseIngredient).filter((i) => i.name && !have.has(norm(i.name))).map((i) => ({ id: uid(), name: i.name, aisle: guessAisle(i.name), qty: i.qty, checked: false, price: state.products.find((p) => norm(p.name) === norm(i.name))?.price ?? 0 }));
+    if (!items.length) { toast("Tous les ingrédients sont déjà dans votre liste.", "info"); return; }
+    dispatch({ type: "grocery/addMany", items }); toast(`${items.length} ingrédient${items.length > 1 ? "s" : ""} ajouté${items.length > 1 ? "s" : ""} à la liste de courses`);
+  };
+  return (
+    <Card title={<span className="flex items-center gap-2"><ChefHat size={15} />Recettes</span>} action={<Btn size="sm" onClick={() => setEdit({})} data-testid="recipe-new"><Plus size={12} />Recette</Btn>}>
+      {cook && <CookingMode recipe={cook} onClose={() => setCook(null)} />}
+      {edit && <RecipeEditor recipe={edit.recipe} onClose={() => setEdit(null)} />}
+      {recipes.length ? <ul className="flex flex-col gap-2" data-testid="recipes-list">{recipes.map((r) => (
+        <li key={r.id} className="rounded-xl border-2 border-line p-2.5 text-[13px]">
+          <div className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate font-semibold">{r.name}</span><span className="font-mono text-[10px] text-muted">{r.ingredients.length} ingr. · {r.steps.length} étapes</span>
+            <button className="text-muted hover:text-accent" aria-label={`Modifier ${r.name}`} onClick={() => setEdit({ recipe: r })}><Pencil size={12} /></button>
+            <button className="text-muted hover:text-bad" aria-label={`Supprimer ${r.name}`} onClick={() => undoable({ type: "recipe/remove", id: r.id }, `Recette « ${r.name} » supprimée`)}><Trash2 size={12} /></button></div>
+          <div className="mt-2 flex flex-wrap gap-1.5"><Btn size="sm" variant="primary" onClick={() => setCook(r)} data-testid={`cook-${r.id}`}><ChefHat size={12} />Mode cuisine</Btn><Btn size="sm" onClick={() => addToList(r)}><ShoppingCart size={12} />Ingrédients → liste</Btn></div>
+        </li>))}</ul>
+        : <p className="text-xs text-muted">Aucune recette. Ajoutez-en une (ingrédients et étapes, une par ligne) pour cuisiner avec une grande police, des cases à cocher et des minuteurs.</p>}
+    </Card>
+  );
+};
+
 const PersonalGroceries: React.FC = () => {
   const { state, dispatch, toast, undoable } = useStore();
   const [name, setName] = useState(""); const [qty, setQty] = useState(""); const [aisle, setAisle] = useState<Aisle | "auto">("auto");
   const [quick, setQuick] = useState(false); const [bulk, setBulk] = useState(""); const [hideChecked, setHideChecked] = useState(false);
-  const [price, setPrice] = useState(""); const [paid, setPaid] = useState("");
+  const [price, setPrice] = useState(""); const [paid, setPaid] = useState(""); const [pending, setPending] = useState(false);
   const [tplName, setTplName] = useState(""); const [dbQuery, setDbQuery] = useState("");
   // Base produits = vos produits appris (prioritaires) + catalogue courant.
   const db = useMemo(() => {
@@ -2321,6 +2680,8 @@ const PersonalGroceries: React.FC = () => {
     dispatch({ type: "grocery/add", item: { id: uid(), name: rebuy.name, aisle: rebuy.aisle, qty: "", checked: false, price: rebuy.price } });
     toast(`${rebuy.name} remis sur la liste`, "ok"); setRebuy(null);
   };
+  const toReceive = pendingReceipts(state);
+  const homeNames = new Set(pantryItems(state, todayISO()).map((x) => norm(x.name)));
   const home = pantryItems(state, todayISO()).map((x) => {
     const a = state.products.find((p) => norm(p.name) === norm(x.name))?.aisle ?? guessAisle(x.name);
     return { ...x, place: a === "Frais" || a === "Surgelés" || a === "Fruits & légumes" ? "Frigo et congélateur" as const : a === "Hygiène" || a === "Entretien" ? "Salle de bain et entretien" as const : "Placards" as const };
@@ -2340,8 +2701,8 @@ const PersonalGroceries: React.FC = () => {
     const amount = paid.trim() ? parseAmount(paid) : cartTotal;
     if (!(amount > 0)) { toast("Indiquez le montant payé (ou des prix sur les articles cochés).", "bad"); return; }
     if (ticketFp && knownTickets.includes(ticketFp)) { toast("Ce ticket est déjà enregistré dans le budget.", "bad"); return; }
-    dispatch({ type: "grocery/checkout", amount, date: todayISO(), ...(ticketFp ? { ticket: ticketFp } : {}) }); setPaid(""); setTicketFp("");
-    toast(`Dépense de ${money(amount, cur)} ajoutée au budget Courses`);
+    dispatch({ type: "grocery/checkout", amount, date: todayISO(), ...(ticketFp ? { ticket: ticketFp } : {}), ...(pending ? { pending: true } : {}) }); setPaid(""); setTicketFp(""); setPending(false);
+    toast(pending ? `Dépense de ${money(amount, cur)} ajoutée · articles « à recevoir » (pas encore à la maison)` : `Dépense de ${money(amount, cur)} ajoutée au budget Courses`);
   };
   const add = (e: React.FormEvent) => {
     e.preventDefault(); if (!name.trim()) return;
@@ -2357,7 +2718,7 @@ const PersonalGroceries: React.FC = () => {
   };
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-      <Card title={<span className="flex items-center gap-2"><ShoppingCart size={15} />Liste de courses <Pill tone={left ? "info" : "ok"}>{left} restants</Pill></span>}
+      <Card title={<span className="flex items-center gap-2"><ShoppingCart size={15} />Liste de courses <Pill tone={left ? "info" : "ok"}>À acheter · {left}</Pill></span>}
         action={<><Btn size="sm" variant={quick ? "primary" : "soft"} onClick={() => setQuick(!quick)}><Zap size={12} />Mode rapide</Btn><Btn size="sm" variant="ghost" onClick={() => setHideChecked(!hideChecked)}>{hideChecked ? "Afficher" : "Masquer"} cochés</Btn></>}>
         {!state.groceries.length ? <Empty icon={<ShoppingCart size={18} />} title="Liste vide" hint="Ajoutez un article à droite ; le rayon est deviné automatiquement." /> : (
           <div className={cx("grid gap-4", !quick && "sm:grid-cols-2")}>
@@ -2369,6 +2730,7 @@ const PersonalGroceries: React.FC = () => {
                     <li key={g.id} className={cx("group flex items-center gap-3 rounded-lg px-2 transition-all duration-300 hover:translate-x-0.5 hover:bg-sunken", quick ? "py-3 text-base" : "py-1.5 text-[13px]")}>
                       <button onClick={() => dispatch({ type: "grocery/toggle", id: g.id })} aria-label={g.checked ? "Décocher" : "Cocher"} className={cx("grid shrink-0 place-items-center rounded border transition", quick ? "h-6 w-6" : "h-4 w-4", g.checked ? "scale-110 border-fg bg-hi text-[rgb(24_22_46)]" : "border-fg/40 hover:border-accent")}>{g.checked && <Check className="tick" size={quick ? 14 : 11} strokeWidth={3} />}</button>
                       <span className={cx("min-w-0 flex-1 truncate", g.checked && "text-muted line-through")}>{g.name}</span>
+                      {!g.checked && homeNames.has(norm(g.name)) && <span className="shrink-0 rounded-full bg-ok/12 px-1.5 text-[10px] font-semibold text-ok" title="Vous en avez déjà à la maison (achat récent)">🏠 déjà là</span>}
                       {g.qty && <span className="font-mono text-xs text-muted">{g.qty}</span>}
                       {quick ? (g.price > 0 && <span className="font-mono text-xs tabular-nums text-muted">{money(g.price, cur)}</span>) : (
                         <input id={`gp-${g.id}`} aria-label={`Prix ${g.name}`} inputMode="decimal" defaultValue={g.price ? String(g.price).replace(".", ",") : ""} placeholder="prix"
@@ -2386,7 +2748,8 @@ const PersonalGroceries: React.FC = () => {
             <ReceiptScanner label="Scanner le ticket de caisse" withItems known={knownTickets} onConfirm={onTicket} />
             {state.groceries.some((g) => g.checked) && <>
               <Field label="Montant payé" htmlFor="gr-paid"><Input id="gr-paid" inputMode="decimal" className="w-28" placeholder={cartTotal ? cartTotal.toFixed(2).replace(".", ",") : "0,00"} value={paid} onChange={(e) => setPaid(e.target.value)} /></Field>
-              <Btn variant="primary" onClick={checkout}><Receipt size={14} />Valider les achats</Btn>
+              <label className="flex max-w-[15rem] items-center gap-2 pb-2 text-[12px] leading-tight text-muted" title="Cochez si les articles sont commandés ou à récupérer : ils ne seront « à la maison » qu'une fois reçus."><input type="checkbox" checked={pending} onChange={(e) => setPending(e.target.checked)} data-testid="gr-pending" />Commande / livraison : pas encore reçue</label>
+              <Btn variant="primary" onClick={checkout}><Receipt size={14} />{pending ? "Valider (à recevoir)" : "Valider les achats"}</Btn>
               <Btn variant="ghost" onClick={() => undoable({ type: "grocery/clearChecked" }, "Articles cochés retirés sans dépense")}><Trash2 size={13} />Retirer sans dépense</Btn></>}
           </div>)}
       </Card>
@@ -2409,7 +2772,14 @@ const PersonalGroceries: React.FC = () => {
               </div>
             </div>
           </div>, document.body)}
-        <Card title={<span className="flex items-center gap-2"><Home size={15} />À la maison</span>}>
+        {toReceive.length > 0 && <Card title={<span className="flex items-center gap-2"><Package size={15} />À recevoir <Pill tone="warn">{toReceive.length}</Pill></span>}>
+          <p className="mb-2 text-[11px] text-muted">Commandé ou à récupérer : ces articles ne sont pas encore « à la maison ». Confirmez quand vous les avez vraiment.</p>
+          <ul className="flex flex-col gap-2" data-testid="to-receive">{toReceive.map((r) => (
+            <li key={r.expenseId} className="rounded-xl border-2 border-line p-2.5 text-[13px]"><div className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate font-medium">{r.label}</span><span className="font-mono text-[10px] text-muted">{fmtDate(r.date)}</span></div>
+              <p className="mt-0.5 text-[12px] text-muted">{r.items.join(", ")}</p>
+              <Btn size="sm" variant="primary" className="mt-2" onClick={() => { dispatch({ type: "expense/received", id: r.expenseId }); toast(`${r.items.length} article${r.items.length > 1 ? "s" : ""} maintenant à la maison`); }}><Check size={13} />Reçu / prêt</Btn></li>))}</ul>
+        </Card>}
+        <Card title={<span className="flex items-center gap-2"><Home size={15} />À la maison <Pill tone="ok">Déjà dispo · {home.length}</Pill></span>}>
           {home.length ? (<>
             <p className="mb-2 text-[11px] text-muted">Estimation d'après vos achats des 3 dernières semaines. Touchez « Fini » quand quelque chose est consommé.</p>
             {(["Frigo et congélateur", "Placards", "Salle de bain et entretien"] as const).map((place) => { const xs = home.filter((x) => x.place === place); if (!xs.length) return null; return (
@@ -2449,6 +2819,7 @@ const PersonalGroceries: React.FC = () => {
             <Btn onClick={saveTemplate} disabled={!state.groceries.length} aria-label="Enregistrer la liste"><Plus size={14} /></Btn>
           </div>
         </Card>
+        <RecipesCard />
         <Card title={<span className="flex items-center gap-2"><Database size={15} />Base de produits</span>} action={<span className="font-mono text-[11px] text-muted">{db.length}</span>}>
           <Input id="db-q" aria-label="Chercher un produit" placeholder="Chercher un produit…" value={dbQuery} onChange={(e) => setDbQuery(e.target.value)} />
           <ul className="mt-2 flex max-h-72 flex-col divide-y divide-line overflow-y-auto text-[13px]">
@@ -2506,6 +2877,101 @@ const CatSelect: React.FC<Omit<React.SelectHTMLAttributes<HTMLSelectElement>, "o
     </Select>
   );
 };
+/** Téléchargement (ou feuille de partage sur iPhone) d'un PDF généré dans le navigateur. */
+async function savePdf(bytes: Uint8Array, file: string): Promise<"shared" | "downloaded"> {
+  const blob = new Blob([bytes], { type: "application/pdf" }), f = new File([blob], file, { type: "application/pdf" });
+  const nav = navigator as Navigator & { canShare?: (d: { files: File[] }) => boolean };
+  if (/iPad|iPhone|iPod|Macintosh/.test(navigator.userAgent) && "ontouchend" in document && nav.canShare?.({ files: [f] })) {
+    try { await navigator.share({ files: [f], title: file }); return "shared"; } catch (e) { if ((e as Error).name === "AbortError") return "shared"; }
+  }
+  const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = file; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  return "downloaded";
+}
+/** Dettes de colocation : qui me doit combien, à qui je dois combien. */
+const DebtsCard: React.FC = () => {
+  const fd = useFlat(); const { state } = useStore();
+  if (fd.status !== "in" || !fd.flat) return null;
+  const cur = state.settings.currency, d = flatDebts(fd.flat, fd.expenses);
+  const settled = !d.owedToMe.length && !d.iOwe.length;
+  return (
+    <Card title={<span className="flex items-center gap-2"><Users size={15} />Dettes de colocation · {fd.flat.name}</span>} action={!settled ? <Pill tone={d.net >= 0 ? "ok" : "warn"}>{d.net >= 0 ? "+" : "−"}{money(Math.abs(d.net) / 100, cur)} net</Pill> : undefined}>
+      {settled ? <p className="text-[13px] text-muted" data-testid="debts-settled">Tout est réglé : personne ne doit rien à personne. 🎉</p> : (
+        <div className="grid gap-4 sm:grid-cols-2" data-testid="debts">
+          <div><p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-ok">On me doit · {money(d.totalOwedToMe / 100, cur)}</p>
+            {d.owedToMe.length ? <ul className="flex flex-col gap-1 text-[13px]">{d.owedToMe.map((x, i) => <li key={i} className="flex justify-between gap-2"><span className="truncate">{x.name}</span><span className="font-mono tabular-nums text-ok">+{money(x.cents / 100, cur)}</span></li>)}</ul> : <p className="text-[12px] text-muted">Personne ne te doit rien.</p>}</div>
+          <div><p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-bad">Je dois · {money(d.totalIOwe / 100, cur)}</p>
+            {d.iOwe.length ? <ul className="flex flex-col gap-1 text-[13px]">{d.iOwe.map((x, i) => <li key={i} className="flex justify-between gap-2"><span className="truncate">{x.name}</span><span className="font-mono tabular-nums text-bad">−{money(x.cents / 100, cur)}</span></li>)}</ul> : <p className="text-[12px] text-muted">Tu ne dois rien à personne.</p>}</div>
+        </div>)}
+      <p className="mt-3 text-[11px] text-muted">Pour enregistrer un remboursement : bascule sur « {fd.flat.name} » en haut de cet onglet, puis « Marquer remboursé ».</p>
+    </Card>
+  );
+};
+/** Argent de poche : enveloppe hebdomadaire ou mensuelle pour les dépenses plaisir, prise sur le budget existant. */
+const PocketCard: React.FC = () => {
+  const { state, dispatch, toast } = useStore();
+  const cur = state.settings.currency, b = state.budget, today = todayISO();
+  const p = pocketStats(b, today), cfg = b.pocket;
+  const [open, setOpen] = useState(false);
+  const [amt, setAmt] = useState(cfg ? String(cfg.amount).replace(".", ",") : ""), [period, setPeriod] = useState<"week" | "month">(cfg?.period ?? "week");
+  const [cats, setCats] = useState<string[]>(cfg?.cats.length ? cfg.cats : DEFAULT_POCKET_CATS);
+  const allCats = catsOf(state).filter((c) => c !== "Logement");
+  const save = (e: React.FormEvent) => {
+    e.preventDefault(); const v = parseAmount(amt);
+    if (!(v > 0) || v > 100000) { toast("Saisissez un montant positif pour l'argent de poche.", "bad"); return; }
+    if (!cats.length) { toast("Choisissez au moins une catégorie.", "bad"); return; }
+    const monthEq = period === "week" ? v * (new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate() / 7) : v;
+    dispatch({ type: "budget/set", patch: { pocket: { amount: Math.round(v * 100) / 100, period, cats } } });
+    toast(monthEq > b.monthly ? `Argent de poche enregistré — attention, il dépasse le budget mensuel (${money(b.monthly, cur)}).` : "Argent de poche enregistré", monthEq > b.monthly ? "info" : "ok"); setOpen(false);
+  };
+  return (
+    <Card title={<span className="flex items-center gap-2"><Wallet size={15} />Argent de poche</span>} action={<Btn size="sm" variant={open ? "primary" : "soft"} onClick={() => setOpen(!open)} data-testid="pocket-config">{open ? "Fermer" : cfg ? "Régler" : "Activer"}</Btn>}>
+      {p ? (<div data-testid="pocket">
+        <div className="flex items-end justify-between gap-2"><p className="font-display text-2xl font-extrabold tabular-nums" data-testid="pocket-remaining">{money(Math.max(0, p.remaining), cur)}<span className="ml-1.5 text-[12px] font-medium text-muted">restants sur {money(p.cfg.amount, cur)}</span></p>
+          <Pill tone={p.over ? "bad" : p.ahead ? "warn" : "ok"}>{p.over ? "dépassé" : p.ahead ? "rythme rapide" : "dans le rythme"}</Pill></div>
+        <div className="mt-2 h-2 rounded-full bg-sunken"><div className="h-full rounded-full" style={{ width: `${Math.min(100, p.pct)}%`, background: p.over ? "rgb(var(--bad))" : p.ahead ? "rgb(var(--warn))" : "rgb(var(--ok))" }} /></div>
+        <p className="mt-1.5 text-[12px] text-muted">{p.cfg.period === "week" ? "Cette semaine" : "Ce mois"} · {fmtDate(p.from)} → {fmtDate(p.to)} · dépensé {money(p.spent, cur)} ({p.pct} %){!p.over && ` · environ ${money(p.perDay, cur)} par jour jusqu'à la fin`}</p>
+        <p className="mt-1 text-[11px] text-muted">Catégories comptées : {(p.cfg.cats.length ? p.cfg.cats : DEFAULT_POCKET_CATS).join(", ")}. Les récurrentes ne comptent pas.</p>
+      </div>) : !open && <p className="text-[13px] text-muted">Fixe une enveloppe pour tes dépenses plaisir (sorties, resto, loisirs) : par semaine ou par mois, prise sur ton budget. Tu vois ce qu'il reste, jour après jour.</p>}
+      {open && <form onSubmit={save} className="mt-3 grid grid-cols-2 gap-3 border-t border-line pt-3" data-testid="pocket-form">
+        <Field label={`Montant (${cur})`} htmlFor="pk-amt"><Input id="pk-amt" inputMode="decimal" value={amt} onChange={(e) => setAmt(e.target.value)} placeholder="Ex. 25" /></Field>
+        <Field label="Période" htmlFor="pk-period"><Select id="pk-period" value={period} onChange={(e) => setPeriod(e.target.value as "week" | "month")}><option value="week">Par semaine</option><option value="month">Par mois</option></Select></Field>
+        <div className="col-span-2"><p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">Catégories concernées</p>
+          <div className="flex flex-wrap gap-1.5">{allCats.map((c) => { const on = cats.includes(c); return <button key={c} type="button" aria-pressed={on} onClick={() => setCats(on ? cats.filter((x) => x !== c) : [...cats, c])} className={cx("rounded-full border px-2.5 py-1 text-[12px]", on ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-line bg-sunken")}>{c}</button>; })}</div></div>
+        <div className="col-span-2 flex justify-between gap-2">{cfg ? <Btn type="button" variant="danger" onClick={() => { dispatch({ type: "budget/set", patch: { pocket: null } }); toast("Argent de poche désactivé", "info"); setOpen(false); }}>Désactiver</Btn> : <span />}<Btn type="submit" variant="primary"><Check size={14} />Enregistrer</Btn></div>
+      </form>}
+    </Card>
+  );
+};
+/** Conseils bienveillants (jamais de jugement) et analyse PDF du mois. */
+const InsightsCard: React.FC<{ mk: string }> = ({ mk }) => {
+  const { state, toast } = useStore(); const fd = useFlat();
+  const [busy, setBusy] = useState(false);
+  const today = todayISO(), cur = state.settings.currency, b = state.budget;
+  const insights = mk === monthKey(today) ? budgetInsights(b, today, cur) : [];
+  const exportPdf = async () => {
+    setBusy(true);
+    try {
+      const cats = catsOf(state), bs = budgetStats(b, mk, today, cats);
+      const prevMk = monthKey(iso(new Date(parseISO(`${mk}-01`).getFullYear(), parseISO(`${mk}-01`).getMonth() - 1, 1)));
+      const cb = categoryBreakdown(bs, b.monthly, b.limits);
+      const bytes = buildBudgetPdf({ month: mk, name: state.settings.name, cur, monthly: b.monthly, stats: bs, prevSpent: budgetStats(b, prevMk, today, cats).spent, lines: cb.lines, unallocated: cb.unallocated,
+        pocket: pocketStats(b, today), insights, top: b.expenses.filter((e) => monthKey(e.date) === mk).sort((x, y) => y.amount - x.amount).slice(0, 8),
+        recurring: b.recurring.filter((r) => r.active).map((r) => ({ label: r.label, amount: r.amount, day: r.day })), debts: fd.status === "in" && fd.flat ? flatDebts(fd.flat, fd.expenses) : null, generatedAt: new Date().toISOString() });
+      const r = await savePdf(bytes, `analyse-budget-${mk}.pdf`); if (r === "downloaded") toast("Analyse PDF téléchargée");
+    } catch { toast("Impossible de générer le PDF.", "bad"); } finally { setBusy(false); }
+  };
+  return (
+    <Card title={<span className="flex items-center gap-2"><Sparkles size={15} />Repères & analyse</span>} action={<Btn size="sm" onClick={() => void exportPdf()} disabled={busy} data-testid="budget-pdf"><Download size={13} />{busy ? "Création…" : "Analyse PDF"}</Btn>}>
+      {insights.length ? <ul className="flex flex-col gap-2" data-testid="insights">{insights.map((i) => (
+        <li key={i.id} className={cx("rounded-xl border-l-4 bg-sunken p-3 text-[13px]", i.tone === "warn" ? "border-l-warn" : i.tone === "ok" ? "border-l-ok" : "border-l-accent")}>
+          <p className="font-semibold">{i.title}</p><p className="mt-0.5 leading-relaxed text-muted">{i.text}</p></li>))}</ul>
+        : <p className="text-[13px] text-muted">{mk === monthKey(today) ? "Rien de particulier à signaler pour l'instant. Les repères apparaissent au fil de tes dépenses." : "Les repères concernent le mois en cours. L'analyse PDF reste disponible pour ce mois."}</p>}
+      <p className="mt-2 text-[11px] text-muted">Repères indicatifs, sans jugement : ils s'appuient sur tes saisies et ne remplacent pas un conseil financier.</p>
+    </Card>
+  );
+};
+
 const PersonalBudget: React.FC = () => {
   const { state, dispatch, toast, undoable } = useStore();
   const cur = state.settings.currency;
@@ -2537,6 +3003,8 @@ const PersonalBudget: React.FC = () => {
     dispatch({ type: "expense/add", expense: { id: uid(), date: f.date, amount, category: f.category, label: f.label.trim() || f.category, source: f.source, ...(f.items.length ? { items: f.items } : {}), ...(f.ticket ? { ticket: f.ticket } : {}) } });
     const lim = state.budget.limits[f.category];
     const catSpent = bs.byCat.find((x) => x.cat === f.category)?.spent ?? 0;
+    const pk = pocketStats(state.budget, today), pkOn = pk && f.date >= pk.from && f.date <= pk.to && (pk.cfg.cats.length ? pk.cfg.cats : DEFAULT_POCKET_CATS).map(norm).includes(norm(f.category));
+    if (pkOn && pk.remaining >= 0 && pk.remaining - amount < 0) { toast(`${money(amount, cur)} ajoutés · cela dépasse ton argent de poche de ${money(amount - pk.remaining, cur)}. Pas grave : tu peux réajuster les prochains jours.`, "info"); setF({ ...f, label: "", amount: "", source: "manuel", items: [], ticket: "" }); return; }
     if (monthKey(f.date) === mk && lim && catSpent <= lim && catSpent + amount > lim) toast(`${money(amount, cur)} ajoutés · plafond ${f.category} dépassé (${money(catSpent + amount, cur)} / ${money(lim, cur)})`, "bad");
     else toast(`${money(amount, cur)} ajoutés en ${f.category}`);
     setF({ ...f, label: "", amount: "", source: "manuel", items: [], ticket: "" });
@@ -2570,6 +3038,9 @@ const PersonalBudget: React.FC = () => {
       </div>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="flex min-w-0 flex-col gap-4">
+          <InsightsCard mk={mk} />
+          <DebtsCard />
+          <PocketCard />
           <Card title="Dépenses par jour" action={<Pill tone="info">{elapsed ? `${money(bs.variable / elapsed, cur)} / jour hors récurrentes` : "—"}</Pill>}>
             <BarChart data={daily.map((v, i) => ({ label: (i + 1) % 5 === 0 || i === 0 ? String(i + 1) : "", value: v, tone: v > state.budget.monthly / dim * 2 ? "warn" : "accent" }))} goal={state.budget.monthly / dim} unit={(v) => `${Math.round(v)}`} />
             <p className="mt-1 text-xs text-muted">Ligne pointillée : budget journalier moyen ({money(state.budget.monthly / dim, cur)}).</p>
@@ -2641,6 +3112,7 @@ const PersonalBudget: React.FC = () => {
                     {editLimits ? <Input id={`lim-${c}`} aria-label={`Plafond ${c}`} inputMode="decimal" placeholder="aucun" className="h-7 w-24 text-xs" defaultValue={lim ? String(lim) : ""}
                       onBlur={(e) => { const val = e.target.value.trim() ? parseAmount(e.target.value) : 0; const limits = { ...state.budget.limits }; if (val > 0) limits[c] = val; else delete limits[c]; dispatch({ type: "budget/set", patch: { limits } }); }} />
                       : <span className={cx("font-mono tabular-nums", lim && v > lim ? "text-bad" : "text-muted")}>{money(v, cur)}{lim ? ` / ${money(lim, cur)}` : ""}</span>}</div>
+                  {!editLimits && <p className={cx("mb-1 text-[11px]", lim && v > lim ? "text-bad" : "text-muted")} data-testid={`cat-remaining-${c}`}>{lim ? (v <= lim ? `Reste ${money(lim - v, cur)}` : `Dépassé de ${money(v - lim, cur)}`) : "Sans plafond"}</p>}
                   <div className="h-1.5 rounded-full bg-sunken"><div className="h-full rounded-full" style={{ width: `${Math.min(100, (v / (lim || Math.max(spent, 1))) * 100)}%`, background: lim && v > lim ? "rgb(var(--bad))" : CAT_COLOR[c] }} /></div>
                 </div>))}
               {!editLimits && !byCat.length && <div className="text-xs text-muted"><p>Aucune dépense ni plafond ce mois-ci.</p><button className="mt-1 font-semibold text-accent underline" onClick={() => setEditLimits(true)}>Fixer des plafonds par catégorie</button></div>}
@@ -2954,7 +3426,7 @@ const ChoresBoard: React.FC<{ flat?: boolean }> = ({ flat = false }) => {
             <Field label="Jour" htmlFor="ch-day"><Select id="ch-day" value={f.day} disabled={f.recurrence === "daily"} onChange={(e) => setF({ ...f, day: Number(e.target.value) })}>{DAYS_LONG.map((d, i) => <option key={d} value={i}>{d}</option>)}</Select></Field></>}
             <TimeMode id="ch-mode" value={cmode} onChange={setCmode} className="col-span-2" />
             {cmode === "duration"
-              ? <Field label="Durée (min)" htmlFor="ch-min" className="col-span-2"><Input id="ch-min" type="number" min={5} step={5} value={f.minutes} onChange={(e) => setF({ ...f, minutes: Number(e.target.value) })} /></Field>
+              ? <Field label="Durée" htmlFor="ch-min" className="col-span-2"><DurationPicker id="ch-min" value={f.minutes} onChange={(n) => setF({ ...f, minutes: n })} /></Field>
               : <><Field label="Début" htmlFor="ch-time"><Input id="ch-time" type="time" value={f.time} onChange={(e) => setF({ ...f, time: e.target.value })} /></Field>
                 <Field label="Fin" htmlFor="ch-end"><Input id="ch-end" type="time" value={f.end} onChange={(e) => setF({ ...f, end: e.target.value })} /></Field></>}
             <StepsEditor id="ch-steps" steps={newSteps} onChange={setNewSteps} className="col-span-2" placeholder="Ex. Vider le frigo, laver les étagères…" />
@@ -3076,6 +3548,8 @@ const HabitForm: React.FC<{ habit?: Habit; preset?: (typeof HABIT_PRESETS)[numbe
   const init = habit ?? (preset ? { name: preset.name, emoji: preset.emoji, cat: preset.cat, time: preset.time, days: preset.days ?? ALL_DAYS, steps: (preset.steps ?? []).map((text) => ({ id: uid(), text })), note: "" } : null);
   const [f, setF] = useState({ name: init?.name ?? "", emoji: init?.emoji ?? "✨", cat: (init?.cat ?? "soin") as HabitCat, time: init?.time ?? "", days: init?.days ?? ALL_DAYS, note: init?.note ?? "" });
   const [steps, setSteps] = useState<Step[]>(init?.steps ?? []);
+  const [inCal, setInCal] = useState(!!habit?.inCalendar);
+  const [duration, setDuration] = useState(habit?.duration ?? 15);
   const [rec, setRec] = useState<"week" | "every" | "month">(habit?.every ? "every" : habit?.monthDay ? "month" : "week");
   const [every, setEvery] = useState(habit?.every ?? 2), [monthDay, setMonthDay] = useState(habit?.monthDay ?? new Date().getDate());
   const submit = (e: React.FormEvent) => {
@@ -3083,7 +3557,7 @@ const HabitForm: React.FC<{ habit?: Habit; preset?: (typeof HABIT_PRESETS)[numbe
     if (!f.name.trim()) { toast("Donnez un nom à la routine.", "bad"); return; }
     if (rec === "week" && !f.days.length) { toast("Choisissez au moins un jour.", "bad"); return; }
     const clean = steps.map((x) => ({ id: x.id, text: x.text.trim() })).filter((x) => x.text);
-    const data = { name: f.name.trim(), emoji: f.emoji, cat: f.cat, days: [...f.days].sort(), time: f.time || undefined, note: f.note.trim() || undefined, steps: clean.length ? clean : undefined,
+    const data = { name: f.name.trim(), emoji: f.emoji, cat: f.cat, days: [...f.days].sort(), time: f.time || undefined, note: f.note.trim() || undefined, steps: clean.length ? clean : undefined, inCalendar: inCal ? true : undefined, duration: inCal ? duration : undefined,
       every: rec === "every" ? Math.max(2, Math.min(60, Math.round(every))) : undefined, monthDay: rec === "month" ? Math.max(1, Math.min(31, Math.round(monthDay))) : undefined };
     if (habit) { dispatch({ type: "habit/update", id: habit.id, patch: data }); toast("Routine mise à jour"); }
     else { dispatch({ type: "habit/add", habit: { id: uid(), ...data, done: [], stepsDone: {}, since: todayISO() } }); toast(`${f.emoji} ${f.name.trim()} ajoutée`); }
@@ -3108,6 +3582,11 @@ const HabitForm: React.FC<{ habit?: Habit; preset?: (typeof HABIT_PRESETS)[numbe
         <div className="flex gap-1.5">{DAYS.map((d, i) => { const on = f.days.includes(i); return <button key={d} type="button" aria-pressed={on} onClick={() => setF({ ...f, days: on ? f.days.filter((x) => x !== i) : [...f.days, i] })}
           className={cx("h-9 flex-1 rounded-lg border-2 text-[12px] font-semibold transition", on ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-line bg-sunken text-muted")}>{d}</button>; })}</div></div>
       </>}
+      <div className="col-span-2 rounded-xl border-2 border-line p-3" data-testid="habit-calendar">
+        <label className="flex items-center gap-2 text-[13px] font-medium"><input type="checkbox" checked={inCal} onChange={(e) => setInCal(e.target.checked)} />Afficher cette routine dans le calendrier</label>
+        {inCal && <div className="mt-2 grid grid-cols-2 items-end gap-2"><Field label="Durée du créneau" htmlFor="hb-dur"><DurationPicker id="hb-dur" min={5} max={240} value={duration} onChange={setDuration} /></Field>
+          <p className="text-[11px] text-muted">{f.time ? `Bloc à ${f.time} les jours prévus.` : "Sans heure : placée dans un créneau libre du jour."} Décochée, la routine reste une pastille sous le jour.</p></div>}
+      </div>
       <Field label="Note (dose, produit…)" htmlFor="hb-note" className="col-span-2"><Input id="hb-note" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} placeholder="Ex. 1 comprimé après le repas" /></Field>
       <StepsEditor id="hb-steps" steps={steps} onChange={setSteps} className="col-span-2" placeholder="Ex. Nettoyant, sérum, crème…" />
       <div className="col-span-2 flex justify-end gap-2"><Btn type="button" variant="ghost" onClick={onDone}>Annuler</Btn><Btn type="submit" variant="primary">{habit ? <><Check size={14} />Enregistrer</> : <><Plus size={14} />Ajouter</>}</Btn></div>
@@ -3126,13 +3605,16 @@ const TodoForm: React.FC<{ todo?: Todo; onDone: () => void }> = ({ todo, onDone 
   const today = todayISO();
   const [f, setF] = useState({ text: todo?.text ?? "", due: todo?.due ?? today, start: todo?.start ?? "", end: todo?.end ?? "", priority: (todo?.priority ?? 2) as Priority, kind: (todo?.kind ?? "perso") as TodoKind, note: todo?.note ?? "" });
   const [steps, setSteps] = useState<Step[]>(todo?.steps ?? []);
+  const [dueTime, setDueTime] = useState<string | undefined>(todo?.dueTime);
+  const [hideEnd, setHideEnd] = useState(!!todo?.hideEnd);
+  const [remind, setRemind] = useState<number | undefined>(todo?.remind);
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!f.text.trim()) { toast("Donnez un titre à la tâche.", "bad"); return; }
     if (f.end && !f.start) { toast("Indiquez aussi l'heure de début.", "bad"); return; }
     if (f.start && f.end && toMin(f.end) <= toMin(f.start)) { toast("L'heure de fin doit suivre l'heure de début.", "bad"); return; }
     const clean = steps.map((x) => ({ ...x, text: x.text.trim() })).filter((x) => x.text);
-    const data = { text: f.text.trim(), due: f.due || undefined, start: f.start || undefined, end: f.start && f.end ? f.end : undefined, priority: f.priority, kind: f.kind, note: f.note.trim() || undefined, steps: clean.length ? clean : undefined };
+    const data = { text: f.text.trim(), due: f.due || undefined, start: f.start || undefined, end: f.start && f.end ? f.end : undefined, hideEnd: f.start && f.end && hideEnd ? true : undefined, dueTime: !f.start && f.due ? dueTime : undefined, remind: f.due && (f.start || dueTime) ? remind : undefined, priority: f.priority, kind: f.kind, note: f.note.trim() || undefined, steps: clean.length ? clean : undefined };
     if (todo) { dispatch({ type: "todo/update", id: todo.id, patch: data }); toast("Tâche mise à jour"); }
     else { dispatch({ type: "todo/add", todo: { id: uid(), done: false, createdAt: today, ...data } }); toast(f.start && f.end && f.due ? "Tâche ajoutée (visible dans le planning)" : "Tâche ajoutée"); }
     onDone();
@@ -3149,7 +3631,11 @@ const TodoForm: React.FC<{ todo?: Todo; onDone: () => void }> = ({ todo, onDone 
       <Field label="Jour" htmlFor="td-due" className="col-span-2"><Input id="td-due" type="date" value={f.due} onChange={(e) => setF({ ...f, due: e.target.value })} /></Field>
       <Field label="Début (facultatif)" htmlFor="td-start"><Input id="td-start" type="time" value={f.start} onChange={(e) => setF({ ...f, start: e.target.value })} /></Field>
       <Field label="Fin (facultatif)" htmlFor="td-end"><Input id="td-end" type="time" value={f.end} onChange={(e) => setF({ ...f, end: e.target.value })} /></Field>
-      <p className="col-span-2 -mt-1 text-[11px] text-muted sm:col-span-4">Jour vide = sans date. Avec un début et une fin, la tâche apparaît dans votre planning comme un rendez-vous.{f.due && <> <button type="button" className="text-accent hover:underline" onClick={() => setF({ ...f, due: "", start: "", end: "" })}>Retirer la date</button></>}</p>
+      {f.end && <div className="col-span-2 -mt-1 flex flex-wrap items-center gap-3 text-[12px] sm:col-span-4"><button type="button" className="text-accent hover:underline" onClick={() => setF({ ...f, end: "" })}>Retirer l'heure de fin</button>
+        <label className="flex items-center gap-1.5"><input type="checkbox" checked={hideEnd} onChange={(e) => setHideEnd(e.target.checked)} />Masquer l'heure de fin dans le planning</label></div>}
+      {f.due && !f.start && <DueTimePicker id="td-duetime" value={dueTime} onChange={setDueTime} className="col-span-2 sm:col-span-4" />}
+      {f.due && (f.start || dueTime) && <RemindSelect id="td-remind" value={remind} onChange={setRemind} className="col-span-2" />}
+      <p className="col-span-2 -mt-1 text-[11px] text-muted sm:col-span-4">Jour vide = sans date. Avec un début (et une fin facultative), la tâche apparaît dans votre planning comme un rendez-vous ; sans horaire, elle apparaît en pastille sous le jour.{f.due && <> <button type="button" className="text-accent hover:underline" onClick={() => setF({ ...f, due: "", start: "", end: "" })}>Retirer la date</button></>}</p>
       <Field label="Note" htmlFor="td-note" className="col-span-2 sm:col-span-4"><Input id="td-note" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} placeholder="Adresse, numéro, documents à prendre…" /></Field>
       <StepsEditor id="td-steps" steps={steps} onChange={setSteps} checkable className="col-span-2 sm:col-span-4" />
       <div className="col-span-2 flex justify-end gap-2 sm:col-span-4"><Btn type="button" variant="ghost" onClick={onDone}>Annuler</Btn><Btn type="submit" variant="primary">{todo ? <><Check size={14} />Enregistrer</> : <><Plus size={14} />Ajouter</>}</Btn></div>
@@ -3169,10 +3655,13 @@ const TodoRow: React.FC<{ t: Todo; onEdit?: (t: Todo) => void; showDate?: boolea
       <span aria-hidden className="text-[15px] leading-none">{kindOf(t.kind).emoji}</span>
       <button className={cx("min-w-0 flex-1 break-words text-left", t.done ? "text-muted line-through" : "hover:text-accent")} onClick={() => onEdit?.(t)} disabled={!onEdit}>{t.text}
         {nSteps > 0 && <span className="ml-1.5 font-mono text-[11px] text-muted">☑ {doneSteps}/{nSteps}</span>}</button>
-      {t.start && <span className="font-mono text-[11px] tabular-nums text-muted">{t.start}{t.end ? `–${t.end}` : ""}</span>}
+      {t.start && <span className="font-mono text-[11px] tabular-nums text-muted">{t.start}{t.end && !t.hideEnd ? `–${t.end}` : ""}</span>}
       {showDate && t.due && t.due !== today && !t.done && <Pill tone={late ? "bad" : "muted"}>{fmtDate(t.due)}</Pill>}
+      {!t.done && t.dueTime && <span className="font-mono text-[11px] tabular-nums text-muted" title="Heure limite">avant {t.dueTime}</span>}
       {!t.done && t.priority === 3 && <Pill tone="bad">🔥 Haute</Pill>}
+      <PostponedPill list={t.postponed} />
       {todoDoneLate(t) && <Pill tone="warn">Fait en retard</Pill>}
+      {!t.done && t.due && <PostponeMenu small current={t.due} label={t.text} onPick={(to) => { dispatch({ type: "todo/postpone", id: t.id, to }); toast(`« ${t.text} » reportée au ${fmtDate(to)}`, "info"); }} />}
       {onEdit && <button className="p-1 text-muted opacity-60 hover:text-bad group-hover:opacity-100" aria-label={`Supprimer ${t.text}`} onClick={() => undoable({ type: "todo/remove", id: t.id }, `« ${t.text} » supprimée`)}><Trash2 size={12} /></button>}
       {t.note && !t.done && <p className="basis-full pl-12 text-[11px] text-muted">{t.note}</p>}
     </li>
@@ -3565,7 +4054,7 @@ const SupportCard: React.FC = () => {
 };
 
 const SettingsView: React.FC = () => {
-  const { state, dispatch, toast, undoable, env } = useStore();
+  const { state, dispatch, toast, undoable, env, go } = useStore();
   const BKEY = `${env.ns}:backup`, CKEY = `${env.ns}:corrupt`;
   const s = state.settings;
   const [json, setJson] = useState("");
@@ -3613,7 +4102,9 @@ const SettingsView: React.FC = () => {
       <Card title="Profil & rythme">
         <div className="grid grid-cols-2 gap-3">
           <Field label="Prénom" htmlFor="st-name"><Input id="st-name" value={s.name} onChange={(e) => set({ name: e.target.value })} /></Field>
-          <Field label="Thème" htmlFor="st-theme"><Select id="st-theme" value={s.theme} onChange={(e) => set({ theme: e.target.value as SettingsState["theme"] })}><option value="system">Système</option><option value="light">Clair</option><option value="dark">Sombre</option></Select></Field>
+          <Field label="Thème" htmlFor="st-theme"><Select id="st-theme" value={s.theme} onChange={(e) => set({ theme: e.target.value as SettingsState["theme"] })}><option value="system">Système</option><option value="light">Clair</option><option value="dark">Sombre</option><option value="auto">Automatique (selon l'heure)</option></Select></Field>
+          {s.theme === "auto" && <div className="col-span-1 grid grid-cols-2 gap-2 sm:col-span-2" data-testid="auto-dark"><Field label="Sombre dès" htmlFor="st-dark-from"><Input id="st-dark-from" type="time" value={s.autoDark?.from ?? "20:00"} onChange={(e) => e.target.value && set({ autoDark: { from: e.target.value, to: s.autoDark?.to ?? "07:00" } })} /></Field><Field label="Clair dès" htmlFor="st-dark-to"><Input id="st-dark-to" type="time" value={s.autoDark?.to ?? "07:00"} onChange={(e) => e.target.value && set({ autoDark: { from: s.autoDark?.from ?? "20:00", to: e.target.value } })} /></Field>
+            <p className="col-span-2 text-[11px] text-muted">Le thème suit l'heure locale de cet appareil. Choisir « Clair » ou « Sombre » (ou le bouton lune/soleil) le fixe à la main.</p></div>}
           <Field label="Réveil par défaut" htmlFor="st-wake"><Input id="st-wake" type="time" value={s.wakeDefault} onChange={(e) => set({ wakeDefault: e.target.value })} /></Field>
           <Field label="Coucher par défaut" htmlFor="st-bed"><Input id="st-bed" type="time" value={s.bedDefault} onChange={(e) => set({ bedDefault: e.target.value })} /></Field>
           <Field label="Préparation matin (min)" htmlFor="st-prep"><Input id="st-prep" type="number" min={10} max={180} value={s.prepMinutes} onChange={(e) => set({ prepMinutes: Number(e.target.value) })} /></Field>
@@ -3628,7 +4119,8 @@ const SettingsView: React.FC = () => {
               <option value="day">Le jour prévu seulement (en retard le lendemain)</option>
             </Select></Field>
           <Field label="Objectif de focus / jour (min)" htmlFor="st-focus"><Input id="st-focus" type="number" min={0} max={720} step={15} value={s.focusGoal} onChange={(e) => { const v = Number(e.target.value); if (v >= 0 && v <= 720) set({ focusGoal: v }); }} /></Field>
-          <Field label="Bloc de travail max (min)" htmlFor="st-block"><Input id="st-block" type="number" min={25} max={180} step={5} value={s.maxBlock} onChange={(e) => set({ maxBlock: Math.max(25, Number(e.target.value)) })} /></Field>
+          <Field label="Bloc de travail max" htmlFor="st-block"><DurationPicker id="st-block" min={30} max={180} value={s.maxBlock} onChange={(n) => set({ maxBlock: Math.max(25, n) })} /></Field>
+          <div className="col-span-1 flex items-end sm:col-span-2"><Btn onClick={() => { set({ tutorialDone: false }); go("dashboard"); }} data-testid="restart-tour"><Sparkles size={14} />Revoir le tutoriel</Btn></div>
         </div>
       </Card>
       <Personalize />
@@ -3661,13 +4153,68 @@ const SettingsView: React.FC = () => {
   );
 };
 
+// ---------------------------------------------------------------- Tutoriel guidé (premier lancement, relançable depuis les Réglages)
+const TOUR: { view: ViewKey; title: string; text: string }[] = [
+  { view: "dashboard", title: "Ton tableau de bord", text: "En un coup d'œil : ce qui est prévu aujourd'hui, les retards, ta charge, ton focus, ton sommeil et ton budget. Tu peux réordonner ou masquer les cartes avec « Personnaliser »." },
+  { view: "academic", title: "Modules, devoirs et examens", text: "Crée tes modules puis tes tâches (touche N). Pour un examen, fixe la date, l'heure et génère un plan de révision détaillé. Reporte une échéance sans perdre l'historique." },
+  { view: "planning", title: "Le planning", text: "Il place tout seul ton travail dans les créneaux libres. Touche une plage vide pour créer un événement, glisse une note dans le calendrier, et supprime n'importe quel élément (avec confirmation)." },
+  { view: "focus", title: "Le focus", text: "Un minuteur Pomodoro lié à une tâche : le temps passé s'ajoute tout seul. Espace pour démarrer ou mettre en pause." },
+  { view: "groceries", title: "Courses et mode cuisine", text: "Liste par rayons, scan de ticket, achats « à recevoir » tant qu'ils ne sont pas livrés, et recettes avec un mode cuisine à grande police et checklist." },
+  { view: "budget", title: "Budget et argent de poche", text: "Plafonds, reste par catégorie, argent de poche hebdomadaire ou mensuel, dettes de colocation, conseils bienveillants et analyse PDF détaillée." },
+  { view: "chores", title: "Ménage et colocation", text: "Corvées en rotation, checklists, reports sans pénalité. En colocation, courses, dépenses et ménage se partagent avec le code d'invitation." },
+  { view: "routines", title: "Routines et tâches perso", text: "Soins, médicaments, sport… avec séries et, si tu veux, un créneau dans le calendrier. Les tâches perso peuvent avoir une heure limite (matin, midi, soir) et un rappel." },
+  { view: "settings", title: "Réglages", text: "Thème clair, sombre ou automatique selon l'heure, couleurs, sauvegardes et compte. Tu peux relancer ce tutoriel à tout moment depuis ici." },
+];
+const Tutorial: React.FC<{ i: number; onGo: (v: ViewKey) => void; onStep: (i: number) => void; onClose: () => void }> = ({ i, onGo, onStep, onClose }) => {
+  const step = TOUR[i];
+  useEffect(() => { onGo(step.view); }, [i]);
+  return createPortal(
+    <div className="fixed inset-x-3 bottom-4 z-[85] mx-auto max-w-md sm:bottom-6" role="dialog" aria-label="Tutoriel" data-testid="tutorial" style={{ marginBottom: "env(safe-area-inset-bottom)" }}>
+      <div className="inked rounded-2xl bg-panel p-4 animate-pop">
+        <p className="mb-1 flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-muted"><span>Tutoriel · {i + 1}/{TOUR.length}</span><button className="text-muted hover:text-fg" onClick={onClose} aria-label="Passer le tutoriel">Passer</button></p>
+        <h2 className="font-display text-lg font-extrabold">{step.title}</h2>
+        <p className="mt-1 text-[13px] leading-relaxed">{step.text}</p>
+        <div className="mt-3 flex items-center justify-between gap-2">
+          <span className="flex gap-1" aria-hidden>{TOUR.map((_, k) => <span key={k} className={cx("h-1.5 w-4 rounded-full", k === i ? "bg-accent" : "bg-line")} />)}</span>
+          <span className="flex gap-2"><Btn size="sm" variant="ghost" disabled={i === 0} onClick={() => onStep(i - 1)}>Précédent</Btn>
+            {i < TOUR.length - 1 ? <Btn size="sm" variant="primary" onClick={() => onStep(i + 1)}>Suivant<ChevronRight size={13} /></Btn> : <Btn size="sm" variant="primary" onClick={onClose}><Check size={13} />Terminer</Btn>}</span>
+        </div>
+      </div>
+    </div>, document.body);
+};
+/** Rappels d'événements et de rendez-vous : toast dans l'application (+ notification du navigateur si autorisée), une seule fois. */
+function useReminders(state: AppState, toast: (t: string, tone?: "ok" | "info" | "bad") => void) {
+  const ref = useRef(state); ref.current = state;
+  useEffect(() => {
+    const tick = () => {
+      const st = ref.current, now = new Date(), today = iso(now), nowAbs = now.getHours() * 60 + now.getMinutes();
+      let fired: string[] = []; try { fired = JSON.parse(localStorage.getItem("etudiant-os/reminded") ?? "[]"); } catch { /* facultatif */ }
+      const out: string[] = [];
+      const fire = (key: string, title: string, startAbs: number, remind: number) => {
+        if (fired.includes(key) || nowAbs < startAbs - remind || nowAbs > startAbs + 30) return;
+        out.push(key); const mins = startAbs - nowAbs;
+        const msg = mins > 1 ? `dans ${mins >= 120 ? `${Math.round(mins / 60)} h` : `${mins} min`}` : mins >= 0 ? "maintenant" : "vient de commencer";
+        toast(`⏰ ${title} : ${msg}`, "info");
+        try { if (typeof Notification !== "undefined" && Notification.permission === "granted") new Notification(title, { body: msg }); } catch { /* facultatif */ }
+      };
+      for (const off of [0, 1]) {
+        const d = iso(addDays(parseISO(today), off));
+        for (const e of st.events ?? []) if (e.remind !== undefined && eventOn(e, d)) fire(`ev:${e.id}|${d}`, e.title, off * 1440 + toMin(e.start), e.remind);
+        for (const t of st.todos ?? []) if (t.remind !== undefined && !t.done && t.due === d && (t.start || t.dueTime)) fire(`td:${t.id}|${d}`, t.text, off * 1440 + toMin((t.start ?? t.dueTime)!), t.remind);
+      }
+      if (out.length) { try { localStorage.setItem("etudiant-os/reminded", JSON.stringify([...fired, ...out].slice(-300))); } catch { /* facultatif */ } }
+    };
+    tick(); const id = window.setInterval(tick, 30_000); return () => window.clearInterval(id);
+  }, [state.events, state.todos]);
+}
+
 // ---------------------------------------------------------------- Premier lancement
 const Onboarding: React.FC<{ onDone: (s: AppState) => void }> = ({ onDone }) => {
   const { env } = useStore();
   const [f, setF] = useState({ name: env.account?.displayName ?? "", budget: "600", wake: "07:30", bed: "23:30", sleepGoal: 8 });
   const settings = (): Partial<SettingsState> => ({ name: f.name.trim() || "Moi", roommates: [], wakeDefault: f.wake, bedDefault: f.bed, sleepGoal: f.sleepGoal });
-  const start = (e: React.FormEvent) => { e.preventDefault(); onDone(blank(settings(), parseAmount(f.budget) || 600)); };
-  const demo = () => { const s = seed(); onDone({ ...s, settings: { ...s.settings, onboarded: true } }); };
+  const start = (e: React.FormEvent) => { e.preventDefault(); onDone(blank({ ...settings(), tutorialDone: false }, parseAmount(f.budget) || 600)); };
+  const demo = () => { const s = seed(); onDone({ ...s, settings: { ...s.settings, onboarded: true, tutorialDone: false } }); };
   return (
     <div className="grid min-h-full place-items-center bg-bg px-4 py-10">
       <div className="w-full max-w-lg animate-pop">
@@ -3873,11 +4420,17 @@ export default function StudentOS({ state: ownState, dispatch: ownDispatch, env,
     const t = state.timer, left = timerLeft(t, now);
     document.title = t.running ? `${pad(Math.floor(left / 60))}:${pad(left % 60)} · ${PHASE_LABEL[t.phase]}` : "Étudiant OS";
   }, [now, state.timer]);
+  // Thème automatique : sombre la nuit (plage horaire locale réglable), clair le jour ; la minute courante relance le calcul.
+  const [, setMinuteTick] = useState(0);
+  useEffect(() => { if (state.settings.theme !== "auto") return; const id = window.setInterval(() => setMinuteTick((x) => x + 1), 30_000); return () => window.clearInterval(id); }, [state.settings.theme]);
+  const autoCfg = state.settings.autoDark ?? { from: "20:00", to: "07:00" };
+  const nowM = new Date().getHours() * 60 + new Date().getMinutes();
+  const effTheme: "system" | "light" | "dark" = state.settings.theme === "auto" ? (isNightTime(nowM, autoCfg.from, autoCfg.to) ? "dark" : "light") : state.settings.theme;
   useEffect(() => {
     const root = document.documentElement;
-    if (state.settings.theme === "system") root.removeAttribute("data-theme"); else root.setAttribute("data-theme", state.settings.theme);
-    try { localStorage.setItem("etudiant-os/theme", JSON.stringify(state.settings.theme)); } catch { /* facultatif */ }
-  }, [state.settings.theme]);
+    if (effTheme === "system") root.removeAttribute("data-theme"); else root.setAttribute("data-theme", effTheme);
+    try { localStorage.setItem("etudiant-os/theme", JSON.stringify(state.settings.theme)); localStorage.setItem("etudiant-os/auto-dark", JSON.stringify(autoCfg)); } catch { /* facultatif */ }
+  }, [effTheme, state.settings.theme, autoCfg.from, autoCfg.to]);
 
   const toast = useCallback((text: string, tone: Toast["tone"] = "ok", action?: ToastAction) => {
     const id = uid();
@@ -3892,8 +4445,13 @@ export default function StudentOS({ state: ownState, dispatch: ownDispatch, env,
     toast(text, "info", { label: "Annuler", run: () => { dispatch({ type: "replace", state: prev }); toast("Action annulée", "info"); } });
   }, [toast, dispatch]);
   const ctx = useMemo(() => ({ state, dispatch, toast, undoable, go: setView, openTask: setEditTask, now, env }), [state, dispatch, toast, undoable, setView, now, env]);
-  const isDark = state.settings.theme === "dark" || (state.settings.theme === "system" && typeof matchMedia !== "undefined" && matchMedia("(prefers-color-scheme: dark)").matches);
-  const toggleTheme = () => dispatch({ type: "settings", patch: { theme: isDark ? "light" : "dark" } });
+  const isDark = effTheme === "dark" || (effTheme === "system" && typeof matchMedia !== "undefined" && matchMedia("(prefers-color-scheme: dark)").matches);
+  // Basculer à la main choisit explicitement clair ou sombre (le mode automatique se réactive dans les Réglages).
+  const toggleTheme = () => { dispatch({ type: "settings", patch: { theme: isDark ? "light" : "dark" } }); if (state.settings.theme === "auto") toast("Thème fixé manuellement : réactivez « Automatique » dans les Réglages.", "info"); };
+  useReminders(state, toast);
+  const [tour, setTour] = useState(0);
+  const tourOn = state.settings.onboarded && state.settings.tutorialDone === false && !override;
+  const endTour = () => { dispatch({ type: "settings", patch: { tutorialDone: true } }); setTour(0); setView("dashboard"); };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -3958,7 +4516,7 @@ export default function StudentOS({ state: ownState, dispatch: ownDispatch, env,
           <nav className="relative flex flex-col gap-0.5">
             <span aria-hidden className="absolute inset-x-0 top-0 h-10 rounded-xl border-2 border-fg bg-hi shadow-[3px_3px_0_0_rgb(var(--ink))] transition-transform duration-500 [transition-timing-function:var(--spring)]"
               style={{ transform: `translateY(${Math.max(0, navItems.findIndex((n) => n.key === view)) * 42}px) rotate(-1deg)`, opacity: !override && navItems.some((n) => n.key === view) ? 1 : 0 }} />
-            {navItems.map((n) => (<button key={n.key} onClick={() => setView(n.key)} title={n.label} aria-label={n.label} className={cx("nav-item group relative flex h-10 items-center gap-2.5 rounded-xl px-3 text-[13px] transition-colors duration-300", view === n.key && !override ? "font-bold text-[rgb(24_22_46)]" : "text-muted hover:text-fg")}>
+            {navItems.map((n) => (<button key={n.key} onClick={() => setView(n.key)} title={n.label} aria-label={n.label} className={cx(tourOn && TOUR[tour]?.view === n.key && "ring-2 ring-accent ring-offset-2 ring-offset-bg", "nav-item group relative flex h-10 items-center gap-2.5 rounded-xl px-3 text-[13px] transition-colors duration-300", view === n.key && !override ? "font-bold text-[rgb(24_22_46)]" : "text-muted hover:text-fg")}>
               <span className="grid w-full place-items-center lg:w-auto"><n.icon size={17} /></span><span className="hidden flex-1 text-left lg:inline">{n.label}</span><span className="hidden font-mono text-[10px] text-muted opacity-0 group-hover:opacity-100 lg:inline">{n.short}</span></button>))}
           </nav>
           <div className="mt-auto flex flex-col gap-2">
@@ -4004,6 +4562,7 @@ export default function StudentOS({ state: ownState, dispatch: ownDispatch, env,
         </div>
       </div>
 
+      {tourOn && <Tutorial i={tour} onGo={(v) => setView(v)} onStep={setTour} onClose={endTour} />}
       <PullToRefresh onRefresh={pullRefresh} top={headerH} />
       {palette && <CommandPalette commands={commands} onClose={() => setPalette(false)} />}
       {newTask && <Modal title="Nouvelle tâche" onClose={() => setNewTask(false)}><TaskForm onDone={() => setNewTask(false)} /></Modal>}

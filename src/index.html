@@ -31,7 +31,11 @@
 <script>
   window.__INITIAL_HASH__ = location.hash;
   // Thème appliqué avant le premier rendu (évite un flash clair en mode sombre).
-  try { var t = JSON.parse(localStorage.getItem("etudiant-os/theme") || "null"); if (t === "dark" || t === "light") document.documentElement.setAttribute("data-theme", t); } catch (e) {}
+  try { var t = JSON.parse(localStorage.getItem("etudiant-os/theme") || "null");
+    // « auto » : sombre pendant la plage nocturne choisie (par défaut 20:00 – 07:00, heure locale).
+    if (t === "auto") { var ad = JSON.parse(localStorage.getItem("etudiant-os/auto-dark") || "null") || { from: "20:00", to: "07:00" }, tm = function (x) { var p = String(x).split(":"); return +p[0] * 60 + +p[1]; }, d = new Date(), n = d.getHours() * 60 + d.getMinutes(), f = tm(ad.from), u = tm(ad.to);
+      t = f === u ? "light" : (f < u ? (n >= f && n < u) : (n >= f || n < u)) ? "dark" : "light"; }
+    if (t === "dark" || t === "light") document.documentElement.setAttribute("data-theme", t); } catch (e) {}
   // Thème sombre du système : attribut data-night (styles du mode « carnet de nuit »), suivi en direct.
   // Couleur de la barre d'état / barre d'adresse = fond de l'app, aussi quand le thème est forcé dans les réglages.
   try { var syncBar = function () { var bg = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim().split(/\s+/).join(","); if (bg) document.querySelectorAll('meta[name="theme-color"]').forEach(function (m) { m.setAttribute("content", "rgb(" + bg + ")"); m.removeAttribute("media"); }); };
