@@ -1,0 +1,223 @@
+// Nouvelles fonctions dans un vrai navigateur (mode local, aucun compte) : tutoriel, thème automatique, examens et plan de révision,
+// reports, calendrier (création par clic, suppression confirmée, notes glissées, routines, tâches sans horaire), achats à recevoir,
+// mode cuisine, argent de poche, analyse PDF, sélecteurs de durée.
+// Prérequis : OUT_DIR=/tmp/site BASE_PATH=/ node scripts/build.mjs --local-only  puis  OUT_DIR=/tmp/site BASE_PATH=/ PORT=5199 node scripts/serve.mjs
+// Lancer : APP_URL=http://127.0.0.1:5199/ node tests/e2e-features.mjs
+import { chromium } from "playwright-core";
+import fs from "node:fs";
+const APP = process.env.APP_URL ?? "http://127.0.0.1:5199/";
+const CHROME = process.env.CHROMIUM_PATH ?? "/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell";
+let pass = 0, fail = 0; const failures = [];
+const ok = (c, m) => { if (c) { pass++; console.log("  ✓ " + m); } else { fail++; failures.push(m); console.log("  ✗ " + m); } };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const plus = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return iso(d); };
+const hhmm = (min) => `${String(Math.floor(min / 60) % 24).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
+
+const browser = await chromium.launch({ executablePath: CHROME });
+const ctx = await browser.newContext({ viewport: { width: 1360, height: 1100 }, acceptDownloads: true });
+const p = await ctx.newPage(); p.setDefaultTimeout(8000);
+const errs = []; p.on("pageerror", (e) => errs.push(e.message));
+const go = async (tab) => { await p.click(`nav >> text=${tab}`); await sleep(1100); };
+const stateOf = () => p.evaluate(() => { const k = Object.keys(localStorage).find((x) => x === "etudiant-os/v1"); return k ? JSON.parse(localStorage.getItem(k)) : null; });
+const toastText = () => p.locator("[role=status]").allInnerTexts();
+
+try {
+  console.log("Premier lancement et tutoriel");
+  await p.goto(APP + "app");
+  await p.fill("#ob-name", "Test"); await p.click("text=Créer mon espace"); await sleep(900);
+  ok(await p.locator("[data-testid=tutorial]").count() === 1, "le tutoriel guidé s'affiche après l'Onboarding");
+  const t1 = await p.locator("[data-testid=tutorial]").innerText();
+  await p.click("[data-testid=tutorial] >> text=Suivant"); await sleep(500);
+  const t2 = await p.locator("[data-testid=tutorial]").innerText();
+  ok(t1 !== t2 && /2\/9/.test(t2), "« Suivant » passe à l'étape 2 et change de page");
+  ok((await p.locator("h1").first().innerText()).toLowerCase().includes("acad"), "le tutoriel ouvre la page correspondante");
+  await p.click("[data-testid=tutorial] >> text=Passer"); await sleep(400);
+  ok(await p.locator("[data-testid=tutorial]").count() === 0, "« Passer » ferme le tutoriel");
+  ok((await stateOf()).settings.tutorialDone === true, "le choix est enregistré (tutorialDone)");
+  await p.reload(); await sleep(700);
+  ok(await p.locator("[data-testid=tutorial]").count() === 0, "le tutoriel ne revient pas après rechargement");
+
+  console.log("Thème automatique");
+  await go("Réglages");
+  await p.selectOption("#st-theme", "auto"); await sleep(300);
+  const nowM = new Date().getHours() * 60 + new Date().getMinutes();
+  await p.fill("#st-dark-from", hhmm((nowM + 1440 - 60) % 1440)); await p.fill("#st-dark-to", hhmm((nowM + 60) % 1440)); await sleep(500);
+  ok(await p.evaluate(() => document.documentElement.getAttribute("data-theme")) === "dark", "dans la plage nocturne : thème sombre");
+  await p.fill("#st-dark-from", hhmm((nowM + 120) % 1440)); await p.fill("#st-dark-to", hhmm((nowM + 240) % 1440)); await sleep(500);
+  ok(await p.evaluate(() => document.documentElement.getAttribute("data-theme")) === "light", "hors plage : thème clair");
+  ok((await stateOf()).settings.theme === "auto", "la préférence « auto » est enregistrée");
+  ok(await p.evaluate(() => JSON.parse(localStorage.getItem("etudiant-os/theme"))) === "auto", "la clé de thème permet l'application avant le rendu");
+  await p.selectOption("#st-theme", "dark"); await sleep(300);
+  ok(await p.evaluate(() => document.documentElement.getAttribute("data-theme")) === "dark" && (await stateOf()).settings.theme === "dark", "le choix manuel reste possible et prioritaire");
+  await p.selectOption("#st-theme", "system"); await sleep(200);
+  await p.click("[data-testid=restart-tour]"); await sleep(600);
+  ok(await p.locator("[data-testid=tutorial]").count() === 1, "« Revoir le tutoriel » (Réglages) relance le tutoriel");
+  await p.click("[data-testid=tutorial] >> text=Passer"); await sleep(300);
+
+  console.log("Académique : module, examen, heure limite, plan de révision, report");
+  await go("Académique");
+  await p.fill("#cf-name", "Maths"); await p.click("button:has-text('Module')"); await sleep(300);
+  await p.click("button:has-text('Nouvelle tâche')"); await sleep(300);
+  ok(await p.locator("#tf-est").evaluate((e) => e.tagName) === "SELECT", "durée estimée : sélecteur de durée commun");
+  await p.fill("#tf-title", "Partiel de maths"); await p.selectOption("#tf-kind", "examen"); await p.fill("#tf-dl", plus(5));
+  await p.click("button:has-text('Midi 12:00')");
+  await p.selectOption("#tf-est", "custom"); await p.fill("#tf-est-custom", "200");
+  await p.click("[data-testid=revision-plan] >> text=Générer"); await sleep(300);
+  const sessions = await p.locator("[data-testid=revision-plan] li").count();
+  ok(sessions >= 3, `le plan de révision est généré (${sessions} séances)`);
+  await p.fill("[data-testid=revision-plan] li:first-child input[placeholder^=Thème]", "Algèbre");
+  await p.click("[role=dialog] button[type=submit]"); await sleep(500);
+  let st = await stateOf(); const ex = st.tasks.find((t) => t.title === "Partiel de maths");
+  ok(ex && ex.dueTime === "12:00" && ex.revision.length === sessions && ex.estimate >= 200, "examen enregistré avec heure limite et plan");
+  ok(ex.revision.reduce((n, r) => n + r.minutes, 0) >= 195 && ex.revision.some((r) => r.topic === "Algèbre"), "séances: durée totale et thème conservés");
+  ok((await p.locator("[data-testid=exams-list]").innerText()).includes("Partiel de maths") && (await p.locator("[data-testid=exams-list]").innerText()).includes("J-5"), "carte « Examens à venir » avec compte à rebours");
+  // report
+  await p.click("button:has-text('Nouvelle tâche')"); await sleep(300);
+  await p.fill("#tf-title", "Devoir A"); await p.fill("#tf-dl", plus(2)); await p.click("[role=dialog] button[type=submit]"); await sleep(300);
+  await p.click("button:has-text('Nouvelle tâche')"); await sleep(300);
+  await p.fill("#tf-title", "Devoir B"); await p.fill("#tf-dl", plus(2)); await p.click("[role=dialog] button[type=submit]"); await sleep(300);
+  await p.locator("article:has-text('Devoir A') >> button[aria-label^='Reporter']").click(); await sleep(200);
+  await p.click("[role=dialog][aria-label=Reporter] >> text=+1 semaine"); await sleep(400);
+  st = await stateOf(); const A = st.tasks.find((t) => t.title === "Devoir A"), B = st.tasks.find((t) => t.title === "Devoir B");
+  ok(A.deadline === plus(9) && A.postponed.length === 1 && A.postponed[0].from === plus(2), "le report déplace l'échéance et garde l'historique");
+  ok(B.deadline === plus(2) && !B.postponed, "l'échéance d'un autre devoir ne change pas");
+  ok((await p.locator("article:has-text('Devoir A')").innerText()).includes("Reportée 1×"), "badge « Reportée 1× » visible");
+  // notes
+  await p.fill("textarea[aria-label=Notes]", "- Appeler le prof de maths\n- Acheter des cahiers"); await sleep(900);
+
+  console.log("Planning : création par clic, détail, suppression confirmée, notes glissées");
+  await go("Planning");
+  const grid = p.locator("[data-testid=day-grid]"); await p.evaluate(() => window.scrollTo(0, 300)); await sleep(200); const box = await grid.boundingBox();
+  await p.mouse.click(box.x + 24, Math.max(box.y, 0) + 300); await sleep(400);
+  ok(await p.locator("[data-testid=event-editor]").count() === 1, "toucher une plage vide ouvre « Nouvel événement »");
+  ok(/^\d\d:\d\d$/.test(await p.inputValue("#ee-start")) && await p.inputValue("#ee-date") === plus(0), "la date et l'heure du créneau touché sont préremplies");
+  await p.fill("#ee-title", "Dentiste"); await p.fill("#ee-place", "Cabinet Dupont");
+  await p.selectOption("#ee-dur", "45"); await p.selectOption("#ee-remind", "30");
+  await p.fill("#ee-steps", "Carte vitale"); await p.keyboard.press("Enter");
+  await p.click("[data-testid=event-editor] >> button[type=submit]"); await sleep(500);
+  st = await stateOf(); const ev = st.events.find((e) => e.title === "Dentiste");
+  ok(ev && ev.place === "Cabinet Dupont" && ev.remind === 30 && ev.steps.length === 1, "événement créé avec lieu, rappel et checklist");
+  ok(ev && (parseInt(ev.end) * 60 + parseInt(ev.end.slice(3))) - (parseInt(ev.start) * 60 + parseInt(ev.start.slice(3))) === 45, "la durée choisie (45 min) donne l'heure de fin");
+  await p.locator("[data-testid=events-list] >> text=Dentiste").click(); await sleep(300);
+  ok((await p.locator("[data-testid=event-editor]").count()) === 1 && (await p.inputValue("#ee-place")) === "Cabinet Dupont", "la liste ouvre l'écran de détails de l'événement");
+  await p.click("[data-testid=event-editor] >> text=Annuler"); await sleep(200);
+  // suppression avec confirmation (bloc du planning)
+  const blk = p.locator("[role=button]:has-text('Dentiste')").first(); await blk.scrollIntoViewIfNeeded(); await blk.click(); await sleep(300);
+  ok(await p.locator("[data-testid=block-detail]").count() === 1, "toucher le bloc ouvre sa fiche");
+  await p.click("[data-testid=block-delete]"); await sleep(250);
+  ok(await p.locator("[data-testid=confirm-dialog]").count() === 1, "la suppression demande une confirmation");
+  await p.click("[data-testid=confirm-dialog] >> text=Annuler"); await sleep(250);
+  ok((await stateOf()).events.some((e) => e.title === "Dentiste"), "« Annuler » conserve l'événement");
+  await p.click("[data-testid=block-delete]"); await sleep(200); await p.click("[data-testid=confirm-yes]"); await sleep(400);
+  ok(!(await stateOf()).events.some((e) => e.title === "Dentiste"), "« Supprimer » (confirmé) retire l'événement");
+  // notes dans le calendrier
+  ok(await p.locator("[data-testid=notes-tray] li").count() === 2, "les lignes de notes sont proposées à planifier");
+  await p.evaluate(() => window.scrollTo(0, 300)); await sleep(200);
+  await p.locator("[data-testid=notes-tray] li").first().dragTo(p.locator("[data-testid=day-grid]"), { targetPosition: { x: 30, y: 300 } }); await sleep(500);
+  ok(await p.locator("[data-testid=event-editor]").count() === 1 && (await p.inputValue("#ee-title")) === "Appeler le prof de maths", "glisser une note dans le calendrier crée un événement prérempli");
+  await p.click("[data-testid=event-editor] >> button[type=submit]"); await sleep(400);
+  ok((await stateOf()).events.some((e) => e.title === "Appeler le prof de maths"), "l'événement issu de la note est enregistré");
+  // rappel imminent
+  { const n = new Date(); const m = n.getHours() * 60 + n.getMinutes() + 10;
+    if (m < 23 * 60) {
+      const before = (await toastText()).length;
+      await p.evaluate(() => window.scrollTo(0, 300)); await sleep(150);
+      const bx = await p.locator("[data-testid=day-grid]").boundingBox(); await p.mouse.click(bx.x + 24, Math.max(bx.y, 0) + 200); await sleep(400);
+      await p.fill("#ee-title", "Visio TD"); await p.fill("#ee-start", hhmm(m)); await p.selectOption("#ee-remind", "30");
+      await p.click("[data-testid=event-editor] >> button[type=submit]"); await sleep(700);
+      ok((await toastText()).join(" ").includes("⏰ Visio TD"), "un rappel imminent s'affiche dans l'application");
+    } }
+  // examen détaillé : séances dans le planning d'un jour de révision
+  const firstRev = ex.revision.sort((a, b) => a.date.localeCompare(b.date))[0];
+  // tâche sans horaire
+  await go("Tâches perso");
+  await p.fill("[aria-label='Ajout rapide']", "Imprimer le TD"); await p.keyboard.press("Enter"); await sleep(300);
+  await go("Planning");
+  ok((await p.locator("[data-testid=untimed-strip]").innerText()).includes("Imprimer le TD"), "une tâche sans horaire s'affiche en pastille comme les routines");
+
+  console.log("Tâche perso : heure limite, début sans fin, report");
+  await go("Tâches perso");
+  await p.click("button:has-text('Tâche détaillée')"); await sleep(300);
+  await p.fill("#td-text", "Rendre la carte"); await p.click("button:has-text('Soir 20:00')");
+  await p.click("[role=dialog] button[type=submit]"); await sleep(400);
+  let td = (await stateOf()).todos.find((x) => x.text === "Rendre la carte");
+  ok(td && td.dueTime === "20:00" && td.due === plus(0), "tâche perso avec heure limite « soir »");
+  await p.click("button:has-text('Tâche détaillée')"); await sleep(300);
+  await p.fill("#td-text", "RDV banque"); await p.fill("#td-start", "15:00"); await p.fill("#td-end", "16:00");
+  await p.click("text=Retirer l'heure de fin"); await sleep(150);
+  ok(await p.inputValue("#td-end") === "", "« Retirer l'heure de fin » vide la fin");
+  await p.click("[role=dialog] button[type=submit]"); await sleep(400);
+  td = (await stateOf()).todos.find((x) => x.text === "RDV banque");
+  ok(td && td.start === "15:00" && !td.end, "tâche perso avec début seul");
+  await p.locator("li:has-text('Rendre la carte') >> button[aria-label^='Reporter']").click(); await sleep(200);
+  await p.click("[role=dialog][aria-label=Reporter] >> text=+1 jour"); await sleep(400);
+  td = (await stateOf()).todos.find((x) => x.text === "Rendre la carte");
+  ok(td.due === plus(1) && td.postponed.length === 1, "report d'une tâche perso avec historique");
+
+  console.log("Routine dans le calendrier");
+  await go("Routines");
+  await p.locator("main button:has-text('Routine')").first().click(); await sleep(400);
+  await p.fill("#hb-name", "Yoga"); await p.fill("#hb-time", "07:30");
+  await p.check("[data-testid=habit-calendar] input[type=checkbox]"); await p.selectOption("#hb-dur", "30");
+  await p.click("[role=dialog] button[type=submit]"); await sleep(400);
+  const h = (await stateOf()).habits.find((x) => x.name === "Yoga");
+  ok(h && h.inCalendar === true && h.duration === 30 && h.time === "07:30", "routine configurée (calendrier, durée, heure)");
+  await go("Planning");
+  ok(await p.locator("[role=button]:has-text('Yoga')").count() >= 1, "la routine apparaît dans le calendrier");
+  await p.locator("[role=button]:has-text('Yoga')").first().evaluate((el) => el.click()); await sleep(300);
+  await p.click("[data-testid=block-delete]"); await sleep(200); await p.click("[data-testid=confirm-yes]"); await sleep(400);
+  const h2 = (await stateOf()).habits.find((x) => x.name === "Yoga");
+  ok(h2 && !h2.inCalendar && (await p.locator("[role=button]:has-text('Yoga')").count()) === 0, "retirer du calendrier conserve la routine");
+
+  console.log("Courses : à recevoir / à la maison, recettes et mode cuisine");
+  await go("Courses");
+  await p.fill("#gr-name", "Lait"); await p.fill("#gr-price", "1,20"); await p.keyboard.press("Enter"); await sleep(250);
+  await p.locator("button[aria-label=Cocher]").first().click(); await sleep(200);
+  await p.check("[data-testid=gr-pending]"); await p.click("button:has-text('Valider (à recevoir)')"); await sleep(400);
+  ok(await p.locator("[data-testid=to-receive]").count() === 1 && (await p.locator("[data-testid=to-receive]").innerText()).includes("Lait"), "l'achat commandé est « à recevoir »");
+  ok(!(await p.locator("text=Estimation d'après vos achats").count()), "il n'est pas encore « à la maison »");
+  await p.click("[data-testid=to-receive] >> text=Reçu / prêt"); await sleep(400);
+  ok(await p.locator("[data-testid=to-receive]").count() === 0 && (await p.locator("text=Estimation d'après vos achats").count()) === 1, "après réception, l'article est à la maison");
+  await p.click("[data-testid=recipe-new]"); await sleep(250);
+  await p.fill("#rc-name", "Pâtes"); await p.fill("#rc-ing", "200 g de pâtes\n2 œufs"); await p.fill("#rc-steps", "Cuire les pâtes 10 min\nMélanger avec les œufs");
+  await p.click("[data-testid=recipe-form] >> button[type=submit]"); await sleep(400);
+  await p.locator("[data-testid^=cook-]").first().click(); await sleep(400);
+  ok(await p.locator("[data-testid=cooking-mode]").count() === 1, "le mode cuisine s'ouvre en plein écran");
+  const fontPx = await p.locator("[data-testid=cooking-mode] ol li button span").nth(1).evaluate((e) => parseFloat(getComputedStyle(e).fontSize));
+  ok(fontPx >= 24, `texte lisible (${fontPx}px)`);
+  ok((await p.locator("[data-testid=cooking-mode]").innerText()).includes("Lancer 10 min"), "minuteur détecté dans l'étape");
+  await p.click("[data-testid=cooking-next]"); await sleep(250);
+  ok((await p.locator("[data-testid=cooking-mode]").innerText()).includes("Étapes 1/2"), "cocher une étape fait avancer la progression");
+  await p.click("[role=tab]:has-text('Ingrédients')"); await p.locator("[data-testid=cooking-mode] ul li button").first().click(); await sleep(200);
+  ok((await p.locator("[data-testid=cooking-mode]").innerText()).includes("Ingrédients 1/2"), "les ingrédients se cochent");
+  await p.click("[aria-label='Plus de personnes']"); await sleep(150);
+  ok((await p.locator("[data-testid=cooking-mode]").innerText()).includes("300 g de pâtes"), "les quantités suivent le nombre de personnes");
+  await p.click("[data-testid=cooking-close]"); await sleep(250);
+  await p.click("button:has-text('Ingrédients → liste')"); await sleep(300);
+  ok((await stateOf()).groceries.some((g) => g.name === "pâtes" && g.qty === "200 g"), "les ingrédients rejoignent la liste de courses");
+
+  console.log("Ménage : sélecteur de durée");
+  await go("Ménage");
+  await p.fill("#ch-name", "Poubelles"); await p.selectOption("#ch-min", "30");
+  await p.locator("main button[type=submit]:has-text('Ajouter')").last().click(); await sleep(400);
+  ok((await stateOf()).chores.some((c) => c.name === "Poubelles" && c.minutes === 30), "corvée créée avec la durée choisie (30 min)");
+
+  console.log("Budget : argent de poche, reste par catégorie, analyse PDF");
+  await go("Budget");
+  await p.selectOption("#bd-cat", "Restauration"); await p.fill("#bd-amount", "12,50"); await p.fill("#bd-label", "Resto"); await p.keyboard.press("Enter"); await sleep(300);
+  await p.click("[data-testid=pocket-config]"); await sleep(200);
+  await p.fill("#pk-amt", "40"); await p.click("[data-testid=pocket-form] >> button[type=submit]"); await sleep(400);
+  ok((await p.locator("[data-testid=pocket]").innerText()).includes("restants sur"), "l'argent de poche est configuré et suivi");
+  const rem = await p.locator("[data-testid=pocket-remaining]").innerText();
+  ok(/27,50/.test(rem), `reste de l'enveloppe : ${rem.replace(/\s+/g, " ")}`);
+  await p.click("[data-testid=limits-btn]"); await p.fill("#lim-Restauration", "30"); await p.locator("#lim-Restauration").blur(); await p.click("[data-testid=limits-btn]"); await sleep(300);
+  ok((await p.locator("[data-testid=cat-remaining-Restauration]").innerText()).includes("Reste 17,50"), "reste par catégorie affiché");
+  const dl = p.waitForEvent("download");
+  await p.click("[data-testid=budget-pdf]"); const d = await dl; const path = await d.path();
+  const head = fs.readFileSync(path).subarray(0, 8).toString("latin1");
+  ok(head.startsWith("%PDF-1.4") && d.suggestedFilename().startsWith("analyse-budget-"), `analyse PDF téléchargée (${d.suggestedFilename()})`);
+  ok(errs.length === 0, "aucune erreur JavaScript" + (errs.length ? " : " + errs.slice(0, 3).join(" | ") : ""));
+} catch (e) { fail++; failures.push("exception : " + e.message.split("\n")[0]); console.log("  ✗ exception : " + e.message.split("\n").slice(0, 8).join(" | ")); await p.screenshot({ path: "/tmp/claude-0/feat-fail.png" }).catch(() => {}); }
+await browser.close();
+console.log(`\n${pass} réussis, ${fail} échec(s)`); if (fail) { console.log(failures.join("\n")); process.exit(1); }

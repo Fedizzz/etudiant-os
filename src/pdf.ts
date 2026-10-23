@@ -15,7 +15,8 @@ export const textWidth = (t: string, size: number, bold = false) => latin1(t).le
 
 export class MiniPdf {
   private pages: string[][] = [];
-  constructor(readonly w = 297, readonly h = 210) { this.addPage(); }
+  readonly w: number; readonly h: number;
+  constructor(w = 297, h = 210) { this.w = w; this.h = h; this.addPage(); }
   private get ops() { return this.pages[this.pages.length - 1]; }
   addPage() { this.pages.push([]); }
   rect(x: number, y: number, w: number, h: number, fill?: RGB, stroke?: RGB, lw = 0.2) {
