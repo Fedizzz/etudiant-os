@@ -191,11 +191,14 @@ test("analyse PDF : fichier valide, plusieurs sections", () => {
   const bs = C.budgetStats(b, "2026-10", TODAY, ["Courses", "Loisirs"]);
   const cb = F.categoryBreakdown(bs, 600, b.limits);
   const bytes = F.buildBudgetPdf({ month: "2026-10", name: "Test", cur: "€", monthly: 600, stats: bs, prevSpent: 100, lines: cb.lines, unallocated: cb.unallocated, pocket: null,
+    history: [{ month: "2026-08", spent: 300, income: 500 }, { month: "2026-09", spent: 450, income: 500 }, { month: "2026-10", spent: 160, income: 0 }], savingsTotal: 50, expenseCount: 2,
+    personal: F.personalDebts({ ...b, debts: [{ id: "d1", person: "Inès", amount: 30, direction: "lent", label: "Resto", date: TODAY, due: "2026-10-01", repaid: [] }] }, TODAY), suggestions: F.suggestLimits({ ...b, limits: {} }, TODAY, ["Courses", "Loisirs"]),
     insights: F.budgetInsights(b, TODAY), top: b.expenses, recurring: [{ label: "Loyer", amount: 420, day: 1 }], debts: { owedToMe: [{ name: "Bob", cents: 500 }], iOwe: [], totalOwedToMe: 500, totalIOwe: 0, net: 500 }, generatedAt: "2026-10-15T10:00:00Z" });
   const txt = Buffer.from(bytes).toString("latin1");
   assert.ok(txt.startsWith("%PDF-1.4") && txt.trimEnd().endsWith("%%EOF"));
-  assert.ok(txt.includes("Analyse du budget") && txt.includes("Par categorie") && txt.includes("Colocation") && txt.includes("Loyer"));
-  assert.ok(bytes.length > 1500);
+  assert.ok(txt.includes("Analyse du budget") && txt.includes("Répartition par catégorie") && txt.includes("Dettes et prêts") && txt.includes("Loyer"));
+  assert.ok(txt.includes("\x80") && txt.includes("Page 1 / "), "symbole € et numéros de page");
+  assert.ok(bytes.length > 3000);
 });
 
 test("séances à heure choisie (examen ou projet) : blocs fixes début–fin, les autres restent automatiques", () => {
@@ -209,4 +212,36 @@ test("séances à heure choisie (examen ou projet) : blocs fixes début–fin, l
   const d2 = C.planDay(withTasks(proj), "2026-10-18", undefined, TODAY).blocks.find((b) => b.label === "Rapport — Relecture")!;
   assert.deepEqual([d2.start, d2.end], [10 * 60 + 15, 10 * 60 + 45]);
   assert.equal(roundtrip(withTasks(proj)).tasks[0].revision![0].start, "16:00");
+});
+
+test("dettes entre personnes : ajout, remboursement partiel, solde, jamais négatif", () => {
+  const d: C.Debt = { id: "d1", person: "Inès", amount: 50, direction: "lent", label: "Concert", date: TODAY, repaid: [] };
+  let s = C.reducer(base(), { type: "debt/save", debt: d });
+  s = C.reducer(s, { type: "debt/save", debt: { ...d, id: "d2", person: "Hugo", amount: 20, direction: "borrowed", due: "2026-10-01" } });
+  let pd = F.personalDebts(s.budget, TODAY);
+  assert.deepEqual([pd.totalOwedToMe, pd.totalIOwe, pd.net], [50, 20, 30]); assert.equal(pd.iOwe[0].late, true);
+  s = C.reducer(s, { type: "debt/repay", id: "d1", amount: 15, date: TODAY });
+  assert.equal(C.debtRemaining(s.budget.debts!.find((x) => x.id === "d1")!), 35);
+  s = C.reducer(s, { type: "debt/repay", id: "d1", amount: 999, date: TODAY }); // plafonné au reste dû
+  assert.equal(C.debtRemaining(s.budget.debts!.find((x) => x.id === "d1")!), 0);
+  pd = F.personalDebts(s.budget, TODAY); assert.equal(pd.owedToMe.length, 0); assert.equal(pd.totalIOwe, 20);
+  assert.equal(roundtrip(s).budget.debts!.length, 2);
+  assert.equal(C.reducer(s, { type: "debt/remove", id: "d2" }).budget.debts!.length, 1);
+  assert.equal(roundtrip({ ...base(), budget: { ...base().budget, debts: [{ ...d, amount: -5 }, { ...d, id: "x", direction: "zz" as never }] } }).budget.debts!.length, 0);
+});
+
+test("plafonds suggérés : récurrentes réservées, somme ≤ budget, historique pris en compte", () => {
+  const b: C.Budget = { monthly: 800, limits: {}, expenses: [], recurring: [{ id: "r", label: "Loyer", amount: 420, category: "Logement", day: 1, active: true, since: "2026-01-01" }] };
+  const cats = ["Courses", "Restauration", "Logement", "Loisirs", "Autre"];
+  const base0 = F.suggestLimits(b, TODAY, cats);
+  const by0 = Object.fromEntries(base0.map((x) => [x.cat, x]));
+  assert.equal(by0.Logement.amount, 420); assert.equal(by0.Logement.basis, "fixe");
+  assert.ok(base0.reduce((n, x) => n + x.amount, 0) <= 800); assert.ok(by0.Courses.amount > by0.Loisirs.amount); assert.equal(by0.Courses.basis, "répartition");
+  const withHist = F.suggestLimits({ ...b, expenses: [exp("1", "2026-09-05", 200, "Restauration"), exp("2", "2026-09-10", 50, "Courses"), exp("3", "2026-08-12", 200, "Restauration"), exp("4", "2026-08-20", 50, "Courses")] }, TODAY, cats);
+  const h = Object.fromEntries(withHist.map((x) => [x.cat, x]));
+  assert.equal(h.Restauration.basis, "historique"); assert.ok(h.Restauration.amount > h.Courses.amount); assert.equal(h.Restauration.avg, 200);
+  assert.ok(withHist.reduce((n, x) => n + x.amount, 0) <= 800); assert.ok(withHist.every((x) => x.amount % 5 === 0 || x.cat === "Logement"));
+  assert.deepEqual(F.suggestLimits({ ...b, monthly: 0 }, TODAY, cats), []);
+  const tight = F.suggestLimits({ ...b, monthly: 450 }, TODAY, cats); assert.ok(tight.reduce((n, x) => n + x.amount, 0) <= 450);
+  assert.ok(F.budgetInsights({ ...b, expenses: [exp("1", "2026-10-02", 10, "Courses"), exp("2", "2026-10-03", 10, "Courses"), exp("3", "2026-10-04", 10, "Courses")] }, TODAY).some((i) => i.id === "limits"));
 });
