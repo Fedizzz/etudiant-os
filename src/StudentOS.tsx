@@ -2,7 +2,7 @@ import { createPortal } from "react-dom";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { MiniPdf } from "./pdf.ts";
-import { eventOn, layoutLanes, parseIngredient, scaleIngredient, stepMinutes, DUE_PRESETS, momentLabel, buildRevisionPlan, isNightTime, pendingReceipts, revisionOn, missedDeadline } from "./core.ts";
+import { eventOn, layoutLanes, parseIngredient, scaleIngredient, stepMinutes, DUE_PRESETS, momentLabel, taskPrefer, buildRevisionPlan, isNightTime, pendingReceipts, revisionOn, missedDeadline } from "./core.ts";
 import type { Postponement, Recipe, RevisionSession } from "./core.ts";
 import { DEFAULT_POCKET_CATS, buildBudgetPdf, budgetInsights, categoryBreakdown, flatDebts, personalDebts, pocketStats, suggestLimits } from "./finance.ts";
 import type { MonthPoint } from "./finance.ts";
@@ -547,12 +547,13 @@ const RevisionEditor: React.FC<{ id: string; sessions: RevisionSession[]; onChan
 const TaskForm: React.FC<{ onDone: () => void; task?: Task }> = ({ onDone, task }) => {
   const { state, dispatch, toast } = useStore();
   const [f, setF] = useState(task
-    ? { title: task.title, courseId: task.courseId ?? "", kind: task.kind, deadline: task.deadline, estimate: task.estimate, priority: task.priority, spent: task.spent }
+    ? { title: task.title, courseId: task.courseId ?? "", kind: task.kind, deadline: task.deadline === NO_DEADLINE && task.kind !== "perso" ? iso(addDays(new Date(), 3)) : task.deadline, estimate: task.estimate, priority: task.priority, spent: task.spent }
     : { title: "", courseId: state.courses[0]?.id ?? "", kind: "devoir" as TaskKind, deadline: iso(addDays(new Date(), 3)), estimate: 120, priority: 2 as Priority, spent: 0 });
   const [mode, setMode] = useState<"duration" | "slot">(task?.slot ? "slot" : "duration");
   const [slot, setSlot] = useState(task?.slot ?? { date: todayISO(), start: "14:00", end: "16:00" });
   const [steps, setSteps] = useState<Step[]>(task?.steps ?? []);
-  const [dueTime, setDueTime] = useState<string | undefined>(task?.dueTime);
+  const [dueTime, setDueTime] = useState<string | undefined>(task?.dueTime && task.kind !== "examen" && !task.prefer ? undefined : task?.dueTime);
+  const [prefer, setPrefer] = useState<string | undefined>(task ? taskPrefer(task) : undefined);
   const [hideEnd, setHideEnd] = useState(!!task?.hideEnd);
   const [revision, setRevision] = useState<RevisionSession[]>(task?.revision ?? []);
   const [doDates, setDoDates] = useState<string[]>(task?.doDates ?? []);
@@ -569,7 +570,7 @@ const TaskForm: React.FC<{ onDone: () => void; task?: Task }> = ({ onDone, task 
       else { dispatch({ type: "task/add", task: { id: uid(), status: "todo", createdAt: todayISO(), ...data } }); toast(pickDays && doDates.length ? "Devoir perso ajouté, placé sur vos jours choisis" : "Devoir perso ajouté (sans échéance)"); }
       onDone(); return;
     }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(f.deadline) || isNaN(parseISO(f.deadline).getTime())) { toast("Choisissez une date d'échéance valide.", "bad"); return; }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(f.deadline) || isNaN(parseISO(f.deadline).getTime()) || f.deadline === NO_DEADLINE) { toast("Choisissez une date d'échéance valide.", "bad"); return; }
     let estimate = f.estimate, chosen: Task["slot"] | undefined;
     if (mode === "slot") {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(slot.date)) { toast("Choisissez le jour du créneau.", "bad"); return; }
@@ -582,7 +583,7 @@ const TaskForm: React.FC<{ onDone: () => void; task?: Task }> = ({ onDone, task 
     if (rev.some((r) => !/^\d{4}-\d{2}-\d{2}$/.test(r.date) || r.date > f.deadline)) { toast(isExam ? "Les séances de révision doivent avoir lieu au plus tard le jour de l'examen." : "Les séances de travail doivent avoir lieu au plus tard le jour de l'échéance.", "bad"); return; }
     const revTotal = rev.reduce((n, r) => n + r.minutes, 0);
     if (rev.length && revTotal > estimate) estimate = revTotal;
-    const data = { ...f, estimate, dueTime: isPerso ? undefined : dueTime, hideEnd: mode === "slot" && hideEnd ? true : undefined, revision: rev.length ? rev : undefined, title: f.title.trim(), courseId: f.courseId || null, slot: chosen, steps: steps.map((x) => ({ ...x, text: x.text.trim() })).filter((x) => x.text), doDates: mode === "duration" && pickDays && doDates.length ? [...doDates].sort() : undefined, noPlan: mode === "duration" && doMode === "none" ? true : undefined };
+    const data = { ...f, estimate, dueTime: isPerso || !isExam ? undefined : dueTime, prefer: isPerso ? undefined : prefer, hideEnd: mode === "slot" && hideEnd ? true : undefined, revision: rev.length ? rev : undefined, title: f.title.trim(), courseId: f.courseId || null, slot: chosen, steps: steps.map((x) => ({ ...x, text: x.text.trim() })).filter((x) => x.text), doDates: mode === "duration" && pickDays && doDates.length ? [...doDates].sort() : undefined, noPlan: mode === "duration" && doMode === "none" ? true : undefined };
     if (data.doDates?.some((d) => d > f.deadline)) { toast(isExam ? "Les jours de révision doivent être avant l'examen." : "Les jours de travail doivent être avant l'échéance.", "bad"); return; }
     if (task) { dispatch({ type: "task/update", id: task.id, patch: data }); toast("Tâche mise à jour"); }
     else { const { slot: sl, ...rest } = data; dispatch({ type: "task/add", task: { id: uid(), ...rest, ...(sl ? { slot: sl } : {}), status: "todo", createdAt: todayISO() } }); toast(sl ? `Tâche ajoutée : ${fmtDate(sl.date)}, ${sl.start}–${sl.end}` : "Tâche ajoutée et planifiée"); }
@@ -593,7 +594,7 @@ const TaskForm: React.FC<{ onDone: () => void; task?: Task }> = ({ onDone, task 
       <Field label="Titre" htmlFor="tf-title" className="col-span-2 sm:col-span-4"><Input id="tf-title" autoFocus value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder="Ex. Fiche de révision chapitre 4" /></Field>
       <Field label="Module" htmlFor="tf-course" className="col-span-2"><Select id="tf-course" value={f.courseId} onChange={(e) => setF({ ...f, courseId: e.target.value })}>
         <option value="">Sans module</option>{state.courses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select></Field>
-      <Field label="Type" htmlFor="tf-kind"><Select id="tf-kind" value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value as TaskKind })}>
+      <Field label="Type" htmlFor="tf-kind"><Select id="tf-kind" value={f.kind} onChange={(e) => { const k = e.target.value as TaskKind; setF({ ...f, kind: k, deadline: k !== "perso" && f.deadline === NO_DEADLINE ? iso(addDays(new Date(), 3)) : f.deadline }); }}>
         <option value="devoir">Devoir</option><option value="examen">Examen</option><option value="projet">Projet</option><option value="perso">Devoir perso (sans échéance)</option></Select></Field>
       <Field label="Priorité" htmlFor="tf-prio"><Select id="tf-prio" value={f.priority} onChange={(e) => setF({ ...f, priority: Number(e.target.value) as Priority })}>
         <option value={1}>Basse</option><option value={2}>Normale</option><option value={3}>Haute</option></Select></Field>
@@ -612,7 +613,8 @@ const TaskForm: React.FC<{ onDone: () => void; task?: Task }> = ({ onDone, task 
       </div> : <>
       <Field label={isExam ? "Date de l'examen" : "Échéance (à rendre)"} htmlFor="tf-dl" className="col-span-2"><Input id="tf-dl" type="date" value={f.deadline} onChange={(e) => setF({ ...f, deadline: e.target.value })} /></Field>
       <TimeMode id="tf-mode" value={mode} onChange={setMode} className="col-span-2" />
-      <DueTimePicker id="tf-duetime" value={dueTime} onChange={setDueTime} className="col-span-2 sm:col-span-4" label={isExam ? "Heure de l'examen (facultatif)" : "Moment préféré pour travailler"} hint={isExam ? undefined : "Le planning place le travail de préférence à ce moment de la journée, quand un créneau est libre."} />
+      {isExam && <DueTimePicker id="tf-duetime" value={dueTime} onChange={setDueTime} className="col-span-2 sm:col-span-4" label="Heure de l'examen (facultatif)" />}
+      <DueTimePicker id="tf-prefer" value={prefer} onChange={(t) => { setPrefer(t); if (t && doMode === "none") setDoMode("auto"); }} className="col-span-2 sm:col-span-4" label={isExam ? "Moment préféré pour réviser" : "Moment préféré pour travailler"} hint="Le planning place le travail (ou les séances sans heure) de préférence à ce moment de la journée, quand un créneau est libre." />
       {mode === "duration" ? <>
         <Field label="Durée estimée" htmlFor="tf-est" className="col-span-2"><DurationPicker id="tf-est" min={15} value={f.estimate} onChange={(n) => setF({ ...f, estimate: Math.max(15, n) })} /></Field>
         <p className="col-span-2 self-end pb-2 text-[11px] text-muted">{doMode === "none" ? "Non placée dans le planning." : doDates.length ? `Répartie sur ${doDates.length} jour${doDates.length > 1 ? "s" : ""} choisi${doDates.length > 1 ? "s" : ""}.` : "Répartie automatiquement dans vos créneaux libres avant l'échéance."}</p>
@@ -2323,6 +2325,7 @@ const Academic: React.FC<{ openNewTask: () => void }> = ({ openNewTask }) => {
                   <p className={cx("text-[13px] font-medium leading-snug", s === "done" && "text-muted line-through")}>{t.title}</p>
                   {taskDoneLate(t) && <p className="mt-1 text-[11px] font-semibold text-warn">⏰ Terminé en retard</p>}
                   {!!t.postponed?.length && <p className="mt-1"><PostponedPill list={t.postponed} /></p>}
+                  {taskPrefer(t) && s !== "done" && <p className="mt-1 text-[11px] text-muted">🕘 Plutôt {momentLabel(taskPrefer(t)!)}</p>}
                   {!!t.revision?.length && s !== "done" && <p className="mt-1 text-[11px] text-muted">📖 {t.kind === "examen" ? "Plan de révision" : "Plan de travail"} : {t.revision.filter((r) => r.done).length}/{t.revision.length} séances</p>}
                   {t.noPlan && s !== "done" && <p className="mt-1 text-[11px] text-muted">🚫 Pas de do date · hors planning</p>}
                   {!!t.doDates?.length && s !== "done" && <p className="mt-1 text-[11px] text-muted">{t.kind === "examen" ? "📖 Révision" : "🛠 Travail"} : {t.doDates.map((d) => fmtDate(d)).join(" · ")}</p>}
@@ -2331,7 +2334,7 @@ const Academic: React.FC<{ openNewTask: () => void }> = ({ openNewTask }) => {
                   <div className="mt-2 h-1 rounded-full bg-sunken"><div className="h-full rounded-full bg-accent" style={{ width: `${pct}%` }} /></div>
                   <div className="mt-2 flex items-center gap-2 text-[11px] text-muted">
                     <span className="font-mono tabular-nums">{fmtDur(t.spent)} / {fmtDur(t.estimate)}</span>
-                    <span className={cx("ml-auto", s !== "done" && left < 0 && "font-semibold text-bad", s !== "done" && left >= 0 && left <= 2 && "text-warn")}>{t.deadline === NO_DEADLINE ? "Sans échéance" : `${fmtDate(t.deadline)}${t.dueTime ? ` · ${t.kind === "examen" ? t.dueTime : momentLabel(t.dueTime)}` : ""}`}</span>
+                    <span className={cx("ml-auto", s !== "done" && left < 0 && "font-semibold text-bad", s !== "done" && left >= 0 && left <= 2 && "text-warn")}>{t.deadline === NO_DEADLINE ? "Sans échéance" : `${fmtDate(t.deadline)}${t.kind === "examen" && t.dueTime ? ` · ${t.dueTime}` : ""}`}</span>
                   </div>
                   <div className="mt-2 flex items-center justify-between">
                     <Btn size="sm" variant="ghost" disabled={s === "todo"} onClick={() => move(t, -1)} aria-label="Statut précédent"><ChevronLeft size={13} /></Btn>

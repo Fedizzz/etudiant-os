@@ -35,6 +35,8 @@ export interface Task {
   steps?: Step[];
   /** Moment préféré pour faire la tâche (« HH:MM ») : matin, midi, après-midi, soir ou une heure choisie. Absent = pas de préférence. Pour un examen : heure de l'épreuve. */
   dueTime?: string;
+  /** Moment préféré pour travailler / réviser (« HH:MM » : matin 09:00, midi 12:00, après-midi 15:00, soir 20:00, ou heure choisie). Le planning y place le travail en priorité. */
+  prefer?: string;
   /** Ne pas afficher l'heure de fin du créneau (seul le début est montré). */
   hideEnd?: boolean;
   /** Historique des reports d'échéance : les retards passés ne sont jamais effacés. */
@@ -512,10 +514,10 @@ const isTime = (x: unknown): x is string => isStr(x) && /^\d{1,2}:\d{2}$/.test(x
  */
 const cleanPostponed = (v: unknown): Postponement[] => (Array.isArray(v) ? (v as Postponement[]).filter((x) => x && isDate(x.from) && isDate(x.to) && isDate(x.at)).slice(-30).map((x) => ({ from: x.from, to: x.to, at: x.at })) : []);
 function cleanTaskExtra(t: Task): Task {
-  const { dueTime, hideEnd, postponed, revision, ...rest } = t;
+  const { dueTime, prefer, hideEnd, postponed, revision, ...rest } = t;
   const rev = Array.isArray(revision) ? revision.filter((r) => r && isStr(r.id) && isDate(r.date) && isNum(r.minutes) && r.minutes > 0).slice(0, 120).map((r) => ({ id: r.id, date: r.date, topic: isStr(r.topic) ? r.topic.slice(0, 120) : "", minutes: Math.min(600, Math.round(r.minutes)), ...(isTime(r.start) ? { start: r.start } : {}), ...(r.done ? { done: true } : {}) })) : [];
   const pp = cleanPostponed(postponed);
-  return { ...rest, ...(isTime(dueTime) ? { dueTime } : {}), ...(hideEnd === true ? { hideEnd: true } : {}), ...(pp.length ? { postponed: pp } : {}), ...(rev.length ? { revision: rev } : {}) };
+  return { ...rest, ...(isTime(dueTime) ? { dueTime } : {}), ...(isTime(prefer) ? { prefer } : {}), ...(hideEnd === true ? { hideEnd: true } : {}), ...(pp.length ? { postponed: pp } : {}), ...(rev.length ? { revision: rev } : {}) };
 }
 export function validateState(x: unknown): { ok: true; state: AppState; repaired: string | null } | { ok: false; error: string } {
   if (!isAppState(x)) return { ok: false, error: "Ce fichier n'est pas une sauvegarde Étudiant OS (version 1)." };
@@ -1008,7 +1010,7 @@ export function planDay(state: AppState, date: string, remaining?: Map<ID, numbe
   let taskMin = fixed.filter((b) => b.kind === "task").reduce((n, b) => n + b.end - b.start, 0);
   for (const { t, q } of queue) {
     const topic = revisionOn(t, date).filter((r) => !r.start).map((r) => r.topic).filter(Boolean).join(", ");
-    const rest = place(q, (s, e) => ({ start: s, end: e, kind: "task", label: `${t.kind === "examen" ? "Révision · " : ""}${t.title}${topic ? ` — ${topic}` : ""}`, color: color(t.courseId), refId: t.id }), t.dueTime && t.kind !== "examen" ? preferredWindow(t.dueTime) : undefined);
+    const rest = place(q, (s, e) => ({ start: s, end: e, kind: "task", label: `${t.kind === "examen" ? "Révision · " : ""}${t.title}${topic ? ` — ${topic}` : ""}`, color: color(t.courseId), refId: t.id }), taskPrefer(t) ? preferredWindow(taskPrefer(t)!) : undefined);
     taskMin += q - rest;
     if (rest > 0) overflow.push({ task: t, minutes: rest });
   }
@@ -1335,6 +1337,8 @@ export function missedDeadline(t: { postponed?: Postponement[] }): string | null
 export const DUE_PRESETS: { k: string; label: string; time: string; window: [number, number] }[] = [
   { k: "matin", label: "Matin", time: "09:00", window: [7 * 60, 12 * 60] }, { k: "midi", label: "Midi", time: "12:00", window: [12 * 60, 14 * 60 + 30] },
   { k: "aprem", label: "Après-midi", time: "15:00", window: [14 * 60 + 30, 18 * 60] }, { k: "soir", label: "Soir", time: "20:00", window: [18 * 60, 23 * 60] }];
+/** Moment préféré d'une tâche : `prefer`, ou (anciennes données, hors examen) `dueTime`. */
+export const taskPrefer = (t: Pick<Task, "kind" | "prefer" | "dueTime">): string | undefined => t.prefer ?? (t.kind !== "examen" ? t.dueTime : undefined);
 /** Plage préférée d'un moment (« 09:00 » → matin…) ; une heure choisie donne la plage qui la suit (3 h). */
 export const preferredWindow = (time: string): [number, number] => DUE_PRESETS.find((p) => p.time === time)?.window ?? [toMin(time), toMin(time) + 180];
 /** Libellé lisible d'un moment préféré : « le matin », « vers 14:30 »… */
