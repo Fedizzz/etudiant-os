@@ -6,7 +6,7 @@ import { eventOn, layoutLanes, parseIngredient, scaleIngredient, stepMinutes, DU
 import type { Postponement, Recipe, RevisionSession } from "./core.ts";
 import { DEFAULT_POCKET_CATS, buildBudgetPdf, budgetInsights, categoryBreakdown, flatDebts, personalDebts, pocketStats, suggestLimits } from "./finance.ts";
 import type { MonthPoint } from "./finance.ts";
-import { debtRemaining, PET_KINDS, RESTORES_PER_MONTH, petStatus, restorableDays, restoresLeft } from "./core.ts";
+import { fmtCountdown, liveStatus, debtRemaining, PET_KINDS, RESTORES_PER_MONTH, petStatus, restorableDays, restoresLeft } from "./core.ts";
 import type { Debt } from "./core.ts";
 import { DAY_WORDS, dayOf, pageGeometry, parseGrid } from "./timetable.ts";
 import { parseIcs, normalizeFeedUrl, isFeedUrl } from "./ical.ts";
@@ -1101,6 +1101,38 @@ const DashGrid: React.FC<{ blocks: DashBlock[] }> = ({ blocks }) => {
   );
 };
 
+/** Horloge en secondes depuis minuit, rafraîchie chaque seconde (30 s si rien n'est en cours, pour économiser la batterie). */
+function useClockSec(fast: boolean): number {
+  const nowSecs = () => { const d = new Date(); return d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds(); };
+  const [t, setT] = useState(nowSecs);
+  useEffect(() => { setT(nowSecs()); const id = window.setInterval(() => setT(nowSecs()), fast ? 1000 : 30_000); return () => window.clearInterval(id); }, [fast]);
+  return t;
+}
+/** « En ce moment » : compte à rebours du cours / événement en cours (temps restant avant sa fin) et prochain créneau. */
+const LiveNow: React.FC<{ className?: string }> = ({ className }) => {
+  const { state } = useStore(); const today = todayISO();
+  const plan = useMemo(() => planFor(state, today, today), [state, today]);
+  const probe = liveStatus(plan.blocks, new Date().getHours() * 3600 + new Date().getMinutes() * 60 + new Date().getSeconds());
+  const t = useClockSec(probe.current.length > 0 || (probe.next?.in ?? 9999) < 120);
+  const { current, next } = liveStatus(plan.blocks, t);
+  if (!current.length && !next) return null;
+  return (
+    <section className={cx("inked rounded-[20px] bg-panel p-4", className)} data-testid="live-now" aria-label="En ce moment">
+      <p className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-muted"><Timer size={13} />En ce moment</p>
+      {current.length > 0 ? <ul className="flex flex-col gap-3">{current.map(({ block: b, left, total, elapsed }) => (
+        <li key={`${b.kind}-${b.start}-${b.label}`} data-testid="live-current">
+          <div className="flex items-end justify-between gap-3">
+            <div className="min-w-0"><p className="truncate font-display text-lg font-extrabold leading-tight">{b.label.replace(/^✓ /, "")}</p><p className="text-[12px] text-muted">{KIND_NAME[b.kind]} · {toHHMM(b.start)} → {toHHMM(b.end)}</p></div>
+            <div className="shrink-0 text-right"><p className="font-mono text-[28px] font-extrabold leading-none tabular-nums" data-testid="live-countdown" aria-live="off">{fmtCountdown(left)}</p><p className="text-[11px] text-muted">restant</p></div>
+          </div>
+          <div className="mt-2 h-2.5 overflow-hidden rounded-full border-2 border-fg bg-sunken" role="progressbar" aria-label={`Avancement de ${b.label}`} aria-valuenow={Math.round((elapsed / total) * 100)} aria-valuemin={0} aria-valuemax={100}><div className="h-full rounded-full transition-[width] duration-1000 ease-linear" style={{ width: `${Math.min(100, (elapsed / total) * 100)}%`, background: b.color ?? "rgb(var(--accent))" }} /></div>
+        </li>))}</ul>
+        : <p className="text-[13px] text-muted">Rien en cours pour l'instant.</p>}
+      {next && <p className="mt-3 border-t border-line pt-2 text-[12.5px] text-muted" data-testid="live-next">Ensuite : <b className="text-fg">{next.block.label.replace(/^✓ /, "")}</b> à {toHHMM(next.block.start)} · dans {next.in >= 3600 ? fmtDur(Math.round(next.in / 60)) : next.in >= 60 ? `${Math.round(next.in / 60)} min` : `${next.in} s`}</p>}
+    </section>
+  );
+};
+
 const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }> = ({ go, openNewTask }) => {
   const { state, dispatch, toast, openTask } = useStore();
   const today = todayISO();
@@ -1113,6 +1145,8 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
   // Toutes les valeurs viennent des mêmes fonctions que les modules (une seule source de vérité).
   const days7 = useMemo(() => planRange(state, today, 7, today), [state, today]);
   const plan = days7[0];
+  const [, setMin] = useState(0); useEffect(() => { const id = window.setInterval(() => setMin((x) => x + 1), 30_000); return () => window.clearInterval(id); }, []);
+  const nowRelevant = (() => { const d = new Date(), l = liveStatus(plan.blocks, d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds()); return l.current.length > 0 || (l.next !== null && l.next.in <= 3600); })();
   const fs = useMemo(() => focusStats(state.focus, today), [state.focus, today]);
   const ss = useMemo(() => sleepStats(state.sleep, state.settings.sleepGoal, today), [state.sleep, state.settings.sleepGoal, today]);
   // Ménage du jour : toutes les corvées prévues aujourd'hui, pour chaque colocataire (rotation automatique).
@@ -1151,6 +1185,7 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
   const stepsLeft = steps.filter((x) => !x.done).length;
   const debtTone = ss.nights7 === 0 ? undefined : ss.debt7 > 240 ? "bad" : ss.debt7 > 60 ? "warn" : "ok";
   const blocks: DashBlock[] = [
+    { id: "now", label: "En ce moment", span: "md:col-span-2 xl:col-span-3", show: nowRelevant, el: <LiveNow className="!rounded-[20px]" /> },
     { id: "pet", label: "Compagnon de série", span: "md:col-span-1", show: true, el: <Card title={<span className="flex items-center gap-2"><Flame size={15} />Compagnon de série</span>}><PetPanel /></Card> },
     { id: "todos", label: "Mes tâches perso", span: "md:col-span-2 xl:col-span-3", show: true, el: <TodoDashCard go={go} /> },
     { id: "start", label: "Pour bien démarrer", span: "md:col-span-2 xl:col-span-3", show: stepsLeft > 0, el: (<>
@@ -2052,6 +2087,7 @@ const Planning: React.FC = () => {
         </>}
         {plan.past && <p className="mt-3 text-xs text-muted">Journée passée : seuls les cours et indisponibilités sont affichés.</p>}
         {mode === "week" ? <div><p className="mb-2 text-[11px] text-muted md:hidden">Glissez horizontalement pour voir toute la semaine · touchez un créneau pour le détail, une case vide pour créer un événement.</p><WeekGrid week={week} today={today} onPick={(bb, d) => setSel({ b: bb, date: d })} onDay={(d) => { setOffset(daysBetween(today, d)); setMode("day"); }} onSlot={onSlot} onDropText={onDropText} /></div> : <>
+        {offset === 0 && <LiveNow className="mt-4" />}
         <div className="mt-4 flex flex-col gap-2"><DueBadges date={date} /><RoutineStrip date={date} /><UntimedStrip date={date} /></div>
         <p className="mt-3 text-[11px] text-muted">Touchez une plage horaire vide pour créer un événement ; glissez-y une note depuis « Notes à planifier ».</p>
         <div className="relative mt-1 cursor-cell overflow-hidden rounded-lg border border-line" data-testid="day-grid" style={{ height: (endH - startH) * PX }}

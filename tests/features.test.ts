@@ -307,3 +307,18 @@ test("moment préféré d'un examen (révisions) : séances sans heure placées 
   assert.equal(C.taskPrefer({ kind: "devoir", dueTime: "09:00" }), "09:00"); // anciennes données
   const rt = roundtrip(withTasks(exam)).tasks[0]; assert.deepEqual([rt.dueTime, rt.prefer], ["08:30", "20:00"]);
 });
+
+test("compte à rebours : temps restant du cours ou de l'événement en cours, puis prochain créneau", () => {
+  const blocks: C.Block[] = [
+    { start: 9 * 60, end: 11 * 60, kind: "class", label: "Maths" }, { start: 10 * 60, end: 10 * 60 + 30, kind: "event", label: "Appel" },
+    { start: 12 * 60, end: 13 * 60, kind: "meal", label: "Déjeuner" }, { start: 14 * 60, end: 15 * 60, kind: "event", label: "Dentiste" }];
+  const at = (h: number, m = 0, s = 0) => h * 3600 + m * 60 + s;
+  let l = C.liveStatus(blocks, at(10, 15, 30));
+  assert.deepEqual(l.current.map((x) => [x.block.label, x.left]), [["Appel", 14 * 60 + 30], ["Maths", 44 * 60 + 30]]); // la fin la plus proche d'abord
+  assert.equal(l.current[1].total, 7200); assert.equal(l.current[1].elapsed, 75 * 60 + 30);
+  assert.deepEqual([l.next?.block.label, l.next?.in], ["Dentiste", 3 * 3600 + 44 * 60 + 30]); // le repas n'est pas un « prochain »
+  l = C.liveStatus(blocks, at(11, 0, 0)); assert.equal(l.current.length, 0); // fin exclue
+  l = C.liveStatus(blocks, at(8, 59, 59)); assert.deepEqual([l.current.length, l.next?.in], [0, 1]);
+  l = C.liveStatus(blocks, at(16)); assert.deepEqual([l.current.length, l.next], [0, null]);
+  assert.deepEqual([C.fmtCountdown(3725), C.fmtCountdown(125), C.fmtCountdown(9), C.fmtCountdown(-4)], ["1:02:05", "2:05", "0:09", "0:00"]);
+});

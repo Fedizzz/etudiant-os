@@ -210,6 +210,22 @@ try {
   await p.locator("main button[type=submit]:has-text('Ajouter')").last().click(); await sleep(400);
   ok((await stateOf()).chores.some((c) => c.name === "Poubelles" && c.minutes === 30), "corvée créée avec la durée choisie (30 min)");
 
+  console.log("En ce moment : compte à rebours");
+  { const n = new Date(), m = n.getHours() * 60 + n.getMinutes();
+    if (m > 20 && m < 23 * 60 + 30) {
+      await p.evaluate(({ s, e, d }) => { const k = "etudiant-os/v1"; const st = JSON.parse(localStorage.getItem(k)); st.events = [...(st.events ?? []), { id: "live1", title: "Cours en cours", date: d, start: s, end: e, recurrence: "none", until: null }]; localStorage.setItem(k, JSON.stringify(st)); },
+        { s: hhmm(m - 10), e: hhmm(m + 20), d: plus(0) });
+      await p.reload(); await sleep(1500); await go("Tableau de bord");
+      const txt = await p.locator("[data-testid=live-now]").first().innerText();
+      ok(txt.includes("Cours en cours") && txt.includes("restant"), "la carte « En ce moment » affiche l'événement en cours");
+      const c1 = await p.locator("[data-testid=live-countdown]").first().innerText(); await sleep(2100);
+      const c2 = await p.locator("[data-testid=live-countdown]").first().innerText();
+      const sec = (x) => x.split(":").reduce((a, v) => a * 60 + Number(v), 0);
+      ok(sec(c1) <= 20 * 60 && sec(c1) > 18 * 60 && sec(c2) < sec(c1), `le compte à rebours diminue chaque seconde (${c1} → ${c2})`);
+      await go("Planning");
+      ok(await p.locator("[data-testid=live-now]").count() >= 1, "le compte à rebours est aussi dans le planning du jour");
+    } }
+
   console.log("Série : restaurations et compagnon");
   { const s0 = await stateOf(); const d = (n) => plus(n);
     // jours actifs : il y a 6, 5, 4 jours (routine cochée) ; manqué : il y a 3 et 2 jours ; actif hier et aujourd'hui
