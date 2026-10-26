@@ -33,7 +33,7 @@ export interface Task {
   noPlan?: boolean;
   /** Checklist (sous-étapes cochables). */
   steps?: Step[];
-  /** Heure précise de l'échéance (« HH:MM ») : matin, midi, soir ou personnalisée. Absent = toute la journée. */
+  /** Moment préféré pour faire la tâche (« HH:MM ») : matin, midi, après-midi, soir ou une heure choisie. Absent = pas de préférence. Pour un examen : heure de l'épreuve. */
   dueTime?: string;
   /** Ne pas afficher l'heure de fin du créneau (seul le début est montré). */
   hideEnd?: boolean;
@@ -86,7 +86,7 @@ export type HabitCat = "soin" | "santé" | "sport" | "bien-être" | "maison" | "
 export interface Habit { id: ID; name: string; emoji: string; cat: HabitCat; time?: string; days: number[]; done: string[]; steps?: Step[]; stepsDone?: Record<string, ID[]>; note?: string; /** Afficher dans le calendrier (créneau à l'heure de la routine, ou dans un créneau libre sans heure). */ inCalendar?: boolean; /** Durée (min) du créneau calendrier. */ duration?: number; since: string; /** Jour et heure où chaque occurrence a été cochée. */ doneOn?: Record<string, string>; doneTime?: Record<string, string>; /** Tous les N jours (depuis « since »). */ every?: number; /** Chaque mois, ce jour-là (1-31). */ monthDay?: number }
 export type TodoKind = "admin" | "rdv" | "appel" | "achat" | "santé" | "perso" | "autre";
 /** Tâche perso ponctuelle : due = jour prévu ; start/end = horaire précis (« HH:MM ») ; priority 1 basse → 3 haute. */
-export interface Todo { id: ID; text: string; done: boolean; due?: string; /** Heure limite du jour (« HH:MM »), sans horaire de travail. */ dueTime?: string; hideEnd?: boolean; postponed?: Postponement[]; /** Rappel : minutes avant `start` (ou `dueTime`). */ remind?: number; start?: string; end?: string; priority?: Priority; kind?: TodoKind; note?: string; steps?: Step[]; doneAt?: string; doneTime?: string; createdAt: string }
+export interface Todo { id: ID; text: string; done: boolean; due?: string; /** Moment préféré (« HH:MM ») : matin, midi, après-midi, soir ou une heure choisie ; sans horaire de travail. */ dueTime?: string; hideEnd?: boolean; postponed?: Postponement[]; /** Rappel : minutes avant `start` (ou `dueTime`). */ remind?: number; start?: string; end?: string; priority?: Priority; kind?: TodoKind; note?: string; steps?: Step[]; doneAt?: string; doneTime?: string; createdAt: string }
 export interface SleepLog { date: string; bed: string; wake: string; quality: 1 | 2 | 3 | 4 | 5; bedOk?: boolean; wakeOk?: boolean }
 /** id = identifiant de session : un même id n'est jamais enregistré deux fois. */
 export interface FocusEntry { id?: ID; date: string; minutes: number; taskId: ID | null; courseId?: ID | null; interrupted?: boolean }
@@ -971,16 +971,19 @@ export function planDay(state: AppState, date: string, remaining?: Map<ID, numbe
     .sort((a, b) => daysBetween(date, a.t.deadline) - daysBetween(date, b.t.deadline) || b.t.priority - a.t.priority);
 
   const blocks: Block[] = [...fixed];
-  const place = (minutes: number, mk: (s: number, e: number) => Block): number => {
+  /** Place `minutes` dans les créneaux libres (blocs ≤ maxBlock, 10 min de pause). `pref` : plage préférée, essayée d'abord. */
+  const place = (minutes: number, mk: (s: number, e: number) => Block, pref?: [number, number]): number => {
     let left = minutes;
-    for (const slot of free) {
-      while (left > 0 && slot[1] - slot[0] >= 15) {
-        const len = Math.min(left, settings.maxBlock, slot[1] - slot[0]);
-        blocks.push(mk(slot[0], slot[0] + len));
-        slot[0] += len + 10; left -= len;
+    const pass = (win?: [number, number]) => {
+      for (let i = 0; i < free.length && left > 0; i++) {
+        const slot = free[i], a = win ? Math.max(slot[0], win[0]) : slot[0], e = win ? Math.min(slot[1], win[1]) : slot[1];
+        let cur = a;
+        while (left > 0 && e - cur >= 15) { const len = Math.min(left, settings.maxBlock, e - cur); blocks.push(mk(cur, cur + len)); left -= len; cur += len + 10; }
+        if (cur > a) { const rest: [number, number][] = []; if (a - slot[0] >= 1) rest.push([slot[0], a]); if (slot[1] - cur >= 1) rest.push([cur, slot[1]]); free.splice(i, 1, ...rest); i += rest.length - 1; }
       }
-      if (left <= 0) break;
-    }
+    };
+    if (pref) pass(pref);
+    if (left > 0) pass();
     return Math.max(0, left);
   };
   let habitMin = fixed.filter((b) => b.kind === "habit").reduce((n, b) => n + b.end - b.start, 0);
@@ -994,7 +997,7 @@ export function planDay(state: AppState, date: string, remaining?: Map<ID, numbe
   let taskMin = fixed.filter((b) => b.kind === "task").reduce((n, b) => n + b.end - b.start, 0);
   for (const { t, q } of queue) {
     const topic = revisionOn(t, date).filter((r) => !r.start).map((r) => r.topic).filter(Boolean).join(", ");
-    const rest = place(q, (s, e) => ({ start: s, end: e, kind: "task", label: `${t.kind === "examen" ? "Révision · " : ""}${t.title}${topic ? ` — ${topic}` : ""}`, color: color(t.courseId), refId: t.id }));
+    const rest = place(q, (s, e) => ({ start: s, end: e, kind: "task", label: `${t.kind === "examen" ? "Révision · " : ""}${t.title}${topic ? ` — ${topic}` : ""}`, color: color(t.courseId), refId: t.id }), t.dueTime && t.kind !== "examen" ? preferredWindow(t.dueTime) : undefined);
     taskMin += q - rest;
     if (rest > 0) overflow.push({ task: t, minutes: rest });
   }
@@ -1113,7 +1116,7 @@ export function taskOnTimeStats(tasks: Task[], today: string, days?: number): On
     }
     // Échéance reportée après coup : le retard d'origine reste compté (historique conservé).
     const missed = missedDeadline(t);
-    if (t.status === "done" && t.doneAt) { if (!inWin(t.doneAt)) continue; if (missed === null && t.doneAt <= t.deadline && !dueTimePassed(t)) ok++; else late++; }
+    if (t.status === "done" && t.doneAt) { if (!inWin(t.doneAt)) continue; if (missed === null && t.doneAt <= t.deadline) ok++; else late++; }
     else if (t.status !== "done" && (missed !== null || t.deadline < today) && inWin(missed ?? t.deadline)) late++;
   }
   return { ok, late };
@@ -1278,19 +1281,21 @@ export function todoDoneLate(t: Todo): boolean {
 export function taskDoneLate(t: Task): boolean {
   if (t.status !== "done" || !t.doneAt || t.deadline === NO_DEADLINE) return false;
   if (t.slot) { const endM = ON_TIME_BY_TIME ? toMin(t.slot.end) : 24 * 60; return t.doneAt > t.slot.date || (t.doneAt === t.slot.date && !!t.doneTime && toMin(t.doneTime) > endM); }
-  return t.doneAt > t.deadline || dueTimePassed(t) || missedDeadline(t) !== null;
+  return t.doneAt > t.deadline || missedDeadline(t) !== null;
 }
 /** Première échéance manquée puis reportée (report fait après la date prévue) ; null si jamais reportée en retard. */
 export function missedDeadline(t: { postponed?: Postponement[] }): string | null {
   const m = (t.postponed ?? []).find((p) => p.at > p.from);
   return m ? m.from : null;
 }
-/** Terminée le jour de l'échéance mais après l'heure limite choisie (selon le réglage « à l'heure »). */
-export function dueTimePassed(t: Task): boolean {
-  return ON_TIME_BY_TIME && !!t.dueTime && t.doneAt === t.deadline && !!t.doneTime && toMin(t.doneTime) > toMin(t.dueTime);
-}
-/** Heures proposées pour une échéance : matin, midi, soir. */
-export const DUE_PRESETS: { k: string; label: string; time: string }[] = [{ k: "matin", label: "Matin", time: "09:00" }, { k: "midi", label: "Midi", time: "12:00" }, { k: "soir", label: "Soir", time: "20:00" }];
+/** Moments de la journée proposés (heure représentative + plage où le planning place de préférence le travail). */
+export const DUE_PRESETS: { k: string; label: string; time: string; window: [number, number] }[] = [
+  { k: "matin", label: "Matin", time: "09:00", window: [7 * 60, 12 * 60] }, { k: "midi", label: "Midi", time: "12:00", window: [12 * 60, 14 * 60 + 30] },
+  { k: "aprem", label: "Après-midi", time: "15:00", window: [14 * 60 + 30, 18 * 60] }, { k: "soir", label: "Soir", time: "20:00", window: [18 * 60, 23 * 60] }];
+/** Plage préférée d'un moment (« 09:00 » → matin…) ; une heure choisie donne la plage qui la suit (3 h). */
+export const preferredWindow = (time: string): [number, number] => DUE_PRESETS.find((p) => p.time === time)?.window ?? [toMin(time), toMin(time) + 180];
+/** Libellé lisible d'un moment préféré : « le matin », « vers 14:30 »… */
+export const momentLabel = (time: string) => { const p = DUE_PRESETS.find((x) => x.time === time); return p ? (p.k === "midi" ? "à midi" : p.k === "aprem" ? "l'après-midi" : `le ${p.label.toLowerCase()}`) : `vers ${time}`; };
 /** Séances de révision d'un jour donné (plan détaillé d'un examen). */
 export const revisionOn = (t: Task, date: string) => (t.revision ?? []).filter((r) => r.date === date && !r.done);
 /** Répartit `total` minutes en séances sur les `dates` données (pas de 5 min), thèmes pris dans la liste (cycliquement). */

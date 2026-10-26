@@ -37,15 +37,26 @@ test("retard manqué puis reporté : compté dans l'historique, pas un report an
   assert.deepEqual(C.taskOnTimeStats([early], TODAY), { ok: 1, late: 0 });
 });
 
-test("heure limite : terminée après l'heure du jour de l'échéance = en retard (mode heure)", () => {
+test("moment préféré : matin, midi, soir ; le travail est placé de préférence à ce moment, sans effet sur le retard", () => {
+  assert.deepEqual(C.DUE_PRESETS.map((p) => p.time), ["09:00", "12:00", "15:00", "20:00"]);
+  assert.deepEqual(C.preferredWindow("20:00"), [18 * 60, 23 * 60]); assert.deepEqual(C.preferredWindow("14:00"), [14 * 60, 17 * 60]);
+  assert.deepEqual([C.momentLabel("09:00"), C.momentLabel("12:00"), C.momentLabel("20:00"), C.momentLabel("16:40")], ["le matin", "à midi", "le soir", "vers 16:40"]);
+  const at = (dueTime?: string) => { const tk = task({ id: "w", title: "Fiche", deadline: "2026-10-18", estimate: 60, ...(dueTime ? { dueTime } : {}) });
+    return C.planDay(withTasks(tk), "2026-10-16", undefined, TODAY).blocks.filter((b) => b.kind === "task").map((b) => [b.start, b.end]); };
+  const none = at(), evening = at("20:00"), morning = at("09:00"), noon = at("12:00");
+  assert.ok(none.length && evening.length && morning.length && noon.length);
+  assert.ok(evening.every(([s]) => s >= 18 * 60), "soir : après 18 h");
+  assert.ok(morning.every(([s, e]) => s >= 7 * 60 && e <= 12 * 60), "matin : avant midi");
+  assert.ok(noon.every(([s]) => s >= 12 * 60 && s < 14 * 60 + 30), "midi : entre 12 h et 14 h 30");
+  // plage préférée pleine : repli sur les créneaux libres ailleurs (jamais de travail perdu)
+  const busy = { ...withTasks(task({ id: "w", deadline: "2026-10-18", estimate: 60, dueTime: "20:00" })), events: [{ id: "e", title: "Soirée", date: "2026-10-16", start: "17:00", end: "23:30", recurrence: "none" as const, until: null }] };
+  const fb = C.planDay(busy, "2026-10-16", undefined, TODAY);
+  assert.ok(fb.blocks.some((b) => b.kind === "task") && fb.overflow.length === 0);
+  // terminer après le moment préféré n'est pas un retard
   C.setOnTimeMode("time");
-  const t = task({ status: "done", deadline: "2026-10-20", doneAt: "2026-10-20", doneTime: "13:00", dueTime: "12:00" });
-  assert.equal(C.taskDoneLate(t), true);
-  assert.equal(C.taskDoneLate({ ...t, doneTime: "11:30" }), false);
+  assert.equal(C.taskDoneLate(task({ status: "done", deadline: "2026-10-20", doneAt: "2026-10-20", doneTime: "23:00", dueTime: "09:00" })), false);
   C.setOnTimeMode("day");
-  assert.equal(C.taskDoneLate(t), false);
-  C.setOnTimeMode("time");
-  assert.deepEqual(C.DUE_PRESETS.map((p) => p.time), ["09:00", "12:00", "20:00"]);
+  assert.equal(roundtrip(withTasks(task({ dueTime: "09:00" }))).tasks[0].dueTime, "09:00");
 });
 
 test("plan de révision : minutes des séances du jour, label avec le thème", () => {

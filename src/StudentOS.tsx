@@ -2,7 +2,7 @@ import { createPortal } from "react-dom";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { MiniPdf } from "./pdf.ts";
-import { eventOn, layoutLanes, parseIngredient, scaleIngredient, stepMinutes, DUE_PRESETS, buildRevisionPlan, isNightTime, pendingReceipts, revisionOn, missedDeadline } from "./core.ts";
+import { eventOn, layoutLanes, parseIngredient, scaleIngredient, stepMinutes, DUE_PRESETS, momentLabel, buildRevisionPlan, isNightTime, pendingReceipts, revisionOn, missedDeadline } from "./core.ts";
 import type { Postponement, Recipe, RevisionSession } from "./core.ts";
 import { DEFAULT_POCKET_CATS, buildBudgetPdf, budgetInsights, categoryBreakdown, flatDebts, personalDebts, pocketStats, suggestLimits } from "./finance.ts";
 import type { MonthPoint } from "./finance.ts";
@@ -491,21 +491,22 @@ export const DurationPicker: React.FC<{ id: string; value: number; onChange: (n:
     </div>
   );
 };
-/** Heure limite d'une échéance : toute la journée, matin, midi, soir ou une heure précise. */
-export const DueTimePicker: React.FC<{ id: string; value: string | undefined; onChange: (t: string | undefined) => void; className?: string }> = ({ id, value, onChange, className }) => {
+/** Moment préféré : pas de préférence, matin, midi, après-midi, soir ou une heure choisie (le planning y place le travail de préférence). */
+export const DueTimePicker: React.FC<{ id: string; value: string | undefined; onChange: (t: string | undefined) => void; className?: string; label?: string; hint?: string }> = ({ id, value, onChange, className, label = "Moment préféré", hint }) => {
   const preset = DUE_PRESETS.find((p) => p.time === value);
   const [custom, setCustom] = useState(!!value && !preset);
   const choose = (t: string | undefined, c = false) => { setCustom(c); onChange(t); };
-  const opts: [string, string | undefined, boolean][] = [["Journée", undefined, false], ...DUE_PRESETS.map((p): [string, string | undefined, boolean] => [`${p.label} ${p.time}`, p.time, false]), ["Heure…", value && !preset ? value : "18:00", true]];
+  const opts: [string, string | undefined, boolean][] = [["Pas de préférence", undefined, false], ...DUE_PRESETS.map((p): [string, string | undefined, boolean] => [p.label, p.time, false]), ["Heure précise", value && !preset ? value : "18:00", true]];
   return (
     <div className={className}>
-      <p id={id} className="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted">Heure limite</p>
+      <p id={id} className="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted">{label}</p>
       <div className="flex flex-wrap items-center gap-1.5" role="group" aria-labelledby={id}>
         {opts.map(([l, t, c]) => { const on = c ? (custom || (!!value && !preset)) : (t === value && !custom); return (
           <button key={l} type="button" aria-pressed={on} onClick={() => choose(t, c)}
             className={cx("rounded-lg border-2 px-2.5 py-1 text-[12px] font-semibold transition", on ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-line bg-sunken text-muted hover:text-fg")}>{l}</button>); })}
-        {(custom || (!!value && !preset)) && <Input type="time" aria-label="Heure limite personnalisée" value={value ?? "18:00"} onChange={(e) => onChange(e.target.value || undefined)} className="h-8 w-28 py-0 text-[12px]" />}
+        {(custom || (!!value && !preset)) && <Input type="time" aria-label="Heure choisie" value={value ?? "18:00"} onChange={(e) => onChange(e.target.value || undefined)} className="h-8 w-28 py-0 text-[12px]" />}
       </div>
+      {hint && <p className="mt-1 text-[11px] text-muted">{hint}</p>}
     </div>
   );
 };
@@ -611,7 +612,7 @@ const TaskForm: React.FC<{ onDone: () => void; task?: Task }> = ({ onDone, task 
       </div> : <>
       <Field label={isExam ? "Date de l'examen" : "Échéance (à rendre)"} htmlFor="tf-dl" className="col-span-2"><Input id="tf-dl" type="date" value={f.deadline} onChange={(e) => setF({ ...f, deadline: e.target.value })} /></Field>
       <TimeMode id="tf-mode" value={mode} onChange={setMode} className="col-span-2" />
-      <DueTimePicker id="tf-duetime" value={dueTime} onChange={setDueTime} className="col-span-2 sm:col-span-4" />
+      <DueTimePicker id="tf-duetime" value={dueTime} onChange={setDueTime} className="col-span-2 sm:col-span-4" label={isExam ? "Heure de l'examen (facultatif)" : "Moment préféré pour travailler"} hint={isExam ? undefined : "Le planning place le travail de préférence à ce moment de la journée, quand un créneau est libre."} />
       {mode === "duration" ? <>
         <Field label="Durée estimée" htmlFor="tf-est" className="col-span-2"><DurationPicker id="tf-est" min={15} value={f.estimate} onChange={(n) => setF({ ...f, estimate: Math.max(15, n) })} /></Field>
         <p className="col-span-2 self-end pb-2 text-[11px] text-muted">{doMode === "none" ? "Non placée dans le planning." : doDates.length ? `Répartie sur ${doDates.length} jour${doDates.length > 1 ? "s" : ""} choisi${doDates.length > 1 ? "s" : ""}.` : "Répartie automatiquement dans vos créneaux libres avant l'échéance."}</p>
@@ -1870,10 +1871,10 @@ const UntimedStrip: React.FC<{ date: string }> = ({ date }) => {
       {todos.map((t) => (
         <button key={t.id} onClick={() => { dispatch({ type: "todo/toggle", id: t.id }); if (!t.done) toast(`« ${t.text} » fait ✓`); }} title={t.done ? "Rouvrir" : "Marquer fait"}
           className={cx("inline-flex items-center gap-1.5 rounded-full border-2 px-2.5 py-1 text-[12px] font-medium transition", t.done ? "border-ok/60 bg-ok/12 text-ok line-through" : "border-line bg-sunken hover:border-fg/60")}>
-          <span aria-hidden>{t.done ? "✓" : kindOf(t.kind).emoji}</span>{t.text}{t.dueTime && <span className="font-mono text-[10px] text-muted">avant {t.dueTime}</span>}
+          <span aria-hidden>{t.done ? "✓" : kindOf(t.kind).emoji}</span>{t.text}{t.dueTime && <span className="text-[10px] text-muted">{momentLabel(t.dueTime)}</span>}
         </button>))}
       {tasks.map((t) => (
-        <button key={t.id} onClick={() => openTask(t.id)} title="Ouvrir la tâche" className="inline-flex items-center gap-1.5 rounded-full border-2 border-line bg-sunken px-2.5 py-1 text-[12px] font-medium transition hover:border-fg/60"><span aria-hidden>📌</span>{t.title}{t.dueTime && <span className="font-mono text-[10px] text-muted">avant {t.dueTime}</span>}</button>))}
+        <button key={t.id} onClick={() => openTask(t.id)} title="Ouvrir la tâche" className="inline-flex items-center gap-1.5 rounded-full border-2 border-line bg-sunken px-2.5 py-1 text-[12px] font-medium transition hover:border-fg/60"><span aria-hidden>📌</span>{t.title}{t.dueTime && <span className="text-[10px] text-muted">{momentLabel(t.dueTime)}</span>}</button>))}
     </div>
   );
 };
@@ -2282,7 +2283,7 @@ const Academic: React.FC<{ openNewTask: () => void }> = ({ openNewTask }) => {
                   <div className="mt-2 h-1 rounded-full bg-sunken"><div className="h-full rounded-full bg-accent" style={{ width: `${pct}%` }} /></div>
                   <div className="mt-2 flex items-center gap-2 text-[11px] text-muted">
                     <span className="font-mono tabular-nums">{fmtDur(t.spent)} / {fmtDur(t.estimate)}</span>
-                    <span className={cx("ml-auto", s !== "done" && left < 0 && "font-semibold text-bad", s !== "done" && left >= 0 && left <= 2 && "text-warn")}>{t.deadline === NO_DEADLINE ? "Sans échéance" : `${fmtDate(t.deadline)}${t.dueTime ? ` · ${t.dueTime}` : ""}`}</span>
+                    <span className={cx("ml-auto", s !== "done" && left < 0 && "font-semibold text-bad", s !== "done" && left >= 0 && left <= 2 && "text-warn")}>{t.deadline === NO_DEADLINE ? "Sans échéance" : `${fmtDate(t.deadline)}${t.dueTime ? ` · ${t.kind === "examen" ? t.dueTime : momentLabel(t.dueTime)}` : ""}`}</span>
                   </div>
                   <div className="mt-2 flex items-center justify-between">
                     <Btn size="sm" variant="ghost" disabled={s === "todo"} onClick={() => move(t, -1)} aria-label="Statut précédent"><ChevronLeft size={13} /></Btn>
@@ -3704,7 +3705,7 @@ const TodoForm: React.FC<{ todo?: Todo; onDone: () => void }> = ({ todo, onDone 
       <Field label="Fin (facultatif)" htmlFor="td-end"><Input id="td-end" type="time" value={f.end} onChange={(e) => setF({ ...f, end: e.target.value })} /></Field>
       {f.end && <div className="col-span-2 -mt-1 flex flex-wrap items-center gap-3 text-[12px] sm:col-span-4"><button type="button" className="text-accent hover:underline" onClick={() => setF({ ...f, end: "" })}>Retirer l'heure de fin</button>
         <label className="flex items-center gap-1.5"><input type="checkbox" checked={hideEnd} onChange={(e) => setHideEnd(e.target.checked)} />Masquer l'heure de fin dans le planning</label></div>}
-      {f.due && !f.start && <DueTimePicker id="td-duetime" value={dueTime} onChange={setDueTime} className="col-span-2 sm:col-span-4" />}
+      {f.due && !f.start && <DueTimePicker id="td-duetime" value={dueTime} onChange={setDueTime} className="col-span-2 sm:col-span-4" hint="Sans horaire précis : la tâche apparaît le jour choisi, avec ce moment indiqué." />}
       {f.due && (f.start || dueTime) && <RemindSelect id="td-remind" value={remind} onChange={setRemind} className="col-span-2" />}
       <p className="col-span-2 -mt-1 text-[11px] text-muted sm:col-span-4">Jour vide = sans date. Avec un début (et une fin facultative), la tâche apparaît dans votre planning comme un rendez-vous ; sans horaire, elle apparaît en pastille sous le jour.{f.due && <> <button type="button" className="text-accent hover:underline" onClick={() => setF({ ...f, due: "", start: "", end: "" })}>Retirer la date</button></>}</p>
       <Field label="Note" htmlFor="td-note" className="col-span-2 sm:col-span-4"><Input id="td-note" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} placeholder="Adresse, numéro, documents à prendre…" /></Field>
@@ -3728,7 +3729,7 @@ const TodoRow: React.FC<{ t: Todo; onEdit?: (t: Todo) => void; showDate?: boolea
         {nSteps > 0 && <span className="ml-1.5 font-mono text-[11px] text-muted">☑ {doneSteps}/{nSteps}</span>}</button>
       {t.start && <span className="font-mono text-[11px] tabular-nums text-muted">{t.start}{t.end && !t.hideEnd ? `–${t.end}` : ""}</span>}
       {showDate && t.due && t.due !== today && !t.done && <Pill tone={late ? "bad" : "muted"}>{fmtDate(t.due)}</Pill>}
-      {!t.done && t.dueTime && <span className="font-mono text-[11px] tabular-nums text-muted" title="Heure limite">avant {t.dueTime}</span>}
+      {!t.done && t.dueTime && !t.start && <span className="text-[11px] text-muted" title="Moment préféré">{momentLabel(t.dueTime)}</span>}
       {!t.done && t.priority === 3 && <Pill tone="bad">🔥 Haute</Pill>}
       <PostponedPill list={t.postponed} />
       {todoDoneLate(t) && <Pill tone="warn">Fait en retard</Pill>}
