@@ -7,7 +7,7 @@ const col = (c: RGB) => c.map((v) => (v / 255).toFixed(3)).join(" ");
 /** Texte → Latin-1 (WinAnsi) ; caractères non représentables remplacés. */
 export function latin1(t: string): string {
   return t.replace(/[–—−]/g, "-").replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/…/g, "...")
-    .replace(/[  ]/g, " ").replace(/[^\x20-\x7e\xa0-\xff]/g, "");
+    .replace(/[  ]/g, " ").replace(/€/g, "\x80").replace(/œ/g, "\x9c").replace(/Œ/g, "\x8c").replace(/•/g, "\x95").replace(/[^\x20-\x7e\x80\x8c\x95\x9c\xa0-\xff]/g, "");
 }
 const esc = (t: string) => latin1(t).replace(/[\\()]/g, (m) => "\\" + m);
 /** Largeur approximative (Helvetica ≈ 0,52 em ; gras ≈ 0,56 em), suffisante pour couper / centrer. */
@@ -17,8 +17,12 @@ export class MiniPdf {
   private pages: string[][] = [];
   readonly w: number; readonly h: number;
   constructor(w = 297, h = 210) { this.w = w; this.h = h; this.addPage(); }
-  private get ops() { return this.pages[this.pages.length - 1]; }
-  addPage() { this.pages.push([]); }
+  private cur = 0;
+  private get ops() { return this.pages[this.cur]; }
+  addPage() { this.pages.push([]); this.cur = this.pages.length - 1; }
+  get pageCount() { return this.pages.length; }
+  /** Revient dessiner sur une page déjà créée (numéros de page). */
+  goto(i: number) { this.cur = Math.max(0, Math.min(this.pages.length - 1, i)); }
   rect(x: number, y: number, w: number, h: number, fill?: RGB, stroke?: RGB, lw = 0.2) {
     const p = `${(x * PT).toFixed(2)} ${((this.h - y - h) * PT).toFixed(2)} ${(w * PT).toFixed(2)} ${(h * PT).toFixed(2)} re`;
     this.ops.push(`${fill ? col(fill) + " rg " : ""}${stroke ? col(stroke) + " RG " + (lw * PT).toFixed(2) + " w " : ""}${p} ${fill && stroke ? "B" : fill ? "f" : "S"}`);

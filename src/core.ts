@@ -63,7 +63,12 @@ export interface Budget {
   incomes?: Income[]; savings?: SavingMove[]; savingsGoal?: { name: string; target: number } | null;
   /** Argent de poche : enveloppe pour les dépenses « plaisir » (par semaine ou par mois), prise sur le budget mensuel. */
   pocket?: PocketCfg | null;
+  /** Prêts et emprunts entre personnes (amis, famille…), pas seulement la colocation. */
+  debts?: Debt[];
 }
+/** Argent prêté (« lent » : on me doit) ou emprunté (« borrowed » : je dois), avec remboursements partiels. Hors budget des dépenses. */
+export interface Debt { id: ID; person: string; amount: number; direction: "lent" | "borrowed"; label: string; date: string; due?: string; repaid: { date: string; amount: number }[] }
+export const debtRemaining = (d: Debt) => Math.max(0, Math.round((d.amount - d.repaid.reduce((n, r) => n + r.amount, 0)) * 100) / 100);
 export interface PocketCfg { amount: number; period: "week" | "month"; cats: string[] }
 /** done : dates faites · doneBy : qui l'a faite ce jour-là · skipped : dates reportées. */
 /** recurrence « once » : une seule fois, le jour `date`. */
@@ -277,6 +282,7 @@ export type Action =
   | { type: "task/step"; id: ID; stepId: ID }
   | { type: "task/postpone"; id: ID; to: string } | { type: "todo/postpone"; id: ID; to: string }
   | { type: "expense/received"; id: ID } | { type: "event/step"; id: ID; stepId: ID }
+  | { type: "debt/save"; debt: Debt } | { type: "debt/remove"; id: ID } | { type: "debt/repay"; id: ID; amount: number; date: string }
   | { type: "recipe/save"; recipe: Recipe } | { type: "recipe/remove"; id: ID }
   | { type: "notes/set"; patch: { text?: string; ink?: string | undefined } }
   | { type: "todo/add"; todo: Todo } | { type: "todo/toggle"; id: ID } | { type: "todo/remove"; id: ID } | { type: "todo/update"; id: ID; patch: Partial<Todo> } | { type: "todo/clearDone" }
@@ -325,6 +331,9 @@ export function reducer(s: AppState, a: Action): AppState {
     case "todo/postpone": return { ...s, todos: (s.todos ?? []).map((t) => (t.id !== a.id || a.to === t.due ? t : { ...t, due: a.to, postponed: [...(t.postponed ?? []), { from: t.due ?? t.createdAt, to: a.to, at: todayISO() }].slice(-30) })) };
     case "expense/received": return { ...s, budget: { ...s.budget, expenses: s.budget.expenses.map((e) => (e.id === a.id ? { ...e, received: true } : e)) } };
     case "event/step": return { ...s, events: (s.events ?? []).map((e) => (e.id !== a.id ? e : { ...e, steps: (e.steps ?? []).map((x) => (x.id === a.stepId ? { ...x, done: !x.done } : x)) })) };
+    case "debt/save": return { ...s, budget: { ...s.budget, debts: [...(s.budget.debts ?? []).filter((d) => d.id !== a.debt.id), a.debt] } };
+    case "debt/remove": return { ...s, budget: { ...s.budget, debts: (s.budget.debts ?? []).filter((d) => d.id !== a.id) } };
+    case "debt/repay": return { ...s, budget: { ...s.budget, debts: (s.budget.debts ?? []).map((d) => (d.id === a.id && a.amount > 0 ? { ...d, repaid: [...d.repaid, { date: a.date, amount: Math.min(a.amount, debtRemaining(d)) }] } : d)) } };
     case "recipe/save": return { ...s, recipes: [...(s.recipes ?? []).filter((r) => r.id !== a.recipe.id), a.recipe] };
     case "recipe/remove": return { ...s, recipes: (s.recipes ?? []).filter((r) => r.id !== a.id) };
     case "course/add": return { ...s, courses: [...s.courses, a.course] };
@@ -585,6 +594,9 @@ export function validateState(x: unknown): { ok: true; state: AppState; repaired
       incomes: keep<Income>("revenus", Array.isArray(b.incomes) ? b.incomes : [], (x) => isStr(x.id) && isDate(x.date) && isNum(x.amount) && x.amount > 0).map((x) => ({ ...x, source: isStr(x.source) ? x.source : "Autre", label: isStr(x.label) ? x.label : "" })),
       savings: keep<SavingMove>("épargne", Array.isArray(b.savings) ? b.savings : [], (x) => isStr(x.id) && isDate(x.date) && isNum(x.amount) && x.amount !== 0).map((x) => ({ ...x, label: isStr(x.label) ? x.label : "" })),
       pocket: b.pocket && isNum(b.pocket.amount) && b.pocket.amount > 0 && (b.pocket.period === "week" || b.pocket.period === "month") ? { amount: b.pocket.amount, period: b.pocket.period, cats: Array.isArray(b.pocket.cats) ? b.pocket.cats.filter(isStr).slice(0, 40) : [] } : null,
+      debts: keep<Debt>("dettes", Array.isArray(b.debts) ? b.debts : [], (d) => isStr(d.id) && isStr(d.person) && d.person.trim() !== "" && isNum(d.amount) && d.amount > 0 && (d.direction === "lent" || d.direction === "borrowed")).map((d) => ({
+        id: d.id, person: d.person.trim().slice(0, 60), amount: Math.round(d.amount * 100) / 100, direction: d.direction, label: isStr(d.label) ? d.label.slice(0, 120) : "", date: isDate(d.date) ? d.date : todayISO(), ...(isDate(d.due) ? { due: d.due } : {}),
+        repaid: Array.isArray(d.repaid) ? d.repaid.filter((r) => r && isDate(r.date) && isNum(r.amount) && r.amount > 0).slice(-100).map((r) => ({ date: r.date, amount: r.amount })) : [] })),
       savingsGoal: b.savingsGoal && isStr(b.savingsGoal.name) && isNum(b.savingsGoal.target) && b.savingsGoal.target > 0 ? { name: b.savingsGoal.name.slice(0, 40), target: b.savingsGoal.target } : null,
     },
     settings,

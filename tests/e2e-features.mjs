@@ -215,6 +215,25 @@ try {
   ok(/27,50/.test(rem), `reste de l'enveloppe : ${rem.replace(/\s+/g, " ")}`);
   await p.click("[data-testid=limits-btn]"); await p.fill("#lim-Restauration", "30"); await p.locator("#lim-Restauration").blur(); await p.click("[data-testid=limits-btn]"); await sleep(300);
   ok((await p.locator("[data-testid=cat-remaining-Restauration]").innerText()).includes("Reste 17,50"), "reste par catégorie affiché");
+  // dettes entre personnes
+  await p.click("[data-testid=debt-add-btn]"); await sleep(200);
+  await p.fill("#db-person", "Inès"); await p.fill("#db-amount", "40"); await p.fill("#db-label", "Concert");
+  await p.click("[data-testid=debt-form] >> button[type=submit]"); await sleep(400);
+  ok((await p.locator("[data-testid=debts]").innerText()).includes("Inès") && (await p.locator("[data-testid=debts]").innerText()).includes("+40,00"), "une personne qui me doit de l'argent (hors colocation) apparaît");
+  await p.fill("[aria-label='Montant remboursé par Inès']", "15"); await p.click("button:has-text('Reçu')"); await sleep(300);
+  ok((await stateOf()).budget.debts[0].repaid[0].amount === 15 && (await p.locator("[data-testid=debts]").innerText()).includes("+25,00"), "remboursement partiel : le reste est mis à jour (25 €)");
+  await p.click("[data-testid=debt-add-btn]"); await p.click("[data-testid=debt-form] >> text=Je dois"); await p.fill("#db-person", "Hugo"); await p.fill("#db-amount", "12"); await p.click("[data-testid=debt-form] >> button[type=submit]"); await sleep(300);
+  ok((await p.locator("[data-testid=debts]").innerText()).includes("−12,00"), "ce que je dois à quelqu'un apparaît de l'autre côté");
+  await p.click("button[aria-label='Hugo']").catch(() => {}); await p.locator("li:has-text('Hugo') >> button:has-text('Soldé')").click(); await sleep(300);
+  ok(!(await p.locator("[data-testid=debts]").innerText()).includes("Hugo"), "« Soldé » retire la dette");
+  // plafonds suggérés
+  await p.click("[data-testid=suggest-limits-btn]"); await sleep(200);
+  const nSug = await p.locator("[data-testid=limit-suggestions] li").count();
+  ok(nSug >= 3, `une limite est suggérée pour ${nSug} catégories`);
+  const lim0 = Object.keys((await stateOf()).budget.limits).length;
+  await p.click("[data-testid=apply-all-limits]"); await sleep(300);
+  const lim1 = (await stateOf()).budget.limits; const tot = Object.values(lim1).reduce((n, v) => n + v, 0);
+  ok(Object.keys(lim1).length >= nSug && tot <= (await stateOf()).budget.monthly, `« Tout appliquer » enregistre les plafonds (${tot} € ≤ budget)`);
   const dl = p.waitForEvent("download");
   await p.click("[data-testid=budget-pdf]"); const d = await dl; const path = await d.path();
   const head = fs.readFileSync(path).subarray(0, 8).toString("latin1");

@@ -4,7 +4,10 @@ import { flushSync } from "react-dom";
 import { MiniPdf } from "./pdf.ts";
 import { eventOn, layoutLanes, parseIngredient, scaleIngredient, stepMinutes, DUE_PRESETS, buildRevisionPlan, isNightTime, pendingReceipts, revisionOn, missedDeadline } from "./core.ts";
 import type { Postponement, Recipe, RevisionSession } from "./core.ts";
-import { DEFAULT_POCKET_CATS, buildBudgetPdf, budgetInsights, categoryBreakdown, flatDebts, pocketStats } from "./finance.ts";
+import { DEFAULT_POCKET_CATS, buildBudgetPdf, budgetInsights, categoryBreakdown, flatDebts, personalDebts, pocketStats, suggestLimits } from "./finance.ts";
+import type { MonthPoint } from "./finance.ts";
+import { debtRemaining } from "./core.ts";
+import type { Debt } from "./core.ts";
 import { DAY_WORDS, dayOf, pageGeometry, parseGrid } from "./timetable.ts";
 import { parseIcs, normalizeFeedUrl, isFeedUrl } from "./ical.ts";
 import { BACKUP_KEY, CORRUPT_KEY, DAYS, DAYS_LONG, OVERDUE_SPREAD, STORAGE_KEY, addDays, bedtimeOptions, blank, budgetStats, choreAssignee, choreHistory, choreScheduledOn, choreStepsDone, choreDoneLate, choreSlotEnd, freeStart, setOnTimeMode, todoDoneLate, taskDoneLate, habitDoneLate, habitTimePassed, nowMinutes, NO_DEADLINE, cx, daysBetween, fmtDate, fmtDur, focusStats, iso, isoWeek, lastNDays, loadState, money, monthKey, norm, onTimeGuess, onTimeStats, taskOnTimeStats, choreOnTimeStats, HABIT_CATS, habitOn, habitStats, habitStepsDone, habitStreak, todoOnTimeStats, TODO_KINDS, activeDays, withoutShared, xpOf, levelOf, globalStreak, LEVELS, applyReceiptToGroceries, pad, pantryItems, parseAmount, parseISO, parseReceipt, parseReceiptItems, receiptFingerprint, phaseSeconds, planFor, planRange, reducer, seed, sleepMinutes, sleepStats, timerLeft, toHHMM, toMin, todayISO, uid, validateState, weekday } from "./core.ts";
@@ -2890,25 +2893,64 @@ async function savePdf(bytes: Uint8Array, file: string): Promise<"shared" | "dow
   setTimeout(() => URL.revokeObjectURL(url), 10000);
   return "downloaded";
 }
-/** Dettes de colocation : qui me doit combien, à qui je dois combien. */
+/** Dettes et prêts : amis, famille… (saisis à la main) et colocation (calculés). Qui me doit combien, à qui je dois combien. */
 const DebtsCard: React.FC = () => {
-  const fd = useFlat(); const { state } = useStore();
-  if (fd.status !== "in" || !fd.flat) return null;
-  const cur = state.settings.currency, d = flatDebts(fd.flat, fd.expenses);
-  const settled = !d.owedToMe.length && !d.iOwe.length;
+  const fd = useFlat(); const { state, dispatch, toast, undoable } = useStore();
+  const cur = state.settings.currency, today = todayISO();
+  const pd = personalDebts(state.budget, today), flat = fd.status === "in" && fd.flat ? flatDebts(fd.flat, fd.expenses) : null;
+  const [open, setOpen] = useState(false); const [pay, setPay] = useState<Record<string, string>>({});
+  const [f, setF] = useState({ person: "", amount: "", direction: "lent" as Debt["direction"], label: "", due: "" });
+  const all = state.budget.debts ?? [];
+  const totalOwed = pd.totalOwedToMe + (flat ? flat.totalOwedToMe / 100 : 0), totalOwe = pd.totalIOwe + (flat ? flat.totalIOwe / 100 : 0), net = Math.round((totalOwed - totalOwe) * 100) / 100;
+  const add = (e: React.FormEvent) => {
+    e.preventDefault(); const v = parseAmount(f.amount);
+    if (!f.person.trim()) { toast("Indiquez le nom de la personne.", "bad"); return; }
+    if (!(v > 0) || v > 1_000_000) { toast("Saisissez un montant positif, par exemple 20.", "bad"); return; }
+    dispatch({ type: "debt/save", debt: { id: uid(), person: f.person.trim(), amount: Math.round(v * 100) / 100, direction: f.direction, label: f.label.trim(), date: today, ...(f.due ? { due: f.due } : {}), repaid: [] } });
+    toast(f.direction === "lent" ? `${f.person.trim()} vous doit ${money(v, cur)}` : `Vous devez ${money(v, cur)} à ${f.person.trim()}`); setF({ ...f, person: "", amount: "", label: "", due: "" }); setOpen(false);
+  };
+  const repay = (d: { id: string; person: string; remaining: number }, v: number) => {
+    if (!(v > 0)) { toast("Saisissez le montant remboursé.", "bad"); return; }
+    dispatch({ type: "debt/repay", id: d.id, amount: v, date: today }); setPay({ ...pay, [d.id]: "" });
+    toast(v >= d.remaining - 0.005 ? `Dette avec ${d.person} soldée ✓` : `${money(v, cur)} remboursés · reste ${money(d.remaining - v, cur)}`);
+  };
+  const row = (d: PersonalDebtRow, good: boolean) => (
+    <li key={d.id} className="rounded-xl border-2 border-line p-2.5 text-[13px]">
+      <div className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate font-semibold">{d.person}{d.label ? <span className="ml-1.5 font-normal text-muted">· {d.label}</span> : null}</span>
+        <span className={cx("font-mono tabular-nums", good ? "text-ok" : "text-bad")}>{good ? "+" : "−"}{money(d.remaining, cur)}</span>
+        <button className="text-muted hover:text-bad" aria-label={`Supprimer la dette ${d.person}`} onClick={() => { const prev = all.find((x) => x.id === d.id); if (prev) undoable({ type: "debt/remove", id: d.id }, `Dette « ${d.person} » supprimée`); }}><Trash2 size={12} /></button></div>
+      {d.due && <p className={cx("mt-0.5 text-[11px]", d.late ? "font-semibold text-bad" : "text-muted")}>{d.late ? "En retard · " : ""}échéance {fmtDate(d.due)}</p>}
+      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+        <Input aria-label={`Montant remboursé par ${d.person}`} inputMode="decimal" placeholder="Montant" className="h-7 w-24 text-xs" value={pay[d.id] ?? ""} onChange={(e) => setPay({ ...pay, [d.id]: e.target.value })} />
+        <Btn size="sm" onClick={() => repay(d, parseAmount(pay[d.id] ?? ""))}>{good ? "Reçu" : "Remboursé"}</Btn>
+        <Btn size="sm" variant="primary" onClick={() => repay(d, d.remaining)}><Check size={12} />Soldé</Btn></div>
+    </li>);
   return (
-    <Card title={<span className="flex items-center gap-2"><Users size={15} />Dettes de colocation · {fd.flat.name}</span>} action={!settled ? <Pill tone={d.net >= 0 ? "ok" : "warn"}>{d.net >= 0 ? "+" : "−"}{money(Math.abs(d.net) / 100, cur)} net</Pill> : undefined}>
-      {settled ? <p className="text-[13px] text-muted" data-testid="debts-settled">Tout est réglé : personne ne doit rien à personne. 🎉</p> : (
+    <Card title={<span className="flex items-center gap-2"><Users size={15} />Dettes et prêts</span>} action={<span className="flex items-center gap-1.5">{(totalOwed > 0 || totalOwe > 0) && <Pill tone={net >= 0 ? "ok" : "warn"}>{net >= 0 ? "+" : "−"}{money(Math.abs(net), cur)} net</Pill>}<Btn size="sm" variant={open ? "primary" : "soft"} onClick={() => setOpen(!open)} data-testid="debt-add-btn"><Plus size={12} />{open ? "Fermer" : "Ajouter"}</Btn></span>}>
+      {open && <form onSubmit={add} className="mb-4 grid grid-cols-2 gap-2 rounded-xl bg-sunken p-3" data-testid="debt-form">
+        <div className="col-span-2 flex gap-1.5" role="group">{([["lent", "On me doit"], ["borrowed", "Je dois"]] as const).map(([v, l]) => <button key={v} type="button" aria-pressed={f.direction === v} onClick={() => setF({ ...f, direction: v })} className={cx("flex-1 rounded-lg border-2 px-2 py-1.5 text-[12px] font-semibold", f.direction === v ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-line bg-panel text-muted")}>{l}</button>)}</div>
+        <Field label="Personne" htmlFor="db-person"><Input id="db-person" value={f.person} onChange={(e) => setF({ ...f, person: e.target.value })} placeholder="Ex. Inès" /></Field>
+        <Field label={`Montant (${cur})`} htmlFor="db-amount"><Input id="db-amount" inputMode="decimal" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} placeholder="20" /></Field>
+        <Field label="Pour quoi (facultatif)" htmlFor="db-label"><Input id="db-label" value={f.label} onChange={(e) => setF({ ...f, label: e.target.value })} placeholder="Resto, billet de train…" /></Field>
+        <Field label="Échéance (facultatif)" htmlFor="db-due"><Input id="db-due" type="date" min={today} value={f.due} onChange={(e) => setF({ ...f, due: e.target.value })} /></Field>
+        <Btn type="submit" variant="primary" className="col-span-2"><Plus size={13} />Enregistrer</Btn>
+      </form>}
+      {!pd.owedToMe.length && !pd.iOwe.length && !flat?.owedToMe.length && !flat?.iOwe.length ? <p className="text-[13px] text-muted" data-testid="debts-settled">Aucune dette en cours. Ajoutez l'argent que vous prêtez ou que vous devez à un ami, à la famille… (la colocation est calculée automatiquement).</p> : (
         <div className="grid gap-4 sm:grid-cols-2" data-testid="debts">
-          <div><p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-ok">On me doit · {money(d.totalOwedToMe / 100, cur)}</p>
-            {d.owedToMe.length ? <ul className="flex flex-col gap-1 text-[13px]">{d.owedToMe.map((x, i) => <li key={i} className="flex justify-between gap-2"><span className="truncate">{x.name}</span><span className="font-mono tabular-nums text-ok">+{money(x.cents / 100, cur)}</span></li>)}</ul> : <p className="text-[12px] text-muted">Personne ne te doit rien.</p>}</div>
-          <div><p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-bad">Je dois · {money(d.totalIOwe / 100, cur)}</p>
-            {d.iOwe.length ? <ul className="flex flex-col gap-1 text-[13px]">{d.iOwe.map((x, i) => <li key={i} className="flex justify-between gap-2"><span className="truncate">{x.name}</span><span className="font-mono tabular-nums text-bad">−{money(x.cents / 100, cur)}</span></li>)}</ul> : <p className="text-[12px] text-muted">Tu ne dois rien à personne.</p>}</div>
+          <div><p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-ok">On me doit · {money(totalOwed, cur)}</p>
+            <ul className="flex flex-col gap-2">{pd.owedToMe.map((d) => row(d, true))}
+              {flat?.owedToMe.map((x, i) => <li key={`f${i}`} className="flex justify-between gap-2 rounded-xl border-2 border-line p-2.5 text-[13px]"><span className="truncate">{x.name} <span className="text-muted">· colocation</span></span><span className="font-mono tabular-nums text-ok">+{money(x.cents / 100, cur)}</span></li>)}
+              {!pd.owedToMe.length && !flat?.owedToMe.length && <li className="text-[12px] text-muted">Personne ne vous doit rien.</li>}</ul></div>
+          <div><p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-bad">Je dois · {money(totalOwe, cur)}</p>
+            <ul className="flex flex-col gap-2">{pd.iOwe.map((d) => row(d, false))}
+              {flat?.iOwe.map((x, i) => <li key={`g${i}`} className="flex justify-between gap-2 rounded-xl border-2 border-line p-2.5 text-[13px]"><span className="truncate">{x.name} <span className="text-muted">· colocation</span></span><span className="font-mono tabular-nums text-bad">−{money(x.cents / 100, cur)}</span></li>)}
+              {!pd.iOwe.length && !flat?.iOwe.length && <li className="text-[12px] text-muted">Vous ne devez rien à personne.</li>}</ul></div>
         </div>)}
-      <p className="mt-3 text-[11px] text-muted">Pour enregistrer un remboursement : bascule sur « {fd.flat.name} » en haut de cet onglet, puis « Marquer remboursé ».</p>
+      {flat && fd.flat && <p className="mt-3 text-[11px] text-muted">Pour enregistrer un remboursement de colocation : basculez sur « {fd.flat.name} » en haut de cet onglet, puis « Marquer remboursé ».</p>}
     </Card>
   );
 };
+type PersonalDebtRow = ReturnType<typeof personalDebts>["owedToMe"][number];
 /** Argent de poche : enveloppe hebdomadaire ou mensuelle pour les dépenses plaisir, prise sur le budget existant. */
 const PocketCard: React.FC = () => {
   const { state, dispatch, toast } = useStore();
@@ -2957,7 +2999,9 @@ const InsightsCard: React.FC<{ mk: string }> = ({ mk }) => {
       const cats = catsOf(state), bs = budgetStats(b, mk, today, cats);
       const prevMk = monthKey(iso(new Date(parseISO(`${mk}-01`).getFullYear(), parseISO(`${mk}-01`).getMonth() - 1, 1)));
       const cb = categoryBreakdown(bs, b.monthly, b.limits);
+      const history: MonthPoint[] = Array.from({ length: 6 }, (_, k) => { const d = new Date(parseISO(`${mk}-01`).getFullYear(), parseISO(`${mk}-01`).getMonth() - (5 - k), 1), key = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`, x = budgetStats(b, key, today, cats); return { month: key, spent: x.spent, income: x.income }; });
       const bytes = buildBudgetPdf({ month: mk, name: state.settings.name, cur, monthly: b.monthly, stats: bs, prevSpent: budgetStats(b, prevMk, today, cats).spent, lines: cb.lines, unallocated: cb.unallocated,
+        history, personal: personalDebts(b, today), suggestions: suggestLimits(b, today, cats), savingsTotal: bs.savingsTotal, expenseCount: b.expenses.filter((e) => monthKey(e.date) === mk).length,
         pocket: pocketStats(b, today), insights, top: b.expenses.filter((e) => monthKey(e.date) === mk).sort((x, y) => y.amount - x.amount).slice(0, 8),
         recurring: b.recurring.filter((r) => r.active).map((r) => ({ label: r.label, amount: r.amount, day: r.day })), debts: fd.status === "in" && fd.flat ? flatDebts(fd.flat, fd.expenses) : null, generatedAt: new Date().toISOString() });
       const r = await savePdf(bytes, `analyse-budget-${mk}.pdf`); if (r === "downloaded") toast("Analyse PDF téléchargée");
@@ -2971,6 +3015,30 @@ const InsightsCard: React.FC<{ mk: string }> = ({ mk }) => {
         : <p className="text-[13px] text-muted">{mk === monthKey(today) ? "Rien de particulier à signaler pour l'instant. Les repères apparaissent au fil de tes dépenses." : "Les repères concernent le mois en cours. L'analyse PDF reste disponible pour ce mois."}</p>}
       <p className="mt-2 text-[11px] text-muted">Repères indicatifs, sans jugement : ils s'appuient sur tes saisies et ne remplacent pas un conseil financier.</p>
     </Card>
+  );
+};
+
+/** Plafonds conseillés pour chaque catégorie, d'après le budget mensuel et les habitudes ; rien n'est appliqué sans accord. */
+const LimitSuggestions: React.FC = () => {
+  const { state, dispatch, toast } = useStore(); const [open, setOpen] = useState(false);
+  const cur = state.settings.currency, b = state.budget;
+  if (!(b.monthly > 0)) return null;
+  const sug = suggestLimits(b, todayISO(), catsOf(state)), total = sug.reduce((n, x) => n + x.amount, 0);
+  const apply = (items: typeof sug) => { dispatch({ type: "budget/set", patch: { limits: { ...b.limits, ...Object.fromEntries(items.map((x) => [x.cat, x.amount])) } } }); toast(`${items.length} plafond${items.length > 1 ? "s" : ""} appliqué${items.length > 1 ? "s" : ""}`); };
+  return (
+    <div className="mb-3" data-testid="limit-suggestions">
+      <Btn size="sm" variant={open ? "primary" : "soft"} onClick={() => setOpen(!open)} data-testid="suggest-limits-btn"><Sparkles size={12} />{open ? "Masquer les suggestions" : "Suggérer des plafonds"}</Btn>
+      {open && <div className="mt-2 rounded-xl bg-sunken p-3">
+        {sug.length ? <>
+          <p className="mb-2 text-[11px] text-muted">Pour votre budget de {money(b.monthly, cur)} : {money(total, cur)} répartis ({Math.round((total / b.monthly) * 100)} %), le reste est votre marge. Les dépenses récurrentes sont réservées telles quelles.</p>
+          <ul className="flex flex-col gap-1.5">{sug.map((x) => (
+            <li key={x.cat} className="flex items-center gap-2 text-[13px]"><span className="min-w-0 flex-1"><span className="font-medium">{x.cat}</span><span className="block text-[11px] text-muted">{x.why}{x.current ? ` · actuel ${money(x.current, cur)}` : ""}</span></span>
+              <span className="font-mono font-semibold tabular-nums">{money(x.amount, cur)}</span>
+              <Btn size="sm" disabled={x.current === x.amount} onClick={() => apply([x])} aria-label={`Appliquer le plafond ${x.cat}`}>{x.current === x.amount ? "Appliqué" : "Appliquer"}</Btn></li>))}</ul>
+          <Btn size="sm" variant="primary" className="mt-3" onClick={() => apply(sug)} data-testid="apply-all-limits"><Check size={12} />Tout appliquer</Btn>
+        </> : <p className="text-[12px] text-muted">Aucune suggestion possible avec ce budget.</p>}
+      </div>}
+    </div>
   );
 };
 
@@ -3107,6 +3175,7 @@ const PersonalBudget: React.FC = () => {
           </Card>
           <Card title="Par catégorie" action={<Btn size="sm" variant={editLimits ? "primary" : "soft"} onClick={() => setEditLimits(!editLimits)} data-testid="limits-btn">{editLimits ? <><Check size={13} />Terminé</> : "Plafonds par mois"}</Btn>}>
             {editLimits && <p className="mb-3 text-[11px] text-muted">Plafond mensuel par catégorie (vide = aucun). Une alerte s'affiche quand il est dépassé.</p>}
+            <LimitSuggestions />
             <div className="flex flex-col gap-3">
               {(editLimits ? catsOf(state).map((c) => ({ c, v: exp.filter((e) => e.category === c).reduce((n, e) => n + e.amount, 0), lim: state.budget.limits[c] })) : byCat).map(({ c, v, lim }) => (
                 <div key={c}>
