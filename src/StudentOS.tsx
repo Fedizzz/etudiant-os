@@ -507,7 +507,7 @@ export const DueTimePicker: React.FC<{ id: string; value: string | undefined; on
   );
 };
 /** Plan de révision détaillé d'un examen : séances datées (thème + durée), génération automatique, cases « fait ». */
-const RevisionEditor: React.FC<{ id: string; sessions: RevisionSession[]; onChange: (r: RevisionSession[]) => void; deadline: string; total: number; topics: string[] }> = ({ id, sessions, onChange, deadline, total, topics }) => {
+const RevisionEditor: React.FC<{ id: string; sessions: RevisionSession[]; onChange: (r: RevisionSession[]) => void; deadline: string; total: number; topics: string[]; kind?: TaskKind }> = ({ id, sessions, onChange, deadline, total, topics, kind }) => {
   const sorted = [...sessions].sort((a, b) => a.date.localeCompare(b.date));
   const gen = () => {
     const days = Math.max(1, Math.min(7, daysBetween(todayISO(), deadline)));
@@ -519,7 +519,7 @@ const RevisionEditor: React.FC<{ id: string; sessions: RevisionSession[]; onChan
   return (
     <div className="col-span-2 rounded-xl border-2 border-line p-3 sm:col-span-4" data-testid="revision-plan">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-[11px] font-medium uppercase tracking-wider text-muted">Plan de révision détaillé{sessions.length ? ` · ${sessions.length} séance${sessions.length > 1 ? "s" : ""} · ${fmtDur(sum)}` : ""}</p>
+        <p className="text-[11px] font-medium uppercase tracking-wider text-muted">{kind === "examen" ? "Plan de révision" : "Plan de travail"} détaillé{sessions.length ? ` · ${sessions.length} séance${sessions.length > 1 ? "s" : ""} · ${fmtDur(sum)}` : ""}</p>
         <div className="flex gap-1.5"><Btn type="button" size="sm" onClick={gen}><Zap size={12} />Générer</Btn>
           <Btn type="button" size="sm" onClick={() => onChange([...sessions, { id: uid(), date: iso(addDays(parseISO(deadline), -1)) < todayISO() ? todayISO() : iso(addDays(parseISO(deadline), -1)), topic: "", minutes: 60 }])}><Plus size={12} />Séance</Btn></div>
       </div>
@@ -529,11 +529,13 @@ const RevisionEditor: React.FC<{ id: string; sessions: RevisionSession[]; onChan
           <div className="flex min-w-0 flex-wrap items-center gap-1.5">
             <Input type="date" aria-label={`Date de la séance ${i + 1}`} value={r.date} max={deadline} onChange={(e) => upd(r.id, { date: e.target.value })} className="h-8 w-40 text-[12px]" />
             <Input aria-label={`Thème de la séance ${i + 1}`} placeholder="Thème (chapitre, exercices…)" value={r.topic} onChange={(e) => upd(r.id, { topic: e.target.value })} className="h-8 min-w-[10rem] flex-1 text-[12px]" />
+            <label className="flex items-center gap-1 text-[11px] text-muted">Début<Input type="time" aria-label={`Début de la séance ${i + 1}`} value={r.start ?? ""} onChange={(e) => upd(r.id, { start: e.target.value || undefined })} className="h-8 w-28 text-[12px]" /></label>
+            <label className="flex items-center gap-1 text-[11px] text-muted">Fin<Input type="time" aria-label={`Fin de la séance ${i + 1}`} disabled={!r.start} value={r.start ? toHHMM(Math.min(1439, toMin(r.start) + r.minutes)) : ""} onChange={(e) => { if (r.start && e.target.value && toMin(e.target.value) > toMin(r.start)) upd(r.id, { minutes: toMin(e.target.value) - toMin(r.start) }); }} className="h-8 w-28 text-[12px]" /></label>
             <DurationPicker id={`${id}-d${i}`} label={`Durée de la séance ${i + 1}`} value={r.minutes} min={15} onChange={(n) => upd(r.id, { minutes: n })} className="w-44 [&_input]:h-8 [&_select]:h-8 [&_select]:text-[12px]" />
           </div>
           <button type="button" aria-label={`Supprimer la séance ${i + 1}`} className="p-1 text-muted hover:text-bad" onClick={() => onChange(sessions.filter((x) => x.id !== r.id))}><X size={13} /></button>
         </li>))}</ul>
-        : <p className="text-[12px] text-muted">Aucune séance : le temps de révision est réparti selon les jours choisis ci-dessus. « Générer » répartit la durée estimée sur les jours précédant l'examen (thèmes pris dans la checklist).</p>}
+        : <p className="text-[12px] text-muted">Aucune séance : le temps est réparti selon les jours choisis ci-dessus. « Générer » répartit la durée estimée sur les jours précédant l'échéance (thèmes pris dans la checklist). Sans heure de début, la séance est placée automatiquement ; avec un début (et une fin), elle est fixée à ce créneau.</p>}
     </div>
   );
 };
@@ -572,8 +574,8 @@ const TaskForm: React.FC<{ onDone: () => void; task?: Task }> = ({ onDone, task 
     } else if (!(f.estimate >= 5)) { toast("L'estimation doit être d'au moins 5 minutes.", "bad"); return; }
     if (!(f.spent >= 0)) { toast("Le temps passé ne peut pas être négatif.", "bad"); return; }
     if (!task && f.deadline < todayISO()) toast("Échéance déjà passée : la tâche apparaîtra en retard.", "info");
-    const rev = isExam && mode === "duration" ? revision.filter((r) => r.minutes > 0) : [];
-    if (rev.some((r) => !/^\d{4}-\d{2}-\d{2}$/.test(r.date) || r.date > f.deadline)) { toast("Les séances de révision doivent avoir lieu au plus tard le jour de l'examen.", "bad"); return; }
+    const rev = (isExam || f.kind === "projet") && mode === "duration" ? revision.filter((r) => r.minutes > 0) : [];
+    if (rev.some((r) => !/^\d{4}-\d{2}-\d{2}$/.test(r.date) || r.date > f.deadline)) { toast(isExam ? "Les séances de révision doivent avoir lieu au plus tard le jour de l'examen." : "Les séances de travail doivent avoir lieu au plus tard le jour de l'échéance.", "bad"); return; }
     const revTotal = rev.reduce((n, r) => n + r.minutes, 0);
     if (rev.length && revTotal > estimate) estimate = revTotal;
     const data = { ...f, estimate, dueTime: isPerso ? undefined : dueTime, hideEnd: mode === "slot" && hideEnd ? true : undefined, revision: rev.length ? rev : undefined, title: f.title.trim(), courseId: f.courseId || null, slot: chosen, steps: steps.map((x) => ({ ...x, text: x.text.trim() })).filter((x) => x.text), doDates: mode === "duration" && pickDays && doDates.length ? [...doDates].sort() : undefined, noPlan: mode === "duration" && doMode === "none" ? true : undefined };
@@ -631,7 +633,7 @@ const TaskForm: React.FC<{ onDone: () => void; task?: Task }> = ({ onDone, task 
         <Field label="Fin" htmlFor="tf-send"><Input id="tf-send" type="time" value={slot.end} onChange={(e) => setSlot({ ...slot, end: e.target.value })} /></Field>
         <label className="col-span-2 flex items-center gap-2 text-[12px] sm:col-span-4"><input type="checkbox" checked={hideEnd} onChange={(e) => setHideEnd(e.target.checked)} />Masquer l'heure de fin (seul le début est affiché dans le planning)</label>
       </>}
-      {isExam && mode === "duration" && <RevisionEditor id="tf-rev" sessions={revision} onChange={setRevision} deadline={f.deadline} total={f.estimate} topics={steps.map((x) => x.text).filter(Boolean)} />}
+      {(isExam || f.kind === "projet") && mode === "duration" && <RevisionEditor id="tf-rev" kind={f.kind} sessions={revision} onChange={setRevision} deadline={f.deadline} total={f.estimate} topics={steps.map((x) => x.text).filter(Boolean)} />}
       </>}
       <StepsEditor id="tf-steps" steps={steps} onChange={setSteps} checkable className="col-span-2 sm:col-span-4" placeholder="Ex. Lire le chapitre, faire les exercices…" />
       {task && <Field label="Temps déjà passé (min)" htmlFor="tf-spent" className="col-span-2"><Input id="tf-spent" type="number" min={0} step={5} value={f.spent} onChange={(e) => setF({ ...f, spent: Math.max(0, Number(e.target.value)) })} /></Field>}
@@ -2269,7 +2271,7 @@ const Academic: React.FC<{ openNewTask: () => void }> = ({ openNewTask }) => {
                   <p className={cx("text-[13px] font-medium leading-snug", s === "done" && "text-muted line-through")}>{t.title}</p>
                   {taskDoneLate(t) && <p className="mt-1 text-[11px] font-semibold text-warn">⏰ Terminé en retard</p>}
                   {!!t.postponed?.length && <p className="mt-1"><PostponedPill list={t.postponed} /></p>}
-                  {!!t.revision?.length && s !== "done" && <p className="mt-1 text-[11px] text-muted">📖 Plan de révision : {t.revision.filter((r) => r.done).length}/{t.revision.length} séances</p>}
+                  {!!t.revision?.length && s !== "done" && <p className="mt-1 text-[11px] text-muted">📖 {t.kind === "examen" ? "Plan de révision" : "Plan de travail"} : {t.revision.filter((r) => r.done).length}/{t.revision.length} séances</p>}
                   {t.noPlan && s !== "done" && <p className="mt-1 text-[11px] text-muted">🚫 Pas de do date · hors planning</p>}
                   {!!t.doDates?.length && s !== "done" && <p className="mt-1 text-[11px] text-muted">{t.kind === "examen" ? "📖 Révision" : "🛠 Travail"} : {t.doDates.map((d) => fmtDate(d)).join(" · ")}</p>}
                   {!!t.steps?.length && <div className="mt-1.5" onPointerDown={(e) => e.stopPropagation()}><p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted">Checklist · {t.steps.filter((x) => x.done).length}/{t.steps.length}</p>

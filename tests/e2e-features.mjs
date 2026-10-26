@@ -67,9 +67,11 @@ try {
   const sessions = await p.locator("[data-testid=revision-plan] li").count();
   ok(sessions >= 3, `le plan de révision est généré (${sessions} séances)`);
   await p.fill("[data-testid=revision-plan] li:first-child input[placeholder^=Thème]", "Algèbre");
+  await p.fill("[data-testid=revision-plan] li:first-child input[aria-label^='Début']", "16:00"); await p.fill("[data-testid=revision-plan] li:first-child input[aria-label^='Fin']", "17:30");
   await p.click("[role=dialog] button[type=submit]"); await sleep(500);
   let st = await stateOf(); const ex = st.tasks.find((t) => t.title === "Partiel de maths");
   ok(ex && ex.dueTime === "12:00" && ex.revision.length === sessions && ex.estimate >= 200, "examen enregistré avec heure limite et plan");
+  ok(ex.revision.some((r) => r.start === "16:00" && r.minutes === 90), "début et fin choisis pour une séance (16:00–17:30)");
   ok(ex.revision.reduce((n, r) => n + r.minutes, 0) >= 195 && ex.revision.some((r) => r.topic === "Algèbre"), "séances: durée totale et thème conservés");
   ok((await p.locator("[data-testid=exams-list]").innerText()).includes("Partiel de maths") && (await p.locator("[data-testid=exams-list]").innerText()).includes("J-5"), "carte « Examens à venir » avec compte à rebours");
   // report

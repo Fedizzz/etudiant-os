@@ -197,3 +197,16 @@ test("analyse PDF : fichier valide, plusieurs sections", () => {
   assert.ok(txt.includes("Analyse du budget") && txt.includes("Par categorie") && txt.includes("Colocation") && txt.includes("Loyer"));
   assert.ok(bytes.length > 1500);
 });
+
+test("séances à heure choisie (examen ou projet) : blocs fixes début–fin, les autres restent automatiques", () => {
+  const proj = task({ id: "p", kind: "projet", title: "Rapport", deadline: "2026-10-22", estimate: 150, revision: [
+    { id: "r1", date: "2026-10-17", topic: "Plan", minutes: 90, start: "16:00" }, { id: "r2", date: "2026-10-17", topic: "Rédaction", minutes: 60 }, { id: "r3", date: "2026-10-18", topic: "Relecture", minutes: 30, start: "10:15" }] });
+  assert.equal(C.dailyQuota(proj, "2026-10-17", 150, TODAY), 60); // seule la séance sans heure est répartie
+  const day = C.planDay(withTasks(proj), "2026-10-17", undefined, TODAY).blocks.filter((b) => b.kind === "task");
+  const fixed = day.find((b) => b.label === "Rapport — Plan")!;
+  assert.deepEqual([fixed.start, fixed.end], [16 * 60, 17 * 60 + 30]);
+  assert.ok(day.some((b) => b.label === "Rapport — Rédaction"));
+  const d2 = C.planDay(withTasks(proj), "2026-10-18", undefined, TODAY).blocks.find((b) => b.label === "Rapport — Relecture")!;
+  assert.deepEqual([d2.start, d2.end], [10 * 60 + 15, 10 * 60 + 45]);
+  assert.equal(roundtrip(withTasks(proj)).tasks[0].revision![0].start, "16:00");
+});
