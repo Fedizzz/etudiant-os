@@ -43,7 +43,8 @@ export interface Task {
   revision?: RevisionSession[];
 }
 export interface Postponement { from: string; to: string; at: string }
-export interface RevisionSession { id: ID; date: string; topic: string; minutes: number; done?: boolean }
+/** start : heure de début choisie (« HH:MM ») = créneau fixe de `minutes` minutes ; absent = placé automatiquement dans les créneaux libres. */
+export interface RevisionSession { id: ID; date: string; topic: string; minutes: number; start?: string; done?: boolean }
 export interface Recipe { id: ID; name: string; servings?: number; ingredients: string[]; steps: string[] }
 /** Étape d'une checklist. Pour une corvée, `done` n'est pas utilisé : l'avancement est noté par date dans `stepsDone`. */
 export interface Step { id: ID; text: string; done?: boolean }
@@ -494,7 +495,7 @@ const isTime = (x: unknown): x is string => isStr(x) && /^\d{1,2}:\d{2}$/.test(x
 const cleanPostponed = (v: unknown): Postponement[] => (Array.isArray(v) ? (v as Postponement[]).filter((x) => x && isDate(x.from) && isDate(x.to) && isDate(x.at)).slice(-30).map((x) => ({ from: x.from, to: x.to, at: x.at })) : []);
 function cleanTaskExtra(t: Task): Task {
   const { dueTime, hideEnd, postponed, revision, ...rest } = t;
-  const rev = Array.isArray(revision) ? revision.filter((r) => r && isStr(r.id) && isDate(r.date) && isNum(r.minutes) && r.minutes > 0).slice(0, 120).map((r) => ({ id: r.id, date: r.date, topic: isStr(r.topic) ? r.topic.slice(0, 120) : "", minutes: Math.min(600, Math.round(r.minutes)), ...(r.done ? { done: true } : {}) })) : [];
+  const rev = Array.isArray(revision) ? revision.filter((r) => r && isStr(r.id) && isDate(r.date) && isNum(r.minutes) && r.minutes > 0).slice(0, 120).map((r) => ({ id: r.id, date: r.date, topic: isStr(r.topic) ? r.topic.slice(0, 120) : "", minutes: Math.min(600, Math.round(r.minutes)), ...(isTime(r.start) ? { start: r.start } : {}), ...(r.done ? { done: true } : {}) })) : [];
   const pp = cleanPostponed(postponed);
   return { ...rest, ...(isTime(dueTime) ? { dueTime } : {}), ...(hideEnd === true ? { hideEnd: true } : {}), ...(pp.length ? { postponed: pp } : {}), ...(rev.length ? { revision: rev } : {}) };
 }
@@ -831,7 +832,7 @@ export function layoutLanes<T extends { start: number; end: number }>(blocks: T[
 export function dailyQuota(t: Task, date: string, remaining = Math.max(0, t.estimate - t.spent), today = date): number {
   if (!(remaining > 0) || t.noPlan) return 0;
   // Plan de révision détaillé : les minutes des séances du jour (et rien les autres jours).
-  if (t.revision?.length) return Math.min(remaining, revisionOn(t, date).reduce((n, r) => n + r.minutes, 0));
+  if (t.revision?.length) return Math.min(remaining, revisionOn(t, date).filter((r) => !r.start).reduce((n, r) => n + r.minutes, 0));
   // Jours de travail / de révision choisis : le travail n'est placé que ces jours-là (à parts égales).
   const dd = (t.doDates ?? []).filter((d) => d >= today && d <= t.deadline);
   if (dd.length) {
@@ -917,6 +918,11 @@ export function planDay(state: AppState, date: string, remaining?: Map<ID, numbe
   // Tâches à créneau précis : bloc fixe le jour choisi.
   for (const t of tasks) if (t.slot && t.status !== "done" && t.slot.date === date && toMin(t.slot.end) > toMin(t.slot.start))
     fixed.push({ start: toMin(t.slot.start), end: toMin(t.slot.end), kind: "task", label: t.kind === "examen" ? `Révision · ${t.title}` : t.title, color: courses.find((c) => c.id === t.courseId)?.color, refId: t.id, ...(t.hideEnd ? { noEnd: true } : {}) });
+  // Séances de révision / de travail à heure choisie : blocs fixes.
+  for (const t of tasks) if (t.status !== "done" && t.revision?.length) for (const r of revisionOn(t, date)) if (r.start) {
+    const st = toMin(r.start), en = Math.min(1439, st + r.minutes);
+    if (en > st) fixed.push({ start: st, end: en, kind: "task", label: `${t.kind === "examen" ? "Révision · " : ""}${t.title}${r.topic ? ` — ${r.topic}` : ""}`, color: courses.find((c) => c.id === t.courseId)?.color, refId: t.id });
+  }
   // Heure choisie par l'utilisateur : jamais déplacée. Heure figée automatiquement : décalée si elle chevauche un autre bloc.
   const byTime = [...timedChores].sort((a, b) => Number(!!b.time) - Number(!!a.time) || toMin(slotOf(a)!) - toMin(slotOf(b)!));
   for (const c of byTime) {
@@ -975,8 +981,8 @@ export function planDay(state: AppState, date: string, remaining?: Map<ID, numbe
   const overflow: DayPlan["overflow"] = [];
   let taskMin = fixed.filter((b) => b.kind === "task").reduce((n, b) => n + b.end - b.start, 0);
   for (const { t, q } of queue) {
-    const topic = revisionOn(t, date).map((r) => r.topic).filter(Boolean).join(", ");
-    const rest = place(q, (s, e) => ({ start: s, end: e, kind: "task", label: t.kind === "examen" ? `Révision · ${t.title}${topic ? ` — ${topic}` : ""}` : t.title, color: color(t.courseId), refId: t.id }));
+    const topic = revisionOn(t, date).filter((r) => !r.start).map((r) => r.topic).filter(Boolean).join(", ");
+    const rest = place(q, (s, e) => ({ start: s, end: e, kind: "task", label: `${t.kind === "examen" ? "Révision · " : ""}${t.title}${topic ? ` — ${topic}` : ""}`, color: color(t.courseId), refId: t.id }));
     taskMin += q - rest;
     if (rest > 0) overflow.push({ task: t, minutes: rest });
   }
