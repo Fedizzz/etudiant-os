@@ -6,7 +6,7 @@ import { eventOn, layoutLanes, parseIngredient, scaleIngredient, stepMinutes, DU
 import type { Postponement, Recipe, RevisionSession } from "./core.ts";
 import { DEFAULT_POCKET_CATS, buildBudgetPdf, budgetInsights, categoryBreakdown, flatDebts, personalDebts, pocketStats, suggestLimits } from "./finance.ts";
 import type { MonthPoint } from "./finance.ts";
-import { debtRemaining } from "./core.ts";
+import { debtRemaining, PET_KINDS, RESTORES_PER_MONTH, petStatus, restorableDays, restoresLeft } from "./core.ts";
 import type { Debt } from "./core.ts";
 import { DAY_WORDS, dayOf, pageGeometry, parseGrid } from "./timetable.ts";
 import { parseIcs, normalizeFeedUrl, isFeedUrl } from "./ical.ts";
@@ -945,11 +945,50 @@ const UpcomingCard: React.FC<{ days: DayPlan[]; kind: "class" | "event"; go: (v:
   );
 };
 /** Carte « Série » façon appli de streak : flamme animée, semaine, niveau et points. */
+/** Compagnon de série : on l'adopte, il grandit avec les jours actifs (œuf → bébé → jeune → adulte → légendaire) et se nourrit une fois par jour. */
+const PetPanel: React.FC = () => {
+  const { state, dispatch, toast } = useStore(); const today = todayISO();
+  const st = petStatus(state, today);
+  const [kind, setKind] = useState("chat"), [name, setName] = useState(""), [askRelease, setAskRelease] = useState(false);
+  if (!st) return (
+    <form className="flex flex-col gap-3" data-testid="pet-adopt" onSubmit={(e) => { e.preventDefault(); const n = name.trim() || "Mochi"; dispatch({ type: "pet/adopt", pet: { name: n.slice(0, 20), kind, born: today, fed: [] } }); toast(`🥚 ${n} vient d'arriver ! Fais une chose par jour pour le faire grandir.`); }}>
+      <p className="text-[13px] text-muted">Adopte un compagnon : il éclot et grandit à chaque jour où tu fais au moins une chose (tâche, routine, corvée…). Pas de punition : s'il s'endort, il t'attend.</p>
+      <div className="flex flex-wrap gap-1.5" role="group" aria-label="Espèce">{PET_KINDS.map((k) => <button key={k.k} type="button" aria-pressed={kind === k.k} aria-label={k.label} title={k.label} onClick={() => setKind(k.k)} className={cx("grid h-12 w-12 place-items-center rounded-xl border-2 text-2xl transition", kind === k.k ? "border-fg bg-hi" : "border-line bg-sunken hover:border-fg/60")}>{k.emoji}</button>)}</div>
+      <div className="flex gap-2"><Input id="pet-name" aria-label="Nom du compagnon" maxLength={20} placeholder="Son nom (ex. Mochi)" value={name} onChange={(e) => setName(e.target.value)} /><Btn type="submit" variant="primary" data-testid="pet-adopt-btn"><Plus size={14} />Adopter</Btn></div>
+    </form>);
+  const px = [44, 48, 58, 70, 82][st.stage], acc = ["", "", "🧣", "✨", "👑"][st.stage];
+  return (
+    <div data-testid="pet" className="flex flex-col gap-3">
+      <div className="flex items-center gap-4">
+        <div className="relative grid h-24 w-24 shrink-0 place-items-center rounded-2xl border-2 border-line bg-sunken">
+          {st.streak >= 7 && <span className="absolute inset-0 rounded-2xl" style={{ background: "radial-gradient(circle, rgb(255 190 80 / .45), transparent 70%)" }} aria-hidden />}
+          <span className={cx("relative leading-none transition-all", st.mood === "heureux" ? "flame-bob" : st.mood === "endormi" ? "opacity-70 grayscale-[.4]" : "")} style={{ fontSize: px }} aria-hidden data-testid="pet-emoji">{st.emoji}</span>
+          {acc && <span className="absolute -top-2 right-2 text-xl" aria-hidden>{acc}</span>}
+          <span className="absolute -bottom-2 -right-2 rounded-full border-2 border-fg bg-panel px-1.5 text-sm" aria-hidden>{st.mood === "heureux" ? "💛" : st.mood === "endormi" ? "💤" : "👀"}</span>
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-display text-xl font-extrabold">{st.pet.name} <span className="text-[12px] font-semibold text-muted">· {st.stageName}</span></p>
+          <p className="mt-0.5 text-[12.5px] leading-snug text-muted">{st.message}</p>
+          <div className="mt-2 h-2.5 overflow-hidden rounded-full border-2 border-fg bg-panel" role="progressbar" aria-valuenow={Math.round(st.progress * 100)} aria-valuemin={0} aria-valuemax={100} aria-label="Croissance"><div className="h-full rounded-full bg-accent transition-all" style={{ width: `${Math.max(4, st.progress * 100)}%` }} /></div>
+          <p className="mt-1 font-mono text-[11px] text-muted">{st.nextAt === null ? `${st.growth} points · stade maximal 🎉` : `${st.growth} / ${st.nextAt} points avant « ${["", "Bébé", "Jeune", "Adulte", "Légendaire"][st.stage + 1]} »`}</p>
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <Btn size="sm" variant="primary" disabled={!st.canFeed} onClick={() => { dispatch({ type: "pet/feed", date: today }); toast(`🍖 ${st.pet.name} se régale ! +1 point de croissance`); }} data-testid="pet-feed">🍖 {st.fedToday ? "Déjà nourri aujourd'hui" : "Nourrir"}</Btn>
+        {!st.canFeed && !st.fedToday && <span className="text-[11px] text-muted">Fais une chose aujourd'hui pour pouvoir le nourrir.</span>}
+        <button className="ml-auto text-[11px] text-muted hover:text-bad" onClick={() => setAskRelease(true)}>Changer de compagnon</button>
+      </div>
+      {askRelease && <ConfirmModal title="Changer de compagnon ?" text={<>{st.pet.name} repart dans la nature et tu pourras adopter un nouvel œuf. Ta série et tes points ne changent pas.</>} confirm="Changer" onYes={() => { dispatch({ type: "pet/release" }); toast(`${st.pet.name} te dit au revoir 👋`, "info"); }} onClose={() => setAskRelease(false)} />}
+    </div>
+  );
+};
+
 const StreakHero: React.FC = () => {
   const { state, toast } = useStore();
   const today = todayISO();
-  const days = useMemo(() => activeDays(state), [state.tasks, state.todos, state.chores, state.habits, state.settings.onTimeMode]);
+  const days = useMemo(() => activeDays(state), [state.tasks, state.todos, state.chores, state.habits, state.restores, state.settings.onTimeMode]);
   const st = globalStreak(days, today);
+  const { dispatch } = useStore(); const restorable = restorableDays(state, today), left = restoresLeft(state, today);
   const xp = useMemo(() => xpOf(state), [state.tasks, state.todos, state.chores, state.habits, state.settings.onTimeMode]);
   const lv = levelOf(xp);
   const [party, setParty] = useState(false);
@@ -985,6 +1024,14 @@ const StreakHero: React.FC = () => {
             <span className={cx("text-[10px] font-semibold", isT ? "text-[#18162e]" : "text-[#4a4668]")}>{DAYS[weekday(parseISO(d))]}</span>
           </div>); })}
       </div>
+      <div className="mt-3 rounded-xl border-2 border-[rgb(24_22_46)] bg-white/70 p-2.5" data-testid="streak-restore">
+        <p className="flex items-center justify-between text-[12px] font-semibold text-[#18162e]"><span>♻️ Restaurations de série</span><span className="font-mono text-[11px] tabular-nums text-[#4a4668]">{left} / {RESTORES_PER_MONTH} ce mois-ci</span></p>
+        {restorable.length > 0 ? <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          {restorable.map((d) => <button key={d} disabled={left === 0} onClick={() => { dispatch({ type: "streak/restore", date: d, today }); toast(`Journée du ${fmtDate(d)} restaurée ✓ — ta série continue`); }} data-testid="restore-day"
+            className="rounded-full border-2 border-[rgb(24_22_46)] bg-[#ffd25e] px-2.5 py-1 text-[12px] font-bold text-[#18162e] transition hover:-translate-y-0.5 disabled:opacity-40">Restaurer le {fmtDate(d)}</button>)}
+          <span className="text-[10.5px] text-[#4a4668]">{left === 0 ? "Plus de restauration ce mois-ci : elles reviennent le 1er." : "Un jour manqué ? Sauve ta série, sans pénalité."}</span></div>
+          : <p className="mt-1 text-[10.5px] text-[#4a4668]">Aucun jour récent à restaurer. Après un jour manqué, tu pourras le sauver ici (3 fois par mois).</p>}
+      </div>
       <div className="mt-3 rounded-xl border-2 border-[rgb(24_22_46)] bg-white/70 p-2.5">
         <div className="mb-1.5 flex items-center gap-2 text-[12px] font-semibold text-[#18162e]">
           <span className="rounded-full bg-[rgb(24_22_46)] px-2 py-0.5 text-[11px] font-bold text-white">Niv. {lv.level}</span>{lv.name}
@@ -1009,7 +1056,7 @@ const StreakChip: React.FC = () => {
         className={cx("flex shrink-0 items-center gap-1 rounded-full border-2 px-2 py-1 text-[13px] font-extrabold transition active:scale-95", st.current ? "border-[#ff8a3d] bg-[#ff8a3d]/15 text-[#ff8a3d]" : "border-line bg-sunken text-muted")}>
         <span className={cx("text-[15px] leading-none", st.current ? "flame-bob" : "grayscale opacity-60")} aria-hidden>🔥</span>{st.current}
       </button>
-      {open && <Modal title="Ma série" onClose={() => setOpen(false)}><StreakHero /></Modal>}
+      {open && <Modal title="Ma série" onClose={() => setOpen(false)}><div className="flex flex-col gap-4"><StreakHero /><div className="rounded-2xl border-2 border-line p-3"><p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">Compagnon de série</p><PetPanel /></div></div></Modal>}
     </>
   );
 };
@@ -1102,6 +1149,7 @@ const Dashboard: React.FC<{ go: (v: ViewKey) => void; openNewTask: () => void }>
   const stepsLeft = steps.filter((x) => !x.done).length;
   const debtTone = ss.nights7 === 0 ? undefined : ss.debt7 > 240 ? "bad" : ss.debt7 > 60 ? "warn" : "ok";
   const blocks: DashBlock[] = [
+    { id: "pet", label: "Compagnon de série", span: "md:col-span-1", show: true, el: <Card title={<span className="flex items-center gap-2"><Flame size={15} />Compagnon de série</span>}><PetPanel /></Card> },
     { id: "todos", label: "Mes tâches perso", span: "md:col-span-2 xl:col-span-3", show: true, el: <TodoDashCard go={go} /> },
     { id: "start", label: "Pour bien démarrer", span: "md:col-span-2 xl:col-span-3", show: stepsLeft > 0, el: (<>
         <Card title={<span className="flex items-center gap-2"><Sparkles size={15} className="text-accent" />Pour bien démarrer · {steps.length - stepsLeft}/{steps.length}</span>}>

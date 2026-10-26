@@ -140,6 +140,10 @@ export interface AppState {
   pantryUsed?: string[];
   /** Recettes (mode cuisine). */
   recipes?: Recipe[];
+  /** Compagnon de série : grandit avec les jours actifs. */
+  pet?: Pet | null;
+  /** Jours manqués « restaurés » (3 par mois) : ils comptent comme actifs ; `at` = jour où la restauration a été faite. */
+  restores?: { date: string; at: string }[];
   templates: GroceryTemplate[]; products: Product[]; timer: TimerState;
 }
 
@@ -282,6 +286,7 @@ export type Action =
   | { type: "task/step"; id: ID; stepId: ID }
   | { type: "task/postpone"; id: ID; to: string } | { type: "todo/postpone"; id: ID; to: string }
   | { type: "expense/received"; id: ID } | { type: "event/step"; id: ID; stepId: ID }
+  | { type: "streak/restore"; date: string; today: string } | { type: "pet/adopt"; pet: Pet } | { type: "pet/feed"; date: string } | { type: "pet/release" }
   | { type: "debt/save"; debt: Debt } | { type: "debt/remove"; id: ID } | { type: "debt/repay"; id: ID; amount: number; date: string }
   | { type: "recipe/save"; recipe: Recipe } | { type: "recipe/remove"; id: ID }
   | { type: "notes/set"; patch: { text?: string; ink?: string | undefined } }
@@ -331,6 +336,10 @@ export function reducer(s: AppState, a: Action): AppState {
     case "todo/postpone": return { ...s, todos: (s.todos ?? []).map((t) => (t.id !== a.id || a.to === t.due ? t : { ...t, due: a.to, postponed: [...(t.postponed ?? []), { from: t.due ?? t.createdAt, to: a.to, at: todayISO() }].slice(-30) })) };
     case "expense/received": return { ...s, budget: { ...s.budget, expenses: s.budget.expenses.map((e) => (e.id === a.id ? { ...e, received: true } : e)) } };
     case "event/step": return { ...s, events: (s.events ?? []).map((e) => (e.id !== a.id ? e : { ...e, steps: (e.steps ?? []).map((x) => (x.id === a.stepId ? { ...x, done: !x.done } : x)) })) };
+    case "streak/restore": return restorableDays(s, a.today).includes(a.date) && restoresLeft(s, a.today) > 0 ? { ...s, restores: [...(s.restores ?? []), { date: a.date, at: a.today }].slice(-120) } : s;
+    case "pet/adopt": return { ...s, pet: a.pet };
+    case "pet/feed": return s.pet && !s.pet.fed.includes(a.date) ? { ...s, pet: { ...s.pet, fed: [...s.pet.fed, a.date].slice(-400) } } : s;
+    case "pet/release": return { ...s, pet: null };
     case "debt/save": return { ...s, budget: { ...s.budget, debts: [...(s.budget.debts ?? []).filter((d) => d.id !== a.debt.id), a.debt] } };
     case "debt/remove": return { ...s, budget: { ...s.budget, debts: (s.budget.debts ?? []).filter((d) => d.id !== a.id) } };
     case "debt/repay": return { ...s, budget: { ...s.budget, debts: (s.budget.debts ?? []).map((d) => (d.id === a.id && a.amount > 0 ? { ...d, repaid: [...d.repaid, { date: a.date, amount: Math.min(a.amount, debtRemaining(d)) }] } : d)) } };
@@ -581,6 +590,8 @@ export function validateState(x: unknown): { ok: true; state: AppState; repaired
     }),
     recipes: Array.isArray(p.recipes) ? keep<Recipe>("recettes", p.recipes, (r) => isStr(r.id) && isStr(r.name) && r.name.trim() !== "").map((r) => ({ id: r.id, name: r.name.slice(0, 80), ...(isNum(r.servings) && r.servings > 0 ? { servings: Math.round(r.servings) } : {}),
       ingredients: Array.isArray(r.ingredients) ? r.ingredients.filter(isStr).map((x) => x.slice(0, 120)).slice(0, 80) : [], steps: Array.isArray(r.steps) ? r.steps.filter(isStr).map((x) => x.slice(0, 400)).slice(0, 80) : [] })).slice(0, 200) : [],
+    pet: p.pet && typeof p.pet === "object" && isStr((p.pet as Pet).name) && isDate((p.pet as Pet).born) ? { name: (p.pet as Pet).name.trim().slice(0, 20) || "Mon compagnon", kind: PET_KINDS.some((k) => k.k === (p.pet as Pet).kind) ? (p.pet as Pet).kind : "chat", born: (p.pet as Pet).born, fed: Array.isArray((p.pet as Pet).fed) ? (p.pet as Pet).fed.filter(isDate).slice(-400) : [] } : null,
+    restores: Array.isArray(p.restores) ? (p.restores as { date: string; at: string }[]).filter((r) => r && isDate(r.date) && isDate(r.at)).slice(-120).map((r) => ({ date: r.date, at: r.at })) : [],
     pantryUsed: Array.isArray(p.pantryUsed) ? (p.pantryUsed as unknown[]).filter(isStr).slice(-2000) : [],
     feedEvents: Array.isArray(p.feedEvents) ? (p.feedEvents as FeedEvent[]).filter((e) => e && isStr(e.feedId) && isDate(e.date) && isTime(e.start) && isTime(e.end)).slice(0, 5000) : [],
     events: keep<PlanEvent>("événements", Array.isArray(p.events) ? p.events : [], (e) => isStr(e.id) && isStr(e.title) && isDate(e.date) && isTime(e.start) && isTime(e.end))
@@ -1231,7 +1242,39 @@ export function activeDays(state: AppState): Set<string> {
   for (const t of state.todos ?? []) if (t.done && t.doneAt) days.add(t.doneAt);
   for (const c of state.chores) if (!c.shared) for (const d of c.done) days.add(c.doneOn?.[d] ?? d);
   for (const h of state.habits ?? []) for (const d of h.done) days.add(d);
+  for (const r of state.restores ?? []) days.add(r.date);
   return days;
+}
+/** Restaurations de série : 3 par mois pour sauver un jour manqué récent (7 derniers jours, juste après un jour actif). */
+export const RESTORES_PER_MONTH = 3;
+export const restoresLeft = (s: Pick<AppState, "restores">, today: string) => Math.max(0, RESTORES_PER_MONTH - (s.restores ?? []).filter((r) => monthKey(r.at) === monthKey(today)).length);
+/** Jours manqués qu'on peut restaurer maintenant : dans les 7 derniers jours (pas aujourd'hui), le jour d'avant étant actif. Du plus ancien au plus récent. */
+export function restorableDays(s: AppState, today: string): string[] {
+  const act = activeDays(s), t0 = parseISO(today), out: string[] = [];
+  for (let i = 7; i >= 1; i--) { const d = iso(addDays(t0, -i)); if (!act.has(d) && act.has(iso(addDays(t0, -i - 1)))) out.push(d); }
+  return out;
+}
+
+// ---------------------------------------------------------------- Compagnon de série
+export const PET_KINDS: { k: string; label: string; emoji: string }[] = [
+  { k: "chat", label: "Chat", emoji: "🐱" }, { k: "chien", label: "Chien", emoji: "🐶" }, { k: "renard", label: "Renard", emoji: "🦊" },
+  { k: "lapin", label: "Lapin", emoji: "🐰" }, { k: "panda", label: "Panda", emoji: "🐼" }, { k: "dragon", label: "Dragon", emoji: "🐲" }];
+export interface Pet { name: string; kind: string; born: string; fed: string[] }
+/** Paliers de croissance (points = jours actifs depuis l'adoption + repas). */
+export const PET_STAGES: { min: number; name: string }[] = [{ min: 0, name: "Œuf" }, { min: 3, name: "Bébé" }, { min: 10, name: "Jeune" }, { min: 25, name: "Adulte" }, { min: 60, name: "Légendaire" }];
+export interface PetStatus { pet: Pet; emoji: string; stage: number; stageName: string; growth: number; nextAt: number | null; progress: number; mood: "heureux" | "attend" | "endormi"; message: string; canFeed: boolean; fedToday: boolean; streak: number }
+export function petStatus(s: AppState, today: string): PetStatus | null {
+  const pet = s.pet; if (!pet) return null;
+  const days = activeDays(s), active = [...days].filter((d) => d >= pet.born && d <= today).length, fed = new Set(pet.fed.filter((d) => d >= pet.born && d <= today)).size;
+  const growth = active + fed;
+  let stage = 0; PET_STAGES.forEach((st, i) => { if (growth >= st.min) stage = i; });
+  const next = PET_STAGES[stage + 1]?.min ?? null, from = PET_STAGES[stage].min;
+  const st = globalStreak(days, today), todayDone = days.has(today), yest = days.has(iso(addDays(parseISO(today), -1)));
+  const mood = todayDone ? "heureux" : yest ? "attend" : "endormi";
+  const kind = PET_KINDS.find((k) => k.k === pet.kind) ?? PET_KINDS[0];
+  const message = mood === "heureux" ? (st.current >= 7 ? `${pet.name} rayonne : ${st.current} jours d'affilée !` : `${pet.name} est ravi·e de ta journée.`)
+    : mood === "attend" ? `${pet.name} t'attend : une petite chose aujourd'hui et il·elle grandit.` : `${pet.name} fait la sieste. Reprends quand tu veux : il·elle sera là, et tu peux restaurer un jour manqué.`;
+  return { pet, emoji: stage === 0 ? "🥚" : kind.emoji, stage, stageName: PET_STAGES[stage].name, growth, nextAt: next, progress: next === null ? 1 : (growth - from) / (next - from), mood, message, canFeed: todayDone && !pet.fed.includes(today), fedToday: pet.fed.includes(today), streak: st.current };
 }
 /** Points : 10 par chose faite, +5 si elle l'a été à l'heure. */
 export function xpOf(state: AppState): number {
