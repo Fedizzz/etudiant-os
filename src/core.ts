@@ -1376,3 +1376,16 @@ export function stepMinutes(step: string): number | null {
   const m = /(\d+)\s*(?:min(?:ute)?s?\b|mn\b)/i.exec(step); if (m) return Number(m[1]);
   const h = /(\d+)\s*h(?:eures?)?\b(?:\s*(\d+))?/i.exec(step); return h ? Number(h[1]) * 60 + Number(h[2] ?? 0) : null;
 }
+
+// ---------------------------------------------------------------- En ce moment : compte à rebours des cours et événements
+export interface LiveItem { block: Block; left: number; total: number; elapsed: number }
+/** Ce qui est en cours à `nowSec` (secondes depuis minuit) avec le temps restant, et le prochain créneau de la journée. Repas et sommeil exclus. */
+export function liveStatus(blocks: Block[], nowSec: number): { current: LiveItem[]; next: { block: Block; in: number } | null } {
+  const items = blocks.filter((b) => b.kind !== "meal" && b.kind !== "sleep" && b.end > b.start);
+  const current = items.filter((b) => nowSec >= b.start * 60 && nowSec < b.end * 60).sort((a, b) => a.end - b.end || a.start - b.start)
+    .map((b) => ({ block: b, left: b.end * 60 - nowSec, total: (b.end - b.start) * 60, elapsed: nowSec - b.start * 60 }));
+  const nx = items.filter((b) => b.start * 60 > nowSec).sort((a, b) => a.start - b.start)[0];
+  return { current, next: nx ? { block: nx, in: nx.start * 60 - nowSec } : null };
+}
+/** 3725 → « 1:02:05 », 125 → « 2:05 ». */
+export const fmtCountdown = (sec: number) => { const s = Math.max(0, Math.round(sec)), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60); return h ? `${h}:${pad(m)}:${pad(s % 60)}` : `${m}:${pad(s % 60)}`; };
