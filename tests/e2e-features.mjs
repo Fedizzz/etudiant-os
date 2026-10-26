@@ -28,7 +28,7 @@ try {
   await p.fill("#ob-name", "Test"); await p.click("text=Créer mon espace"); await sleep(900);
   ok(await p.locator("[data-testid=tutorial]").count() === 1, "le tutoriel guidé s'affiche après l'Onboarding");
   const t1 = await p.locator("[data-testid=tutorial]").innerText();
-  await p.click("[data-testid=tutorial] >> text=Suivant"); await sleep(500);
+  await p.click("[data-testid=tutorial] >> text=Suivant"); await sleep(1100);
   const t2 = await p.locator("[data-testid=tutorial]").innerText();
   ok(t1 !== t2 && /2\/9/.test(t2), "« Suivant » passe à l'étape 2 et change de page");
   ok((await p.locator("h1").first().innerText()).toLowerCase().includes("acad"), "le tutoriel ouvre la page correspondante");
@@ -61,7 +61,7 @@ try {
   await p.click("button:has-text('Nouvelle tâche')"); await sleep(300);
   ok(await p.locator("#tf-est").evaluate((e) => e.tagName) === "SELECT", "durée estimée : sélecteur de durée commun");
   await p.fill("#tf-title", "Partiel de maths"); await p.selectOption("#tf-kind", "examen"); await p.fill("#tf-dl", plus(5));
-  await p.click("button:has-text('Midi 12:00')");
+  await p.click("button:has-text('Midi')");
   await p.selectOption("#tf-est", "custom"); await p.fill("#tf-est-custom", "200");
   await p.click("[data-testid=revision-plan] >> text=Générer"); await sleep(300);
   const sessions = await p.locator("[data-testid=revision-plan] li").count();
@@ -70,18 +70,20 @@ try {
   await p.fill("[data-testid=revision-plan] li:first-child input[aria-label^='Début']", "16:00"); await p.fill("[data-testid=revision-plan] li:first-child input[aria-label^='Fin']", "17:30");
   await p.click("[role=dialog] button[type=submit]"); await sleep(500);
   let st = await stateOf(); const ex = st.tasks.find((t) => t.title === "Partiel de maths");
-  ok(ex && ex.dueTime === "12:00" && ex.revision.length === sessions && ex.estimate >= 200, "examen enregistré avec heure limite et plan");
+  ok(ex && ex.dueTime === "12:00" && ex.revision.length === sessions && ex.estimate >= 200, "examen enregistré avec heure et plan");
   ok(ex.revision.some((r) => r.start === "16:00" && r.minutes === 90), "début et fin choisis pour une séance (16:00–17:30)");
   ok(ex.revision.reduce((n, r) => n + r.minutes, 0) >= 195 && ex.revision.some((r) => r.topic === "Algèbre"), "séances: durée totale et thème conservés");
   ok((await p.locator("[data-testid=exams-list]").innerText()).includes("Partiel de maths") && (await p.locator("[data-testid=exams-list]").innerText()).includes("J-5"), "carte « Examens à venir » avec compte à rebours");
   // report
   await p.click("button:has-text('Nouvelle tâche')"); await sleep(300);
-  await p.fill("#tf-title", "Devoir A"); await p.fill("#tf-dl", plus(2)); await p.click("[role=dialog] button[type=submit]"); await sleep(300);
+  ok(await p.locator("text=Moment préféré pour travailler").count() === 1 && (await p.locator("text=Heure limite").count()) === 0, "le formulaire propose un « moment préféré » (matin, midi, soir), pas une heure limite");
+  await p.click("[role=dialog] button:has-text('Soir')"); await p.fill("#tf-title", "Devoir A"); await p.fill("#tf-dl", plus(2)); await p.click("[role=dialog] button[type=submit]"); await sleep(300);
   await p.click("button:has-text('Nouvelle tâche')"); await sleep(300);
   await p.fill("#tf-title", "Devoir B"); await p.fill("#tf-dl", plus(2)); await p.click("[role=dialog] button[type=submit]"); await sleep(300);
   await p.locator("article:has-text('Devoir A') >> button[aria-label^='Reporter']").click(); await sleep(200);
   await p.click("[role=dialog][aria-label=Reporter] >> text=+1 semaine"); await sleep(400);
   st = await stateOf(); const A = st.tasks.find((t) => t.title === "Devoir A"), B = st.tasks.find((t) => t.title === "Devoir B");
+  ok(A.dueTime === "20:00", "moment préféré « soir » enregistré");
   ok(A.deadline === plus(9) && A.postponed.length === 1 && A.postponed[0].from === plus(2), "le report déplace l'échéance et garde l'historique");
   ok(B.deadline === plus(2) && !B.postponed, "l'échéance d'un autre devoir ne change pas");
   ok((await p.locator("article:has-text('Devoir A')").innerText()).includes("Reportée 1×"), "badge « Reportée 1× » visible");
@@ -141,10 +143,10 @@ try {
   console.log("Tâche perso : heure limite, début sans fin, report");
   await go("Tâches perso");
   await p.click("button:has-text('Tâche détaillée')"); await sleep(300);
-  await p.fill("#td-text", "Rendre la carte"); await p.click("button:has-text('Soir 20:00')");
+  await p.fill("#td-text", "Rendre la carte"); await p.click("button:has-text('Soir')");
   await p.click("[role=dialog] button[type=submit]"); await sleep(400);
   let td = (await stateOf()).todos.find((x) => x.text === "Rendre la carte");
-  ok(td && td.dueTime === "20:00" && td.due === plus(0), "tâche perso avec heure limite « soir »");
+  ok(td && td.dueTime === "20:00" && td.due === plus(0), "tâche perso avec moment préféré « soir »");
   await p.click("button:has-text('Tâche détaillée')"); await sleep(300);
   await p.fill("#td-text", "RDV banque"); await p.fill("#td-start", "15:00"); await p.fill("#td-end", "16:00");
   await p.click("text=Retirer l'heure de fin"); await sleep(150);
