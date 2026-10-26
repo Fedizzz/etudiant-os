@@ -207,6 +207,27 @@ try {
   await p.locator("main button[type=submit]:has-text('Ajouter')").last().click(); await sleep(400);
   ok((await stateOf()).chores.some((c) => c.name === "Poubelles" && c.minutes === 30), "corvée créée avec la durée choisie (30 min)");
 
+  console.log("Série : restaurations et compagnon");
+  { const s0 = await stateOf(); const d = (n) => plus(n);
+    // jours actifs : il y a 6, 5, 4 jours (routine cochée) ; manqué : il y a 3 et 2 jours ; actif hier et aujourd'hui
+    await p.evaluate(({ days }) => { const k = "etudiant-os/v1"; const st = JSON.parse(localStorage.getItem(k)); st.habits = [{ id: "hh", name: "Étirements", emoji: "🤸", cat: "sport", days: [0,1,2,3,4,5,6], done: days, since: "2026-01-01" }]; localStorage.setItem(k, JSON.stringify(st)); }, { days: [d(-6), d(-5), d(-4), d(-1), d(0)] });
+    await p.reload(); await sleep(1500);
+    await p.click("button[aria-label^='Série']"); await sleep(600);
+    ok((await p.locator("[data-testid=streak-restore]").innerText()).includes("3 / 3"), "3 restaurations disponibles ce mois-ci");
+    ok(await p.locator("[data-testid=restore-day]").count() === 1, "un seul jour offert à la fois (le premier manqué)");
+    await p.locator("[data-testid=restore-day]").click(); await sleep(400);
+    ok((await p.locator("[data-testid=streak-restore]").innerText()).includes("2 / 3") && await p.locator("[data-testid=restore-day]").count() === 1, "après une restauration : 2/3 et le jour suivant est offert");
+    await p.locator("[data-testid=restore-day]").click(); await sleep(400);
+    ok((await stateOf()).restores.length === 2 && (await p.locator("[data-testid=streak-hero]").innerText()).includes("7 jours"), "la série est rejointe (7 jours)");
+    ok((await p.locator("[data-testid=restore-day]").count()) === 0, "plus aucun jour à restaurer");
+    await p.fill("#pet-name", "Mochi"); await p.click("[aria-label=Renard]"); await p.click("[data-testid=pet-adopt-btn]"); await sleep(400);
+    ok((await p.locator("[data-testid=pet]").innerText()).includes("Mochi") && (await stateOf()).pet.kind === "renard", "adoption d'un compagnon");
+    const e0 = await p.locator("[data-testid=pet-emoji]").innerText();
+    ok(e0 === "🥚" && (await p.locator("[data-testid=pet]").innerText()).includes("Œuf"), "il commence en œuf");
+    await p.click("[data-testid=pet-feed]"); await sleep(300);
+    ok((await stateOf()).pet.fed.length === 1 && await p.locator("[data-testid=pet-feed]").isDisabled(), "il se nourrit une seule fois par jour");
+    await p.keyboard.press("Escape"); await sleep(300); }
+
   console.log("Budget : argent de poche, reste par catégorie, analyse PDF");
   await go("Budget");
   await p.selectOption("#bd-cat", "Restauration"); await p.fill("#bd-amount", "12,50"); await p.fill("#bd-label", "Resto"); await p.keyboard.press("Enter"); await sleep(300);

@@ -256,3 +256,44 @@ test("plafonds suggérés : récurrentes réservées, somme ≤ budget, historiq
   const tight = F.suggestLimits({ ...b, monthly: 450 }, TODAY, cats); assert.ok(tight.reduce((n, x) => n + x.amount, 0) <= 450);
   assert.ok(F.budgetInsights({ ...b, expenses: [exp("1", "2026-10-02", 10, "Courses"), exp("2", "2026-10-03", 10, "Courses"), exp("3", "2026-10-04", 10, "Courses")] }, TODAY).some((i) => i.id === "limits"));
 });
+
+const habitDone = (...dates: string[]): C.Habit => ({ id: "h", name: "H", emoji: "✨", cat: "autre", days: [0, 1, 2, 3, 4, 5, 6], done: dates, since: "2026-01-01" });
+test("restauration de série : 3 par mois, jours récents seulement, la série se rejoint", () => {
+  // actif du 6 au 9, manqué le 10 et le 11, actif le 12 ; aujourd'hui le 15 (jeudi) : série cassée
+  const s0 = { ...base(), habits: [habitDone("2026-10-06", "2026-10-07", "2026-10-08", "2026-10-09", "2026-10-12", "2026-10-13", "2026-10-14", "2026-10-15")] };
+  assert.equal(C.globalStreak(C.activeDays(s0), TODAY).current, 4);
+  assert.deepEqual(C.restorableDays(s0, TODAY), ["2026-10-10"]); // le 11 n'est offert qu'après le 10 (chaîne)
+  assert.equal(C.restoresLeft(s0, TODAY), 3);
+  let s = C.reducer(s0, { type: "streak/restore", date: "2026-10-10", today: TODAY });
+  assert.deepEqual(C.restorableDays(s, TODAY), ["2026-10-11"]);
+  s = C.reducer(s, { type: "streak/restore", date: "2026-10-11", today: TODAY });
+  assert.equal(C.globalStreak(C.activeDays(s), TODAY).current, 10); assert.equal(C.restoresLeft(s, TODAY), 1);
+  assert.equal(C.reducer(s0, { type: "streak/restore", date: "2026-10-03", today: TODAY }), s0); // pas restaurable
+  assert.equal(C.reducer(s0, { type: "streak/restore", date: "2026-10-15", today: TODAY }), s0); // aujourd'hui / déjà actif
+  // quota épuisé
+  const full = { ...s0, restores: [{ date: "2026-09-01", at: "2026-10-01" }, { date: "2026-09-02", at: "2026-10-02" }, { date: "2026-09-03", at: "2026-10-03" }] };
+  assert.equal(C.restoresLeft(full, TODAY), 0); assert.equal(C.reducer(full, { type: "streak/restore", date: "2026-10-10", today: TODAY }), full);
+  assert.equal(C.restoresLeft(full, "2026-11-02"), 3); // le quota revient le mois suivant
+  assert.equal(roundtrip(s).restores!.length, 2);
+});
+
+test("compagnon de série : croissance par jours actifs, humeur, repas quotidien", () => {
+  const pet: C.Pet = { name: "Mochi", kind: "renard", born: "2026-10-01", fed: [] };
+  const days = (n: number) => Array.from({ length: n }, (_, i) => C.iso(C.addDays(C.parseISO("2026-10-01"), i)));
+  assert.equal(C.petStatus(base(), TODAY), null);
+  let st = C.petStatus({ ...base(), pet, habits: [habitDone()] }, TODAY)!;
+  assert.deepEqual([st.stageName, st.growth, st.emoji, st.mood], ["Œuf", 0, "🥚", "endormi"]);
+  st = C.petStatus({ ...base(), pet, habits: [habitDone(...days(3))] }, "2026-10-04")!;
+  assert.deepEqual([st.stageName, st.growth, st.emoji, st.mood, st.nextAt], ["Bébé", 3, "🦊", "attend", 10]);
+  st = C.petStatus({ ...base(), pet, habits: [habitDone(...days(15))] }, TODAY)!;
+  assert.deepEqual([st.stageName, st.mood, st.canFeed, st.streak], ["Jeune", "heureux", true, 15]);
+  let s: C.AppState = { ...base(), pet, habits: [habitDone(...days(15))] };
+  s = C.reducer(s, { type: "pet/feed", date: TODAY }); assert.equal(C.petStatus(s, TODAY)!.growth, 16); assert.equal(C.petStatus(s, TODAY)!.canFeed, false);
+  assert.equal(C.reducer(s, { type: "pet/feed", date: TODAY }), s); // un seul repas par jour
+  assert.ok(C.petStatus({ ...base(), pet, habits: [habitDone(...days(15))] }, TODAY)!.progress > 0.3);
+  // jours avant l'adoption ignorés
+  assert.equal(C.petStatus({ ...base(), pet: { ...pet, born: "2026-10-10" }, habits: [habitDone(...days(15))] }, TODAY)!.growth, 6);
+  const back = roundtrip(s).pet!; assert.deepEqual([back.name, back.kind, back.fed.length], ["Mochi", "renard", 1]);
+  assert.equal(C.reducer(s, { type: "pet/release" }).pet, null);
+  assert.equal(roundtrip({ ...base(), pet: { ...pet, kind: "licorne" } }).pet!.kind, "chat");
+});
