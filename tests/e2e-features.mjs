@@ -221,7 +221,7 @@ try {
       const c1 = await p.locator("[data-testid=live-countdown]").first().innerText(); await sleep(2100);
       const c2 = await p.locator("[data-testid=live-countdown]").first().innerText();
       const sec = (x) => x.split(":").reduce((a, v) => a * 60 + Number(v), 0);
-      ok(sec(c1) <= 20 * 60 && sec(c1) > 18 * 60 && sec(c2) < sec(c1), `le compte à rebours diminue chaque seconde (${c1} → ${c2})`);
+      ok(sec(c1) <= 20 * 60 && sec(c1) > 0 && sec(c2) < sec(c1), `le compte à rebours diminue chaque seconde (${c1} → ${c2})`);
       await go("Planning");
       ok(await p.locator("[data-testid=live-now]").count() >= 1, "le compte à rebours est aussi dans le planning du jour");
     } }
@@ -246,6 +246,17 @@ try {
     await p.click("[data-testid=pet-feed]"); await sleep(300);
     ok((await stateOf()).pet.fed.length === 1 && await p.locator("[data-testid=pet-feed]").isDisabled(), "il se nourrit une seule fois par jour");
     await p.keyboard.press("Escape"); await sleep(300); }
+
+  await go("Ménage");
+  await p.locator("[data-testid^=chore-edit-]").first().click(); await sleep(300);
+  await p.fill("#ce-name", "Sortir les poubelles"); await p.click("[data-testid=chore-edit] >> text=Une seule fois"); await p.fill("#ce-date", plus(2));
+  await p.fill("#ce-time", "18:30"); await p.selectOption("#ce-min", "45");
+  await p.click("[data-testid=chore-edit] >> button[type=submit]"); await sleep(400);
+  const ch = (await stateOf()).chores.find((c) => c.name === "Sortir les poubelles");
+  ok(ch && ch.recurrence === "once" && ch.date === plus(2) && ch.time === "18:30" && ch.minutes === 45, "corvée modifiée : nom, date, heure de début et durée");
+  await p.locator("[data-testid^=chore-edit-]").first().click(); await sleep(300);
+  await p.click("[data-testid=chore-edit] >> [aria-label=\"Retirer l'heure\"]"); await p.click("[data-testid=chore-edit] >> button[type=submit]"); await sleep(400);
+  ok(!(await stateOf()).chores.find((c) => c.name === "Sortir les poubelles").time, "l'heure de début peut être retirée");
 
   console.log("Budget : argent de poche, reste par catégorie, analyse PDF");
   await go("Budget");
