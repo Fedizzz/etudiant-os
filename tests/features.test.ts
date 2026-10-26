@@ -297,3 +297,13 @@ test("compagnon de série : croissance par jours actifs, humeur, repas quotidien
   assert.equal(C.reducer(s, { type: "pet/release" }).pet, null);
   assert.equal(roundtrip({ ...base(), pet: { ...pet, kind: "licorne" } }).pet!.kind, "chat");
 });
+
+test("moment préféré d'un examen (révisions) : séances sans heure placées à ce moment ; l'heure de l'examen est à part", () => {
+  const exam = task({ id: "x", kind: "examen", title: "Physique", deadline: "2026-10-22", estimate: 90, dueTime: "08:30", prefer: "20:00", revision: [{ id: "r", date: "2026-10-17", topic: "Cinématique", minutes: 60 }] });
+  const b = C.planDay(withTasks(exam), "2026-10-17", undefined, TODAY).blocks.filter((x) => x.kind === "task");
+  assert.ok(b.length === 1 && b[0].start >= 18 * 60, "révision placée le soir");
+  assert.equal(C.taskPrefer(exam), "20:00");
+  assert.equal(C.taskPrefer({ kind: "examen", dueTime: "08:30" }), undefined); // l'heure de l'examen n'est pas un moment préféré
+  assert.equal(C.taskPrefer({ kind: "devoir", dueTime: "09:00" }), "09:00"); // anciennes données
+  const rt = roundtrip(withTasks(exam)).tasks[0]; assert.deepEqual([rt.dueTime, rt.prefer], ["08:30", "20:00"]);
+});

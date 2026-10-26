@@ -59,6 +59,9 @@ try {
   await go("Académique");
   await p.fill("#cf-name", "Maths"); await p.click("button:has-text('Module')"); await sleep(300);
   await p.click("button:has-text('Nouvelle tâche')"); await sleep(300);
+  await p.selectOption("#tf-kind", "perso"); await p.selectOption("#tf-kind", "devoir");
+  ok(await p.inputValue("#tf-dl") !== "9999-12-31" && await p.inputValue("#tf-dl") === plus(3), "passer de « devoir perso » à « devoir » remet une échéance réelle (pas l'an 9999)");
+  await p.selectOption("#tf-kind", "devoir");
   ok(await p.locator("#tf-est").evaluate((e) => e.tagName) === "SELECT", "durée estimée : sélecteur de durée commun");
   await p.fill("#tf-title", "Partiel de maths"); await p.selectOption("#tf-kind", "examen"); await p.fill("#tf-dl", plus(5));
   await p.click("button:has-text('Midi')");
@@ -83,7 +86,7 @@ try {
   await p.locator("article:has-text('Devoir A') >> button[aria-label^='Reporter']").click(); await sleep(200);
   await p.click("[role=dialog][aria-label=Reporter] >> text=+1 semaine"); await sleep(400);
   st = await stateOf(); const A = st.tasks.find((t) => t.title === "Devoir A"), B = st.tasks.find((t) => t.title === "Devoir B");
-  ok(A.dueTime === "20:00", "moment préféré « soir » enregistré");
+  ok(A.prefer === "20:00" && !A.dueTime, "moment préféré « soir » enregistré");
   ok(A.deadline === plus(9) && A.postponed.length === 1 && A.postponed[0].from === plus(2), "le report déplace l'échéance et garde l'historique");
   ok(B.deadline === plus(2) && !B.postponed, "l'échéance d'un autre devoir ne change pas");
   ok((await p.locator("article:has-text('Devoir A')").innerText()).includes("Reportée 1×"), "badge « Reportée 1× » visible");
