@@ -3464,6 +3464,46 @@ const ChoreDragCell: React.FC<{ chore: Chore; date: string; children: (drag: { o
 };
 
 /** Ménage : le même écran pour le ménage personnel et, dans un appartement, pour celui de la colocation (`flat`) : suggestions, checklist, heure fixe, report, historique… */
+/** Modifier une corvée : nom, fréquence, jour ou date, heure de début (facultative), durée, personnes. */
+const ChoreEdit: React.FC<{ c: Chore; flat: boolean; memberNames: string[]; showWho: boolean; onDone: () => void }> = ({ c, flat, memberNames, showWho, onDone }) => {
+  const { dispatch, toast } = useStore();
+  const [name, setName] = useState(c.name), [rec, setRec] = useState<Recurrence>(c.recurrence), [date, setDate] = useState(c.date ?? todayISO()), [day, setDay] = useState(c.day);
+  const [time, setTime] = useState(c.time ?? ""), [minutes, setMinutes] = useState(c.minutes), [who, setWho] = useState(c.assignees.join(", "));
+  const save = (e: React.FormEvent) => {
+    e.preventDefault();
+    const assignees = who.split(",").map((x) => x.trim()).filter(Boolean);
+    if (!name.trim() || !assignees.length) { toast("Nom et au moins une personne requis.", "bad"); return; }
+    if (rec === "once" && !/^\d{4}-\d{2}-\d{2}$/.test(date)) { toast("Choisissez la date de la corvée.", "bad"); return; }
+    if (time && !/^\d{2}:\d{2}$/.test(time)) { toast("Heure de début invalide.", "bad"); return; }
+    if (!(minutes >= 5)) { toast("Choisissez une durée d'au moins 5 minutes.", "bad"); return; }
+    dispatch({ type: "chore/update", id: c.id, patch: { name: name.trim(), recurrence: rec, day: rec === "once" ? weekday(parseISO(date)) : day, date: rec === "once" ? date : undefined, minutes, time: time || undefined, assignees } });
+    toast(`Corvée « ${name.trim()} » modifiée`); onDone();
+  };
+  const sel = who.split(",").map((x) => x.trim()).filter(Boolean);
+  return (
+    <form onSubmit={save} className="grid grid-cols-2 gap-3" data-testid="chore-edit">
+      <Field label="Corvée" htmlFor="ce-name" className="col-span-2"><Input id="ce-name" autoFocus value={name} onChange={(e) => setName(e.target.value)} /></Field>
+      <div className="col-span-2 flex gap-1.5" role="group" aria-label="Fréquence">
+        {([[false, "🔁 Récurrente"], [true, "📅 Une seule fois"]] as [boolean, string][]).map(([once, l]) => { const on = (rec === "once") === once; return (
+          <button key={l} type="button" aria-pressed={on} onClick={() => setRec(once ? "once" : rec === "once" ? "weekly" : rec)} className={cx("flex-1 rounded-lg border-2 px-2 py-2 text-[13px] font-semibold transition", on ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-line bg-sunken text-muted")}>{l}</button>); })}
+      </div>
+      {rec === "once" ? <Field label="Date" htmlFor="ce-date" className="col-span-2"><Input id="ce-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field> : <>
+        <Field label="Récurrence" htmlFor="ce-rec"><Select id="ce-rec" value={rec} onChange={(e) => setRec(e.target.value as Recurrence)}>{(Object.keys(REC_LABEL) as Recurrence[]).filter((r) => r !== "once").map((r) => <option key={r} value={r}>{REC_LABEL[r]}</option>)}</Select></Field>
+        <Field label="Jour" htmlFor="ce-day"><Select id="ce-day" value={day} disabled={rec === "daily"} onChange={(e) => setDay(Number(e.target.value))}>{DAYS_LONG.map((d, i) => <option key={d} value={i}>{d}</option>)}</Select></Field></>}
+      <Field label="Heure de début (facultatif)" htmlFor="ce-time"><div className="flex gap-1.5"><Input id="ce-time" type="time" value={time} onChange={(e) => setTime(e.target.value)} />{time && <Btn type="button" variant="ghost" size="sm" onClick={() => setTime("")} aria-label="Retirer l'heure">✕</Btn>}</div></Field>
+      <Field label="Durée" htmlFor="ce-min"><DurationPicker id="ce-min" value={minutes} onChange={setMinutes} /></Field>
+      <p className="col-span-2 -mt-1 text-[11px] text-muted">{time ? `Dans le planning : ${time} → ${toHHMM(toMin(time) + minutes)}.` : "Sans heure de début : la corvée est placée dans un créneau libre du jour."}</p>
+      {flat ? (
+        <fieldset className="col-span-2"><legend className="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted">{rec === "once" ? "Qui la fait" : "Rotation entre"}</legend>
+          <div className="flex flex-wrap gap-2">{memberNames.map((n) => { const on = sel.includes(n); return (
+            <label key={n} className={cx("flex cursor-pointer items-center gap-1.5 rounded-full border-2 px-3 py-1 text-xs font-semibold", on ? "border-fg bg-hi/60" : "border-line text-muted")}>
+              <input type="checkbox" className="sr-only" checked={on} onChange={() => setWho((rec === "once" ? [n] : on ? sel.filter((x) => x !== n) : memberNames.filter((m) => sel.includes(m) || m === n)).join(", "))} />{n}</label>); })}</div></fieldset>
+      ) : showWho && <Field label="Rotation (séparée par des virgules)" htmlFor="ce-who" className="col-span-2"><Input id="ce-who" value={who} onChange={(e) => setWho(e.target.value)} /></Field>}
+      <div className="col-span-2 flex justify-end gap-2"><Btn type="button" variant="ghost" onClick={onDone}>Annuler</Btn><Btn type="submit" variant="primary"><Check size={14} />Enregistrer</Btn></div>
+    </form>
+  );
+};
+
 const ChoresBoard: React.FC<{ flat?: boolean }> = ({ flat = false }) => {
   const { state: fullState, dispatch, toast, undoable } = useStore();
   const fd = useFlat(), flatStatus = fd.status;
@@ -3479,6 +3519,8 @@ const ChoresBoard: React.FC<{ flat?: boolean }> = ({ flat = false }) => {
   const [presetEnd, setPresetEnd] = useState(false);
   const [newSteps, setNewSteps] = useState<Step[]>([]);
   const [editSteps, setEditSteps] = useState<ID | null>(null);
+  const [editChore, setEditChore] = useState<ID | null>(null);
+  const choreEditing = state.chores.find((c) => c.id === editChore);
   const editing = state.chores.find((c) => c.id === editSteps);
   const [f, setF] = useState({ name: "", recurrence: "weekly" as Recurrence, day: 5, date: todayISO(), minutes: 20, time: "18:00", end: "18:30", assignees: (flat ? memberNames : ["Moi", ...state.settings.roommates]).join(", ") });
   const people = Array.from(new Set(flat ? [...memberNames, ...state.chores.flatMap((c) => c.assignees)] : state.chores.flatMap((c) => c.assignees)));
@@ -3501,7 +3543,7 @@ const ChoresBoard: React.FC<{ flat?: boolean }> = ({ flat = false }) => {
                 {state.chores.map((c) => (
                   <tr key={c.id} className="group">
                     <td className="pr-2"><p className="font-medium text-fg">{c.name}</p>
-                      <button className="text-[11px] text-accent hover:underline" onClick={() => setEditSteps(c.id)} aria-label={`Checklist de ${c.name}`}>{c.steps?.length ? `☑ Checklist · ${c.steps.length} étape${c.steps.length > 1 ? "s" : ""}` : "+ Checklist"}</button><p className="text-[11px] text-muted">{REC_LABEL[c.recurrence]}{c.recurrence === "once" && c.date ? ` · ${fmtDate(c.date)}` : ""}{c.time ? ` · ${c.time}–${toHHMM(toMin(c.time) + c.minutes)}` : ` · ${c.minutes} min`}</p></td>
+                      <button className="mr-2 text-[11px] text-accent hover:underline" onClick={() => setEditChore(c.id)} aria-label={`Modifier ${c.name}`} data-testid={`chore-edit-${c.id}`}>✎ Modifier</button><button className="text-[11px] text-accent hover:underline" onClick={() => setEditSteps(c.id)} aria-label={`Checklist de ${c.name}`}>{c.steps?.length ? `☑ Checklist · ${c.steps.length} étape${c.steps.length > 1 ? "s" : ""}` : "+ Checklist"}</button><p className="text-[11px] text-muted">{REC_LABEL[c.recurrence]}{c.recurrence === "once" && c.date ? ` · ${fmtDate(c.date)}` : ""}{c.time ? ` · ${c.time}–${toHHMM(toMin(c.time) + c.minutes)}` : ` · ${c.minutes} min`}</p></td>
                     {days.map((d) => { const on = choreScheduledOn(c, d); const k = iso(d); const done = c.done.includes(k); const skipped = (c.skipped ?? []).includes(k); const who = choreAssignee(c, d); const by = c.doneBy?.[k] ?? who; return (
                       <td key={k} className="relative text-center" data-chore-row={c.id} data-date={k}>{on ? (<>
                         {skipped ? (
@@ -3602,6 +3644,7 @@ const ChoresBoard: React.FC<{ flat?: boolean }> = ({ flat = false }) => {
           </form>
         </Card>
       </div>
+      {choreEditing && <Modal title={`Modifier · ${choreEditing.name}`} onClose={() => setEditChore(null)}><ChoreEdit c={choreEditing} flat={flat} memberNames={memberNames} showWho={flat || state.settings.roommates.length > 0 || choreEditing.assignees.some((a) => a !== "Moi")} onDone={() => setEditChore(null)} /></Modal>}
       {editing && <Modal title={`Checklist · ${editing.name}`} onClose={() => setEditSteps(null)}><ChoreStepsEdit c={editing} onDone={() => setEditSteps(null)} /></Modal>}
     </div>
   );
