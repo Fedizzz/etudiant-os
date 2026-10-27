@@ -125,6 +125,30 @@ try {
   ok(await p.locator("[data-testid=event-editor]").count() === 1 && (await p.inputValue("#ee-title")) === "Appeler le prof de maths", "glisser une note dans le calendrier crée un événement prérempli");
   await p.click("[data-testid=event-editor] >> button[type=submit]"); await sleep(400);
   ok((await stateOf()).events.some((e) => e.title === "Appeler le prof de maths"), "l'événement issu de la note est enregistré");
+  // sélection multiple : rectangle à la souris puis glisser le groupe
+  for (const [name, hh] of [["Multi A", "20:00"], ["Multi B", "21:30"]]) {
+    await p.evaluate(() => window.scrollTo(0, 300)); await sleep(150);
+    const gb = await p.locator("[data-testid=day-grid]").boundingBox(); await p.mouse.click(gb.x + 24, Math.max(gb.y, 0) + 40); await sleep(350);
+    await p.fill("#ee-title", name); await p.fill("#ee-start", hh); await p.selectOption("#ee-dur", "30");
+    await p.click("[data-testid=event-editor] >> button[type=submit]"); await sleep(400);
+  }
+  const startOf = async (n) => (await stateOf()).events.find((e) => e.title === n)?.start;
+  const a0 = await startOf("Multi A"), b0 = await startOf("Multi B");
+  await p.locator("[data-bk*=event]:has-text('Multi A')").first().scrollIntoViewIfNeeded();
+  const ba = await p.locator("[data-bk]:has-text('Multi A')").first().boundingBox(), bb = await p.locator("[data-bk]:has-text('Multi B')").first().boundingBox();
+  const g = await p.locator("[data-testid=day-grid]").boundingBox();
+  await p.mouse.move(g.x + g.width - 6, ba.y - 6); await p.mouse.down(); await p.mouse.move(g.x + 80, (ba.y + bb.y) / 2, { steps: 6 }); await p.mouse.move(g.x + 80, bb.y + bb.height + 6, { steps: 6 }); await p.mouse.up(); await sleep(300);
+  ok(await p.locator("[data-testid=multi-bar]").count() === 1 && /2 sélectionnés/.test(await p.locator("[data-testid=multi-bar]").innerText()), "un rectangle tracé à la souris sélectionne plusieurs événements");
+  ok(await p.locator("[data-testid=event-editor]").count() === 0, "tracer le rectangle ne crée pas d'événement");
+  const sb = await p.locator("[data-bk]:has-text('Multi A')").first().boundingBox();
+  await p.mouse.move(sb.x + 20, sb.y + 8); await p.mouse.down(); await p.mouse.move(sb.x + 20, sb.y + 8 - 84 / 2, { steps: 8 }); await p.mouse.up(); await sleep(400);
+  const a1 = await startOf("Multi A"), b1 = await startOf("Multi B"), mn = (h) => parseInt(h) * 60 + parseInt(h.slice(3));
+  ok(mn(a0) - mn(a1) === 30 && mn(b0) - mn(b1) === 30, "glisser l'un des blocs sélectionnés décale tout le groupe de la même durée (−30 min)");
+  await p.locator("[data-testid=select-mode]").click(); await p.locator("[data-bk]:has-text('Multi A')").first().click(); await p.locator("[data-bk]:has-text('Multi B')").first().click(); await sleep(200);
+  ok(/2 sélectionnés/.test(await p.locator("[data-testid=multi-bar]").innerText()), "le mode « Sélectionner » permet de cocher plusieurs blocs au toucher/clic");
+  await p.fill("[data-testid=multi-bar] input[type=date]", plus(1)); await p.click("[data-testid=multi-move-day]"); await sleep(400);
+  { const s2 = await stateOf(); ok(["Multi A", "Multi B"].every((n) => s2.events.find((e) => e.title === n)?.date === plus(1)), "« Déplacer à ce jour » envoie tout le groupe au jour choisi"); }
+  await p.locator("[data-testid=select-mode]").click();
   // rappel imminent
   { const n = new Date(); const m = n.getHours() * 60 + n.getMinutes() + 10;
     if (m < 23 * 60) {
