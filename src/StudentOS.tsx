@@ -2596,7 +2596,7 @@ async function openVideoPip(snap: () => { left: number; total: number; phase: st
 }
 
 /** Minuteur compact : affiché dans une fenêtre flottante (Picture-in-Picture) ou, à défaut, en pastille dans l'application. */
-const MiniTimer: React.FC<{ win: Window | null; onClose: () => void }> = ({ win, onClose }) => {
+const MiniTimer: React.FC<{ win: Window | null; onClose: () => void; onPopOut: () => void }> = ({ win, onClose, onPopOut }) => {
   const { state, dispatch } = useStore();
   const [now, setNow] = useState(() => Date.now());
   // Horloge propre à la fenêtre flottante : elle continue même si l'onglet principal est en arrière-plan.
@@ -2612,7 +2612,7 @@ const MiniTimer: React.FC<{ win: Window | null; onClose: () => void }> = ({ win,
   const pct = Math.min(100, Math.max(0, (1 - left / total) * 100));
   const face = (
     <div className={cx("flex flex-col gap-2 bg-panel p-3 text-fg", win ? "h-full justify-center" : "w-56 rounded-2xl border-2 border-fg shadow-[3px_3px_0_0_rgb(var(--ink))]")} data-testid="mini-timer" role="timer" aria-label="Mini minuteur">
-      <div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-muted"><span>{PHASE_LABEL[t.phase]}</span><button aria-label="Fermer le mini minuteur" className="rounded px-1 hover:text-bad" onClick={onClose}>✕</button></div>
+      <div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-muted"><span>{PHASE_LABEL[t.phase]}</span><span className="flex items-center gap-1">{!win && <button aria-label="Ouvrir dans une fenêtre à part" title="Ouvrir dans une fenêtre à part (ou glissez la pastille hors de la page)" data-testid="mini-popout" className="rounded px-1 hover:text-accent" onClick={onPopOut}>⧉</button>}<button aria-label="Fermer le mini minuteur" className="rounded px-1 hover:text-bad" onClick={onClose}>✕</button></span></div>
       <p className="text-center font-display text-5xl font-extrabold tabular-nums leading-none tracking-tight" data-testid="mini-time">{pad(Math.floor(left / 60))}:{pad(left % 60)}</p>
       <div className="h-1.5 overflow-hidden rounded-full bg-sunken"><div className={cx("h-full", t.phase === "work" ? "bg-accent" : "bg-ok")} style={{ width: `${pct}%` }} /></div>
       <p className="truncate text-center text-[11px] text-muted">{task?.title ?? "Focus libre"}</p>
@@ -2622,11 +2622,11 @@ const MiniTimer: React.FC<{ win: Window | null; onClose: () => void }> = ({ win,
       </div>
     </div>);
   if (win) return createPortal(face, win.document.body);
-  return <MiniDraggable>{face}</MiniDraggable>;
+  return <MiniDraggable onPopOut={onPopOut}>{face}</MiniDraggable>;
 };
 
 /** Pastille déplaçable (souris, doigt, stylet) ; la position est mémorisée sur l'appareil. */
-const MiniDraggable: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+const MiniDraggable: React.FC<{ children: React.ReactNode; onPopOut: () => void }> = ({ children, onPopOut }) => {
   const KEY = "etudiant-os/mini-pos";
   const [pos, setPos] = useState<{ x: number; y: number } | null>(() => { try { const j = JSON.parse(localStorage.getItem(KEY) ?? "null"); return j && Number.isFinite(j.x) && Number.isFinite(j.y) ? j : null; } catch { return null; } });
   const ref = useRef<HTMLDivElement>(null);
@@ -2638,7 +2638,12 @@ const MiniDraggable: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* facultatif */ }
   };
   const move = (e: React.PointerEvent) => { if (drag.current) setPos(clamp(e.clientX - drag.current.dx, e.clientY - drag.current.dy)); };
-  const up = () => { if (drag.current) { drag.current = null; try { if (pos) localStorage.setItem(KEY, JSON.stringify(pos)); } catch { /* préférence facultative */ } } };
+  const up = (e: React.PointerEvent) => {
+    if (!drag.current) return;
+    // Lâchée en dehors de la page : le minuteur s'ouvre dans sa propre fenêtre.
+    const out = e.clientX < 12 || e.clientY < 12 || e.clientX > window.innerWidth - 12 || e.clientY > window.innerHeight - 12;
+    if (out) { drag.current = null; onPopOut(); return; }
+    if (drag.current) { drag.current = null; try { if (pos) localStorage.setItem(KEY, JSON.stringify(pos)); } catch { /* préférence facultative */ } } };
   return <div ref={ref} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} data-testid="mini-drag" title="Glisser pour déplacer"
     className={cx("fixed z-[70] cursor-grab touch-none select-none active:cursor-grabbing", !pos && "bottom-20 right-3 md:bottom-4")} style={pos ? { left: pos.x, top: pos.y } : undefined}>{children}</div>;
 };
@@ -4843,6 +4848,14 @@ export default function StudentOS({ state: ownState, dispatch: ownDispatch, env,
   // Mini-minuteur : fenêtre flottante Picture-in-Picture quand le navigateur le permet (Chrome/Edge), sinon pastille dans l'application.
   const [mini, setMini] = useState<{ win: Window | null; stop?: () => void; pip?: boolean } | null>(null);
   const closeMini = useCallback(() => { setMini((m) => { try { m?.win?.close(); } catch { /* déjà fermée */ } m?.stop?.(); return null; }); }, []);
+  /** Habille une fenêtre secondaire (styles et thème de l'application) et y affiche le mini minuteur. */
+  const adoptWindow = useCallback((w: Window) => {
+    document.querySelectorAll('style, link[rel="stylesheet"]').forEach((n) => w.document.head.appendChild(n.cloneNode(true)));
+    for (const a of Array.from(document.documentElement.attributes)) w.document.documentElement.setAttribute(a.name, a.value);
+    w.document.body.className = document.body.className; w.document.body.style.margin = "0"; w.document.body.style.height = "100vh";
+    w.addEventListener("pagehide", () => setMini(null));
+    setMini((m) => { m?.stop?.(); return { win: w }; });
+  }, []);
   const toggleMini = useCallback(() => {
     if (mini) { closeMini(); return; }
     const dpip = (window as unknown as { documentPictureInPicture?: { requestWindow: (o: { width: number; height: number }) => Promise<Window> } }).documentPictureInPicture;
@@ -4859,15 +4872,15 @@ export default function StudentOS({ state: ownState, dispatch: ownDispatch, env,
         .catch(() => inApp("Mini minuteur ouvert dans l'application (la fenêtre flottante n'est pas disponible sur ce navigateur)."));
     };
     if (!dpip) { viaVideo(); return; }
-    dpip.requestWindow({ width: 260, height: 190 }).then((w) => {
-      // La fenêtre flottante reprend les styles et le thème de l'application.
-      document.querySelectorAll('style, link[rel="stylesheet"]').forEach((n) => w.document.head.appendChild(n.cloneNode(true)));
-      for (const a of Array.from(document.documentElement.attributes)) w.document.documentElement.setAttribute(a.name, a.value);
-      w.document.body.className = document.body.className; w.document.body.style.margin = "0"; w.document.body.style.height = "100vh";
-      w.addEventListener("pagehide", () => setMini(null));
-      setMini({ win: w });
-    }).catch(viaVideo);
-  }, [mini, toast, closeMini, dispatch]);
+    dpip.requestWindow({ width: 260, height: 190 }).then(adoptWindow).catch(viaVideo);
+  }, [mini, toast, closeMini, dispatch, adoptWindow]);
+  /** Sortir la pastille de la page : le mini minuteur s'ouvre dans sa propre petite fenêtre (à appeler depuis un geste de l'utilisateur). */
+  const popOutMini = useCallback(() => {
+    const w = window.open("about:blank", "etudiant-os-mini", "popup=yes,width=280,height=210");
+    if (!w) { toast("Autorisez les fenêtres pop-up pour ce site afin d'ouvrir le mini minuteur à part.", "bad"); return; }
+    w.document.title = "Mini minuteur · Étudiant.OS";
+    adoptWindow(w);
+  }, [toast, adoptWindow]);
   const ctx = useMemo(() => ({ state, dispatch, toast, undoable, go: setView, openTask: setEditTask, now, env, mini: !!mini, toggleMini }), [state, dispatch, toast, undoable, setView, now, env, mini, toggleMini]);
   const isDark = effTheme === "dark" || (effTheme === "system" && typeof matchMedia !== "undefined" && matchMedia("(prefers-color-scheme: dark)").matches);
   // Basculer à la main choisit explicitement clair ou sombre (le mode automatique se réactive dans les Réglages).
@@ -4934,7 +4947,7 @@ export default function StudentOS({ state: ownState, dispatch: ownDispatch, env,
   return (
     <StoreCtx.Provider value={ctx}><FlatCtx.Provider value={flatData}>
       <style>{accentCss(state.settings.accent)}</style>
-      {mini && (mini.win || !mini.pip) && <MiniTimer win={mini.win} onClose={closeMini} />}
+      {mini && (mini.win || !mini.pip) && <MiniTimer win={mini.win} onClose={closeMini} onPopOut={popOutMini} />}
       <div className="flex min-h-full bg-bg text-fg">
         <aside className="sticky top-0 hidden h-screen w-[76px] shrink-0 flex-col overflow-y-auto p-3 md:flex lg:w-60 2xl:w-64" style={{ paddingTop: "calc(var(--safe-top) + 12px)" }}>
           <div className="mb-6 flex items-center gap-2.5 px-1 pt-2 lg:px-2"><div className="sticker grid h-9 w-9 place-items-center rounded-xl border-2 border-fg bg-pink text-white shadow-[3px_3px_0_0_rgb(var(--ink))]"><ListChecks size={17} /></div><span className="hidden font-display text-[19px] font-extrabold leading-none tracking-tight lg:inline">Étudiant<span className="text-accent">.</span>OS</span></div>
