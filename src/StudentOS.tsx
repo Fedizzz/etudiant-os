@@ -2030,25 +2030,73 @@ const Planning: React.FC = () => {
   const [dragI, setDragI] = useState<{ i: number; dy: number } | null>(null);
   const dragRef = useRef<number | null>(null);
   const snap = (dy: number) => Math.round(((dy / PX) * 60) / 5) * 5;
+  // Sélection multiple : Ctrl/⌘/Maj + clic, mode « Sélectionner » (tactile) ou rectangle tracé à la souris sur la grille.
+  const bkey = (b: Block) => `${b.kind}:${b.refId ?? ""}:${b.start}`;
+  const [multi, setMulti] = useState<Set<string>>(new Set());
+  const [selMode, setSelMode] = useState(false);
+  const [box, setBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [moveDay, setMoveDay] = useState(today);
+  const suppressSlot = useRef(false);
+  const selected = plan.blocks.map((b, i) => ({ b, i })).filter((x) => multi.has(bkey(x.b)));
+  useEffect(() => { setMulti(new Set()); }, [date]);
+  useEffect(() => { if (!multi.size) return; const k = (e: KeyboardEvent) => { if (e.key === "Escape") setMulti(new Set()); }; window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, [multi.size]);
+  const toggleKey = (k: string) => setMulti((m) => { const n = new Set(m); if (n.has(k)) n.delete(k); else n.add(k); return n; });
+  /** Place un bloc (corvée, tâche, événement) au jour et à l'heure donnés. */
+  const applyMove = (b: Block, toDate: string, start: number) => {
+    const len = b.end - b.start, t = toHHMM(start);
+    if (b.kind === "chore" && b.refId) { const c = state.chores.find((x) => x.id === b.refId); if (c) moveChoreTo(dispatch, c, date, toDate, t); }
+    else if (b.kind === "task" && b.refId) { const tk = state.tasks.find((x) => x.id === b.refId); if (tk) { const l = tk.slot ? toMin(tk.slot.end) - toMin(tk.slot.start) : Math.max(len, 15); dispatch({ type: "task/update", id: tk.id, patch: { slot: { date: toDate, start: t, end: toHHMM(Math.min(23 * 60 + 59, start + l)) }, doDates: undefined, noPlan: undefined } }); } }
+    else if (b.kind === "event" && b.refId) { const ev = state.events.find((x) => x.id === b.refId); if (ev) { const e = toHHMM(Math.min(23 * 60 + 59, start + len));
+      if (ev.recurrence === "none") dispatch({ type: "event/update", id: ev.id, patch: { date: toDate, start: t, end: e } });
+      else { dispatch({ type: "event/skip", id: ev.id, date }); dispatch({ type: "event/add", event: { id: uid(), title: ev.title, date: toDate, start: t, end: e, recurrence: "none", until: null, ...(ev.color ? { color: ev.color } : {}) } }); } } }
+  };
+  const moveGroup = (delta: number, toDate: string) => {
+    const grp = selected.filter((x) => movable(x.b)); if (!grp.length) return;
+    const lo = Math.min(...grp.map((x) => x.b.start)), hi = Math.max(...grp.map((x) => x.b.end));
+    const d = Math.max(-lo, Math.min(23 * 60 + 55 - hi, delta));
+    const others = plan.blocks.filter((x) => !multi.has(bkey(x)) && x.kind !== "meal" && x.kind !== "sleep");
+    for (const { b } of grp) { const len = b.end - b.start, wanted = b.start + d; applyMove(b, toDate, b.kind === "event" || toDate !== date ? wanted : freeStart(wanted, len, others)); }
+    toast(`${grp.length} élément${grp.length > 1 ? "s" : ""} déplacé${grp.length > 1 ? "s" : ""}${toDate !== date ? ` au ${fmtDate(toDate)}` : d ? ` (${d > 0 ? "+" : "−"}${fmtDur(Math.abs(d))})` : ""}`);
+    setMulti(new Set());
+  };
   const blockDrag = useDrag({
     onMove: (_dx, dy) => { if (dragRef.current !== null) setDragI({ i: dragRef.current, dy }); },
     onCancel: () => { setDragI(null); dragRef.current = null; },
     onDrop: (_dx, dy) => {
       const i = dragRef.current; setDragI(null); dragRef.current = null; if (i === null) return;
       const b = plan.blocks[i]; const delta = snap(dy); if (!delta) return;
+      if (multi.size > 1 && multi.has(bkey(b))) { moveGroup(delta, date); return; }
       const len = b.end - b.start, wanted = Math.max(0, Math.min(23 * 60 + 55 - len, b.start + delta));
       // Chorés et tâches : jamais par-dessus un autre bloc (on glisse au plus proche créneau libre). Les événements restent libres.
       const start = b.kind === "event" ? wanted : freeStart(wanted, len, plan.blocks.filter((x, j) => j !== i && x.kind !== "meal" && x.kind !== "sleep")), t = toHHMM(start);
       if (start !== wanted) toast("Créneau occupé : placé juste à côté.", "info");
-      if (b.kind === "chore" && b.refId) { const c = state.chores.find((x) => x.id === b.refId); if (c) moveChoreTo(dispatch, c, date, date, t); }
-      else if (b.kind === "task" && b.refId) { const tk = state.tasks.find((x) => x.id === b.refId); if (tk) { const l = tk.slot ? toMin(tk.slot.end) - toMin(tk.slot.start) : Math.max(len, 15); dispatch({ type: "task/update", id: tk.id, patch: { slot: { date, start: t, end: toHHMM(Math.min(23 * 60 + 59, start + l)) }, doDates: undefined, noPlan: undefined } }); } }
-      else if (b.kind === "event" && b.refId) { const ev = state.events.find((x) => x.id === b.refId); if (ev) { const e = toHHMM(start + len);
-        if (ev.recurrence === "none") dispatch({ type: "event/update", id: ev.id, patch: { start: t, end: e } });
-        else { dispatch({ type: "event/skip", id: ev.id, date }); dispatch({ type: "event/add", event: { id: uid(), title: ev.title, date, start: t, end: e, recurrence: "none", until: null, ...(ev.color ? { color: ev.color } : {}) } }); } } }
-      else return;
+      if (!movable(b)) return;
+      applyMove(b, date, start);
       toast(`« ${b.label.replace(/^✓ /, "")} » : ${t}`);
     },
   });
+  /** Ce bloc suit le curseur : celui qu'on tient, ou tout bloc de la sélection quand on en tient un. */
+  const grouped = (b: Block, i: number) => !!dragI && (dragI.i === i || (multi.size > 1 && multi.has(bkey(b)) && multi.has(bkey(plan.blocks[dragI.i]))));
+  const startMarquee = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0 || e.pointerType !== "mouse" || (e.target as HTMLElement).closest('[role="button"], button')) return;
+    const grid = e.currentTarget, x0 = e.clientX, y0 = e.clientY, base = e.ctrlKey || e.metaKey || e.shiftKey ? new Set(multi) : new Set<string>();
+    let active = false;
+    const mv = (ev: PointerEvent) => {
+      if (!active && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 6) return;
+      active = true;
+      const r = grid.getBoundingClientRect(), l = Math.min(x0, ev.clientX), tp = Math.min(y0, ev.clientY), rt = Math.max(x0, ev.clientX), bt = Math.max(y0, ev.clientY);
+      setBox({ x: l - r.left, y: tp - r.top, w: rt - l, h: bt - tp });
+      const hit = new Set(base);
+      grid.querySelectorAll<HTMLElement>("[data-bk]").forEach((el) => { const q = el.getBoundingClientRect(); if (q.left < rt && q.right > l && q.top < bt && q.bottom > tp) hit.add(el.dataset.bk!); });
+      setMulti(hit);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", mv); window.removeEventListener("pointerup", up);
+      setBox(null);
+      if (active) { suppressSlot.current = true; window.setTimeout(() => { suppressSlot.current = false; }, 80); }
+    };
+    window.addEventListener("pointermove", mv); window.addEventListener("pointerup", up);
+  };
   const movable = (b: Block) => !!b.refId && (b.kind === "chore" || b.kind === "task" || (b.kind === "event" && state.events.some((e) => e.id === b.refId)));
   const [mode, setMode] = useState<"day" | "week">(() => { try { return localStorage.getItem("etudiant-os/planning-view") === "week" ? "week" : "day"; } catch { return "day"; } });
   useEffect(() => { try { localStorage.setItem("etudiant-os/planning-view", mode); } catch { /* préférence facultative */ } }, [mode]);
@@ -2090,9 +2138,23 @@ const Planning: React.FC = () => {
         {mode === "week" ? <div><p className="mb-2 text-[11px] text-muted md:hidden">Glissez horizontalement pour voir toute la semaine · touchez un créneau pour le détail, une case vide pour créer un événement.</p><WeekGrid week={week} today={today} onPick={(bb, d) => setSel({ b: bb, date: d })} onDay={(d) => { setOffset(daysBetween(today, d)); setMode("day"); }} onSlot={onSlot} onDropText={onDropText} /></div> : <>
         {offset === 0 && <LiveNow className="mt-4" />}
         <div className="mt-4 flex flex-col gap-2"><DueBadges date={date} /><RoutineStrip date={date} /><UntimedStrip date={date} /></div>
-        <p className="mt-3 text-[11px] text-muted">Touchez une plage horaire vide pour créer un événement ; glissez-y une note depuis « Notes à planifier ».</p>
-        <div className="relative mt-1 cursor-cell overflow-hidden rounded-lg border border-line" data-testid="day-grid" style={{ height: (endH - startH) * PX }}
-          onClick={(e) => { if ((e.target as HTMLElement).closest('[role="button"], button')) return; onSlot(date, slotMinutes(e, e.currentTarget, startH * 60, PX)); }}
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <p className="min-w-0 flex-1 text-[11px] text-muted">Touchez une plage horaire vide pour créer un événement ; glissez-y une note depuis « Notes à planifier ». Pour en déplacer plusieurs : tracez un rectangle à la souris, ou Ctrl/Maj + clic.</p>
+          <Btn size="sm" variant={selMode ? "primary" : "ghost"} aria-pressed={selMode} onClick={() => { setSelMode(!selMode); if (selMode) setMulti(new Set()); }} data-testid="select-mode">☑ Sélectionner</Btn>
+        </div>
+        {multi.size > 0 && (
+          <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl border-2 border-accent/50 bg-accent/8 px-3 py-2 text-[12px]" role="status" data-testid="multi-bar">
+            <b>{multi.size} sélectionné{multi.size > 1 ? "s" : ""}</b>
+            <span className="text-muted">Glissez l'un d'eux pour décaler tout le groupe, ou :</span>
+            <Btn size="sm" onClick={() => moveGroup(-15, date)} aria-label="Décaler de 15 minutes plus tôt">−15 min</Btn>
+            <Btn size="sm" onClick={() => moveGroup(15, date)} aria-label="Décaler de 15 minutes plus tard">+15 min</Btn>
+            <Input type="date" aria-label="Jour de destination" value={moveDay} min={today} onChange={(e) => setMoveDay(e.target.value)} className="!w-auto" />
+            <Btn size="sm" variant="primary" disabled={!moveDay || moveDay < today} onClick={() => moveGroup(0, moveDay)} data-testid="multi-move-day">Déplacer à ce jour</Btn>
+            <Btn size="sm" variant="ghost" onClick={() => setMulti(new Set())}>Désélectionner</Btn>
+          </div>)}
+        <div className="relative mt-1 cursor-cell select-none overflow-hidden rounded-lg border border-line" data-testid="day-grid" style={{ height: (endH - startH) * PX }}
+          onPointerDown={startMarquee}
+          onClick={(e) => { if ((e.target as HTMLElement).closest('[role="button"], button') || suppressSlot.current) return; if (multi.size) { setMulti(new Set()); return; } onSlot(date, slotMinutes(e, e.currentTarget, startH * 60, PX)); }}
           onDragOver={(e) => e.preventDefault()} onDrop={(e) => { const t = e.dataTransfer.getData("text/plain").trim(); if (!t) return; e.preventDefault(); onDropText(date, slotMinutes(e, e.currentTarget, startH * 60, PX), t); }}>
           {Array.from({ length: endH - startH }, (_, i) => (
             <div key={i} className="absolute inset-x-0 border-t border-line/70" style={{ top: i * PX }}><span className="absolute left-2 top-0.5 font-mono text-[10px] text-muted">{pad((startH + i) % 24)}:00</span></div>
@@ -2101,12 +2163,12 @@ const Planning: React.FC = () => {
             <div className="absolute inset-x-0 z-10 h-px bg-bad" style={{ top: ((nowMin - startH * 60) / 60) * PX }}><span className="absolute -left-0.5 -top-[3px] h-[7px] w-[7px] rounded-full bg-bad" /></div>
           )}
           {plan.blocks.map((b, i) => { const ln = lanes[i]; const h = Math.max(22, ((b.end - b.start) / 60) * PX - 3), compact = h < 44; return (
-            <div key={i} role="button" tabIndex={0} onPointerDown={movable(b) ? (e) => { dragRef.current = i; blockDrag.onPointerDown(e); } : undefined} onClick={() => { if (blockDrag.wasDrag()) return; setSel({ b, date }); }} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSel({ b, date }); } }} title={`${toHHMM(b.start)}–${toHHMM(b.end)} · ${b.label}`}
-              className={cx("absolute cursor-pointer overflow-hidden rounded-md px-2 text-xs shadow-sm hover:brightness-95", dragI?.i !== i && "transition", compact ? "flex items-center gap-1.5 py-0" : "py-1.5", BLOCK_STYLE[b.kind], ln.lanes > 1 && "ring-1 ring-bg", dragI?.i === i && "z-30 scale-[1.02] shadow-lg ring-2 ring-accent")}
-              style={{ top: ((b.start - startH * 60) / 60) * PX + 1.5 + (dragI?.i === i ? (snap(dragI.dy) / 60) * PX : 0), height: h, borderLeftColor: b.color,
+            <div key={i} role="button" tabIndex={0} data-bk={bkey(b)} aria-pressed={multi.has(bkey(b))} onPointerDown={movable(b) && !selMode ? (e) => { if (e.ctrlKey || e.metaKey || e.shiftKey) return; dragRef.current = i; blockDrag.onPointerDown(e); } : undefined} onClick={(e) => { if (blockDrag.wasDrag()) return; if ((selMode || e.ctrlKey || e.metaKey || e.shiftKey) && movable(b)) { e.stopPropagation(); toggleKey(bkey(b)); return; } setMulti(new Set()); setSel({ b, date }); }} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSel({ b, date }); } }} title={`${toHHMM(b.start)}–${toHHMM(b.end)} · ${b.label}`}
+              className={cx("absolute cursor-pointer overflow-hidden rounded-md px-2 text-xs shadow-sm hover:brightness-95", !grouped(b, i) && "transition", compact ? "flex items-center gap-1.5 py-0" : "py-1.5", BLOCK_STYLE[b.kind], ln.lanes > 1 && "ring-1 ring-bg", grouped(b, i) && "z-30 scale-[1.02] shadow-lg ring-2 ring-accent", multi.has(bkey(b)) && "z-20 outline outline-2 outline-offset-1 outline-accent")}
+              style={{ top: ((b.start - startH * 60) / 60) * PX + 1.5 + (grouped(b, i) ? (snap(dragI!.dy) / 60) * PX : 0), height: h, borderLeftColor: b.color,
                 left: `calc(3.5rem + (100% - 4rem) * ${ln.lane} / ${ln.lanes})`, width: `calc((100% - 4rem) / ${ln.lanes} - 3px)` }}>
               <div className={cx("flex items-center gap-1.5", compact && "shrink-0")}>
-                <span className="font-mono text-[10px] tabular-nums text-muted">{dragI?.i === i ? <b className="text-accent">{toHHMM(b.start + snap(dragI.dy))}</b> : toHHMM(b.start)}{compact || b.noEnd ? "" : `–${toHHMM(b.end + (dragI?.i === i ? snap(dragI.dy) : 0))}`}</span>
+                <span className="font-mono text-[10px] tabular-nums text-muted">{grouped(b, i) ? <b className="text-accent">{toHHMM(b.start + snap(dragI!.dy))}</b> : toHHMM(b.start)}{compact || b.noEnd ? "" : `–${toHHMM(b.end + (grouped(b, i) ? snap(dragI!.dy) : 0))}`}</span>
                 {b.kind === "task" && <Zap size={10} className="text-accent" />}{b.kind === "chore" && <Home size={10} className="text-warn" />}{b.kind === "meal" && <Coffee size={10} />}{b.kind === "event" && <CalendarClock size={10} className="text-pink" />}
                 {b.kind === "event" && b.refId && <button className="ml-auto rounded px-1 text-[10px] text-muted hover:bg-sunken hover:text-bad" aria-label={`Supprimer ${b.label}`} title="Supprimer (avec confirmation)"
                   onClick={(e) => { e.stopPropagation(); const evt = state.events.find((x) => x.id === b.refId); const td = (state.todos ?? []).find((x) => x.id === b.refId);
@@ -2116,6 +2178,7 @@ const Planning: React.FC = () => {
               <p className={cx("font-medium text-fg", compact ? "min-w-0 flex-1 truncate text-[12px]" : ln.lanes > 1 ? "break-words leading-tight [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:4] overflow-hidden" : "truncate")}>{b.label}</p>
             </div>
           ); })}
+          {box && <div className="pointer-events-none absolute z-40 border border-accent bg-accent/15" style={{ left: box.x, top: box.y, width: box.w, height: box.h }} />}
         </div>
         </>}
         <p className="mt-2 text-xs text-muted">Les blocs <Zap size={10} className="inline text-accent" /> sont générés automatiquement : reste à faire ÷ jours avant l'échéance, ajusté par la priorité, placé dans les créneaux libres (blocs de {state.settings.maxBlock} min max, 10 min de pause entre deux).</p>
