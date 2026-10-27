@@ -1660,8 +1660,9 @@ const ChoreMove: React.FC<{ chore: Chore; date: string; start: number; onDone: (
     else if (chore.recurrence === "once") dispatch({ type: "chore/update", id: chore.id, patch: { date: d, day: weekday(parseISO(d)), pinned: pin } });
     else {
       // Occurrence d'une corvée récurrente : reportée ce jour-là, et recréée une seule fois au nouveau jour.
-      dispatch({ type: "chore/skip", id: chore.id, date });
-      dispatch({ type: "chore/add", chore: { id: uid(), name: chore.name, recurrence: "once", date: d, day: weekday(parseISO(d)), minutes: chore.minutes, assignees: [chore.assignees[0] ?? "Moi"], done: [], pinned: pin, ...(chore.steps?.length ? { steps: chore.steps, stepsDone: {} } : {}), ...(chore.shared || chore.id.startsWith("flat:") ? { shared: true, ...(chore.time ? { time: chore.time } : {}) } : {}) } });
+      const nid = uid();
+      dispatch({ type: "chore/skip", id: chore.id, date, to: { id: nid, date: d } });
+      dispatch({ type: "chore/add", chore: { id: nid, name: chore.name, recurrence: "once", date: d, day: weekday(parseISO(d)), minutes: chore.minutes, assignees: [chore.assignees[0] ?? "Moi"], done: [], pinned: pin, ...(chore.steps?.length ? { steps: chore.steps, stepsDone: {} } : {}), ...(chore.shared || chore.id.startsWith("flat:") ? { shared: true, ...(chore.time ? { time: chore.time } : {}) } : {}) } });
     }
     toast(auto ? `${chore.name} : déplacée au ${fmtDate(d)} (heure automatique)` : `${chore.name} : déplacée au ${fmtDate(d)} à ${t}`); onDone();
   };
@@ -3547,8 +3548,8 @@ const ChoresBoard: React.FC<{ flat?: boolean }> = ({ flat = false }) => {
                     {days.map((d) => { const on = choreScheduledOn(c, d); const k = iso(d); const done = c.done.includes(k); const skipped = (c.skipped ?? []).includes(k); const who = choreAssignee(c, d); const by = c.doneBy?.[k] ?? who; return (
                       <td key={k} className="relative text-center" data-chore-row={c.id} data-date={k}>{on ? (<>
                         {skipped ? (
-                          <button onClick={() => { dispatch({ type: "chore/skip", id: c.id, date: k }); toast("Report annulé", "info"); }} title="Reportée · cliquer pour annuler le report"
-                            className="flex h-10 w-full flex-col items-center justify-center rounded-md border border-dashed border-line text-[10px] text-muted">reportée</button>
+                          <button onClick={() => { dispatch({ type: "chore/skip", id: c.id, date: k }); toast("Report annulé", "info"); }} title={c.movedTo?.[k] ? `Déplacée au ${fmtDate(c.movedTo[k].date)} · cliquer pour annuler` : "Reportée · cliquer pour annuler le report"}
+                            className="flex h-10 w-full flex-col items-center justify-center rounded-md border border-dashed border-line text-[10px] text-muted">{c.movedTo?.[k] ? <>→ {fmtDate(c.movedTo[k].date)}</> : "reportée"}</button>
                         ) : <ChoreDragCell chore={c} date={k}>{(dg) => <><button onPointerDown={!done ? (e) => dg.onPointerDown(e) : undefined} style={{ WebkitTouchCallout: "none", userSelect: "none" } as React.CSSProperties} onContextMenu={(e) => e.preventDefault()} onClick={() => { if (dg.wasDrag()) return; dispatch({ type: "chore/toggle", id: c.id, date: k, who }); if (!done) toast(solo ? `${c.name} : faite` : `${c.name} : fait par ${who}`); }} title={done ? `Faite par ${by} · cliquer pour annuler` : `À faire par ${who} · cliquer quand c'est fait`}
                           className={cx(dg.dragging && "dragging-src", "flex h-10 w-full flex-col items-center justify-center rounded-md border text-[11px] transition", done && choreDoneLate(c, k) ? "border-warn/50 bg-warn/12 text-warn" : done ? "border-ok/40 bg-ok/12 text-ok" : k < today || (k === today && (choreSlotEnd(c, k) ?? 1e9) < nowMinutes()) ? "border-bad/30 bg-bad/6 text-bad" : who === "Moi" ? "border-accent/40 bg-accent/8 text-fg" : "border-line bg-sunken text-fg hover:border-accent/50")}>
                           {done ? <><Check size={14} />{choreDoneLate(c, k) ? <span className="text-[9px]">en retard</span> : !solo && by !== who && <span className="text-[9px]">{by}</span>}</> : <span className="font-medium">{solo ? "à faire" : who}</span>}

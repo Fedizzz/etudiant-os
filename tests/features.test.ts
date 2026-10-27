@@ -322,3 +322,15 @@ test("compte à rebours : temps restant du cours ou de l'événement en cours, p
   l = C.liveStatus(blocks, at(16)); assert.deepEqual([l.current.length, l.next], [0, null]);
   assert.deepEqual([C.fmtCountdown(3725), C.fmtCountdown(125), C.fmtCountdown(9), C.fmtCountdown(-4)], ["1:02:05", "2:05", "0:09", "0:00"]);
 });
+
+test("corvée déplacée : l'origine mémorise la destination, l'annulation retire la copie", () => {
+  const c: C.Chore = { id: "c1", name: "Draps", recurrence: "weekly", day: 0, minutes: 15, assignees: ["Moi"], done: [] };
+  let s: C.AppState = { ...base(), chores: [c] };
+  s = C.reducer(s, { type: "chore/skip", id: "c1", date: "2026-10-26", to: { id: "c2", date: "2026-10-27" } });
+  s = C.reducer(s, { type: "chore/add", chore: { ...c, id: "c2", recurrence: "once", date: "2026-10-27", day: 1 } });
+  assert.equal(s.chores.find((x) => x.id === "c1")?.movedTo?.["2026-10-26"]?.date, "2026-10-27");
+  s = C.reducer(s, { type: "chore/skip", id: "c1", date: "2026-10-26" });
+  assert.equal(s.chores.length, 1);
+  assert.equal(s.chores[0].movedTo, undefined);
+  assert.deepEqual(s.chores[0].skipped, []);
+});

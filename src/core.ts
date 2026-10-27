@@ -74,7 +74,7 @@ export const debtRemaining = (d: Debt) => Math.max(0, Math.round((d.amount - d.r
 export interface PocketCfg { amount: number; period: "week" | "month"; cats: string[] }
 /** done : dates faites · doneBy : qui l'a faite ce jour-là · skipped : dates reportées. */
 /** recurrence « once » : une seule fois, le jour `date`. */
-export interface Chore { id: ID; name: string; /** Corvée de la colocation (base de données) fusionnée dans l'affichage ; jamais enregistrée dans l'état personnel ni comptée dans vos statistiques. */ shared?: boolean; recurrence: Recurrence; date?: string; day: number; minutes: number; assignees: string[]; done: string[]; doneBy?: Record<string, string>; skipped?: string[]; /** Heure fixe « HH:MM » (sinon placée automatiquement dans un créneau libre). */ time?: string; /** Checklist, et étapes cochées par date. */ steps?: Step[]; stepsDone?: Record<string, ID[]>; /** Jour où chaque occurrence a été cochée. */ doneOn?: Record<string, string>; /** Heure fixée par le planning pour une date (le bloc ne bouge plus ensuite). */ pinned?: Record<string, string>; /** Heure où chaque occurrence a été cochée. */ doneTime?: Record<string, string> }
+export interface Chore { id: ID; name: string; /** Corvée de la colocation (base de données) fusionnée dans l'affichage ; jamais enregistrée dans l'état personnel ni comptée dans vos statistiques. */ shared?: boolean; recurrence: Recurrence; date?: string; day: number; minutes: number; assignees: string[]; done: string[]; doneBy?: Record<string, string>; skipped?: string[]; /** Heure fixe « HH:MM » (sinon placée automatiquement dans un créneau libre). */ time?: string; /** Checklist, et étapes cochées par date. */ steps?: Step[]; stepsDone?: Record<string, ID[]>; /** Jour où chaque occurrence a été cochée. */ doneOn?: Record<string, string>; /** Heure fixée par le planning pour une date (le bloc ne bouge plus ensuite). */ pinned?: Record<string, string>; /** Heure où chaque occurrence a été cochée. */ doneTime?: Record<string, string>; /** Occurrence déplacée : date d'origine → copie créée et nouvelle date. */ movedTo?: Record<string, { id: ID; date: string }> }
 /** Calendrier externe abonné (lien .ics Celcat, iCloud, Google…). */
 export interface CalFeed { id: ID; name: string; url: string; color: string; lastSync: string | null; lastError: string | null; count?: number }
 /** Occurrence importée d'un calendrier abonné (remplacée à chaque actualisation). */
@@ -283,7 +283,7 @@ export type Action =
   | { type: "class/addMany"; sessions: ClassSession[]; courses: Course[] }
   | { type: "expense/update"; id: ID; patch: Partial<Expense> }
   | { type: "recurring/save"; item: RecurringExpense } | { type: "recurring/remove"; id: ID } | { type: "recurring/sync"; today: string }
-  | { type: "chore/skip"; id: ID; date: string }
+  | { type: "chore/skip"; id: ID; date: string; to?: { id: ID; date: string } }
   | { type: "chore/update"; id: ID; patch: Partial<Chore> } | { type: "chore/pin"; id: ID; date: string; time: string } | { type: "chore/step"; id: ID; date: string; stepId: ID }
   | { type: "task/step"; id: ID; stepId: ID }
   | { type: "task/postpone"; id: ID; to: string } | { type: "todo/postpone"; id: ID; to: string }
@@ -449,13 +449,21 @@ export function reducer(s: AppState, a: Action): AppState {
     case "recurring/save": return { ...s, budget: { ...s.budget, recurring: [...s.budget.recurring.filter((r) => r.id !== a.item.id), a.item] } };
     case "recurring/remove": return { ...s, budget: { ...s.budget, recurring: s.budget.recurring.filter((r) => r.id !== a.id) } };
     case "recurring/sync": return applyRecurring(s, a.today);
-    case "chore/skip": return {
-      ...s, chores: s.chores.map((c) => {
-        if (c.id !== a.id) return c;
-        const sk = c.skipped ?? [];
-        return { ...c, skipped: sk.includes(a.date) ? sk.filter((x) => x !== a.date) : [...sk, a.date], done: c.done.filter((x) => x !== a.date) };
-      }),
-    };
+    case "chore/skip": {
+      const src = s.chores.find((c) => c.id === a.id);
+      const unskip = !!src && (src.skipped ?? []).includes(a.date);
+      // Annuler le report d'une occurrence déplacée supprime aussi la copie créée au nouveau jour.
+      const copy = unskip ? src?.movedTo?.[a.date]?.id : undefined;
+      return {
+        ...s, chores: s.chores.filter((c) => c.id !== copy).map((c) => {
+          if (c.id !== a.id) return c;
+          const sk = c.skipped ?? [];
+          const mv = Object.fromEntries(Object.entries(c.movedTo ?? {}).filter(([k]) => k !== a.date));
+          const movedTo = a.to && !unskip ? { ...mv, [a.date]: a.to } : mv;
+          return { ...c, skipped: unskip ? sk.filter((x) => x !== a.date) : [...sk, a.date], done: c.done.filter((x) => x !== a.date), movedTo: Object.keys(movedTo).length ? movedTo : undefined };
+        }),
+      };
+    }
     case "timer/start": return { ...s, timer: timerStart(s.timer, a.now) };
     case "timer/pause": return { ...s, timer: timerPause(s.timer, a.now) };
     case "timer/reset": return { ...s, timer: { ...newTimer(s.settings.pomodoro), cycles: s.timer.cycles, taskId: s.timer.taskId, phase: s.timer.phase, remaining: phaseSeconds(s.settings.pomodoro, s.timer.phase) } };
