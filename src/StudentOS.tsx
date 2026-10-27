@@ -2518,6 +2518,60 @@ function useAmbient(): [Ambient, (k: Ambient) => void] {
   return [kind, play];
 }
 
+/**
+ * Mini-minuteur « vidéo » : le minuteur est dessiné sur un canvas et diffusé dans une vidéo en Picture-in-Picture.
+ * Fonctionne là où la fenêtre flottante de document n'existe pas (Safari iPad/iPhone/Mac, Firefox) et reste visible
+ * quand l'application passe en arrière-plan. Lecture/pause du lecteur = démarrer/pauser le minuteur.
+ */
+async function openVideoPip(snap: () => { left: number; total: number; phase: string; title: string; running: boolean }, controls: { toggle: () => void; skip: () => void }, onClose: () => void): Promise<() => void> {
+  const cv = document.createElement("canvas"); cv.width = 480; cv.height = 270;
+  const g = cv.getContext("2d"); if (!g || !(cv as HTMLCanvasElement & { captureStream?: unknown }).captureStream) throw new Error("canvas stream");
+  const draw = () => {
+    const s = snap();
+    g.fillStyle = "#18162e"; g.fillRect(0, 0, 480, 270);
+    g.fillStyle = "#b8b6d4"; g.font = "600 24px system-ui, sans-serif"; g.textAlign = "center";
+    g.fillText(`${s.phase.toUpperCase()}${s.running ? "" : " · EN PAUSE"}`, 240, 52);
+    g.fillStyle = "#ffffff"; g.font = "800 112px system-ui, sans-serif";
+    g.fillText(`${pad(Math.floor(s.left / 60))}:${pad(s.left % 60)}`, 240, 156);
+    g.fillStyle = "#34315a"; g.fillRect(40, 182, 400, 10);
+    g.fillStyle = s.running ? "#f5d90a" : "#8886ad"; g.fillRect(40, 182, 400 * Math.min(1, Math.max(0, 1 - s.left / s.total)), 10);
+    g.fillStyle = "#b8b6d4"; g.font = "500 24px system-ui, sans-serif";
+    g.fillText(s.title.length > 30 ? s.title.slice(0, 29) + "…" : s.title, 240, 238);
+  };
+  draw();
+  const video = document.createElement("video");
+  video.muted = true; video.playsInline = true; video.setAttribute("playsinline", ""); video.setAttribute("aria-hidden", "true");
+  video.style.cssText = "position:fixed;right:0;bottom:0;width:2px;height:2px;opacity:.01;pointer-events:none";
+  video.srcObject = (cv as HTMLCanvasElement & { captureStream: (fps?: number) => MediaStream }).captureStream(10);
+  document.body.appendChild(video);
+  const id = window.setInterval(draw, 500);
+  let closed = false;
+  const cleanup = () => {
+    if (closed) return; closed = true; window.clearInterval(id);
+    try { if (document.pictureInPictureElement === video) void document.exitPictureInPicture(); } catch { /* déjà fermé */ }
+    try { video.pause(); video.srcObject = null; video.remove(); } catch { /* sans importance */ }
+    const ms = navigator.mediaSession; if (ms) for (const a of ["play", "pause", "nexttrack"] as const) { try { ms.setActionHandler(a, null); } catch { /* non pris en charge */ } }
+  };
+  try {
+    await video.play();
+    const v = video as HTMLVideoElement & { webkitSetPresentationMode?: (m: string) => void; webkitSupportsPresentationMode?: (m: string) => boolean };
+    if (video.requestPictureInPicture) await video.requestPictureInPicture();
+    else if (v.webkitSupportsPresentationMode?.("picture-in-picture")) v.webkitSetPresentationMode!("picture-in-picture");
+    else throw new Error("pip indisponible");
+  } catch (e) { cleanup(); throw e; }
+  const left = () => { if (!closed) { cleanup(); onClose(); } };
+  video.addEventListener("leavepictureinpicture", left);
+  video.addEventListener("webkitpresentationmodechanged", () => { if ((video as HTMLVideoElement & { webkitPresentationMode?: string }).webkitPresentationMode === "inline") left(); });
+  const ms = navigator.mediaSession;
+  if (ms) {
+    try { ms.metadata = new MediaMetadata({ title: "Minuteur Focus", artist: "Étudiant.OS" }); } catch { /* facultatif */ }
+    ms.setActionHandler("play", () => { controls.toggle(); void video.play().catch(() => {}); });
+    ms.setActionHandler("pause", () => { controls.toggle(); void video.play().catch(() => {}); });
+    try { ms.setActionHandler("nexttrack", controls.skip); } catch { /* facultatif */ }
+  }
+  return cleanup;
+}
+
 /** Minuteur compact : affiché dans une fenêtre flottante (Picture-in-Picture) ou, à défaut, en pastille dans l'application. */
 const MiniTimer: React.FC<{ win: Window | null; onClose: () => void }> = ({ win, onClose }) => {
   const { state, dispatch } = useStore();
@@ -4745,11 +4799,24 @@ export default function StudentOS({ state: ownState, dispatch: ownDispatch, env,
     toast(text, "info", { label: "Annuler", run: () => { dispatch({ type: "replace", state: prev }); toast("Action annulée", "info"); } });
   }, [toast, dispatch]);
   // Mini-minuteur : fenêtre flottante Picture-in-Picture quand le navigateur le permet (Chrome/Edge), sinon pastille dans l'application.
-  const [mini, setMini] = useState<{ win: Window | null } | null>(null);
+  const [mini, setMini] = useState<{ win: Window | null; stop?: () => void } | null>(null);
+  const closeMini = useCallback(() => { setMini((m) => { try { m?.win?.close(); } catch { /* déjà fermée */ } m?.stop?.(); return null; }); }, []);
   const toggleMini = useCallback(() => {
-    if (mini) { try { mini.win?.close(); } catch { /* déjà fermée */ } setMini(null); return; }
+    if (mini) { closeMini(); return; }
     const dpip = (window as unknown as { documentPictureInPicture?: { requestWindow: (o: { width: number; height: number }) => Promise<Window> } }).documentPictureInPicture;
-    if (!dpip) { setMini({ win: null }); toast("Mini minuteur ouvert dans l'application (la fenêtre flottante n'est pas disponible sur ce navigateur).", "info"); return; }
+    const inApp = (msg: string) => { setMini({ win: null }); toast(msg, "info"); };
+    // Repli : minuteur dessiné dans une vidéo Picture-in-Picture (Safari iPad/iPhone/Mac, Firefox), visible aussi quand l'appli passe en arrière-plan.
+    const viaVideo = () => {
+      const snap = () => { const s = stateRef.current, t = s.timer; return { left: timerLeft(t, Date.now()), total: phaseSeconds(s.settings.pomodoro, t.phase), phase: PHASE_LABEL[t.phase], title: s.tasks.find((x) => x.id === t.taskId)?.title ?? "Focus libre", running: t.running }; };
+      const controls = { toggle: () => dispatch({ type: stateRef.current.timer.running ? "timer/pause" : "timer/start", now: Date.now() }),
+        skip: () => { const s = stateRef.current, t = s.timer, total = phaseSeconds(s.settings.pomodoro, t.phase), done = total - timerLeft(t, Date.now());
+          if (t.phase === "work" && done < 60) dispatch({ type: "timer/phase", phase: (t.cycles + 1) % s.settings.pomodoro.longEvery === 0 ? "long" : "short" });
+          else dispatch({ type: "timer/finish", now: Date.now(), date: todayISO(), secondsDone: t.phase === "work" ? done : undefined }); } };
+      openVideoPip(snap, controls, () => setMini(null))
+        .then((stop) => setMini({ win: null, stop }))
+        .catch(() => inApp("Mini minuteur ouvert dans l'application (la fenêtre flottante n'est pas disponible sur ce navigateur)."));
+    };
+    if (!dpip) { viaVideo(); return; }
     dpip.requestWindow({ width: 260, height: 190 }).then((w) => {
       // La fenêtre flottante reprend les styles et le thème de l'application.
       document.querySelectorAll('style, link[rel="stylesheet"]').forEach((n) => w.document.head.appendChild(n.cloneNode(true)));
@@ -4757,8 +4824,8 @@ export default function StudentOS({ state: ownState, dispatch: ownDispatch, env,
       w.document.body.className = document.body.className; w.document.body.style.margin = "0"; w.document.body.style.height = "100vh";
       w.addEventListener("pagehide", () => setMini(null));
       setMini({ win: w });
-    }).catch(() => { setMini({ win: null }); });
-  }, [mini, toast]);
+    }).catch(viaVideo);
+  }, [mini, toast, closeMini, dispatch]);
   const ctx = useMemo(() => ({ state, dispatch, toast, undoable, go: setView, openTask: setEditTask, now, env, mini: !!mini, toggleMini }), [state, dispatch, toast, undoable, setView, now, env, mini, toggleMini]);
   const isDark = effTheme === "dark" || (effTheme === "system" && typeof matchMedia !== "undefined" && matchMedia("(prefers-color-scheme: dark)").matches);
   // Basculer à la main choisit explicitement clair ou sombre (le mode automatique se réactive dans les Réglages).
@@ -4825,7 +4892,7 @@ export default function StudentOS({ state: ownState, dispatch: ownDispatch, env,
   return (
     <StoreCtx.Provider value={ctx}><FlatCtx.Provider value={flatData}>
       <style>{accentCss(state.settings.accent)}</style>
-      {mini && <MiniTimer win={mini.win} onClose={toggleMini} />}
+      {mini && (mini.win || !mini.stop) && <MiniTimer win={mini.win} onClose={closeMini} />}
       <div className="flex min-h-full bg-bg text-fg">
         <aside className="sticky top-0 hidden h-screen w-[76px] shrink-0 flex-col overflow-y-auto p-3 md:flex lg:w-60 2xl:w-64" style={{ paddingTop: "calc(var(--safe-top) + 12px)" }}>
           <div className="mb-6 flex items-center gap-2.5 px-1 pt-2 lg:px-2"><div className="sticker grid h-9 w-9 place-items-center rounded-xl border-2 border-fg bg-pink text-white shadow-[3px_3px_0_0_rgb(var(--ink))]"><ListChecks size={17} /></div><span className="hidden font-display text-[19px] font-extrabold leading-none tracking-tight lg:inline">Étudiant<span className="text-accent">.</span>OS</span></div>

@@ -95,8 +95,8 @@ try {
 
   console.log("Focus : mini minuteur détaché");
   await go("Focus");
-  await p.evaluate(() => { Object.defineProperty(window, "documentPictureInPicture", { value: undefined, configurable: true, writable: true }); });
-  await p.click("[data-testid=mini-detach]"); await sleep(400);
+  await p.evaluate(() => { Object.defineProperty(window, "documentPictureInPicture", { value: undefined, configurable: true, writable: true }); HTMLVideoElement.prototype.requestPictureInPicture = async () => { throw new Error("indisponible"); }; });
+  await p.click("[data-testid=mini-detach]"); await sleep(700);
   ok(await p.locator("[data-testid=mini-timer]").count() === 1, "« Détacher en mini » ouvre le mini minuteur (repli dans l'application)");
   await go("Planning");
   ok(await p.locator("[data-testid=mini-timer]").count() === 1, "le mini minuteur reste visible quand on change de page");
@@ -115,6 +115,14 @@ try {
   await popup.click("[data-testid=mini-toggle]"); await sleep(300);
   await popup.close(); await sleep(400);
   ok(await p.locator("[data-testid=mini-timer]").count() === 0, "fermer la fenêtre flottante referme le mini minuteur");
+  // repli vidéo Picture-in-Picture (Safari, Firefox, iPad) : le minuteur est dessiné dans une vidéo
+  await go("Focus");
+  await p.evaluate(() => { Object.defineProperty(window, "documentPictureInPicture", { value: undefined, configurable: true, writable: true }); window.__pipCalls = 0; HTMLVideoElement.prototype.requestPictureInPicture = async function () { window.__pipCalls++; return {}; }; });
+  await p.click("[data-testid=mini-detach]"); await sleep(700);
+  ok(await p.evaluate(() => window.__pipCalls) === 1 && await p.locator("video[aria-hidden]").count() === 1, "sans fenêtre flottante, le minuteur passe en vidéo Picture-in-Picture (visible en arrière-plan)");
+  ok(await p.locator("[data-testid=mini-timer]").count() === 0, "la pastille de l'application n'est pas dupliquée");
+  await p.evaluate(() => document.querySelector("video[aria-hidden]").dispatchEvent(new Event("leavepictureinpicture"))); await sleep(300);
+  ok(await p.locator("video[aria-hidden]").count() === 0, "fermer la vidéo flottante nettoie le mini minuteur");
   console.log("Planning : création par clic, détail, suppression confirmée, notes glissées");
   await go("Planning");
   const grid = p.locator("[data-testid=day-grid]"); await p.evaluate(() => window.scrollTo(0, 300)); await sleep(200); const box = await grid.boundingBox();
