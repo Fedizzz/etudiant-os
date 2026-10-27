@@ -100,6 +100,10 @@ try {
   ok(await p.locator("[data-testid=mini-timer]").count() === 1, "« Détacher en mini » ouvre le mini minuteur (repli dans l'application)");
   await go("Planning");
   ok(await p.locator("[data-testid=mini-timer]").count() === 1, "le mini minuteur reste visible quand on change de page");
+  { const d0 = await p.locator("[data-testid=mini-drag]").boundingBox();
+    await p.mouse.move(d0.x + 10, d0.y + 6); await p.mouse.down(); await p.mouse.move(d0.x - 150, d0.y - 120, { steps: 6 }); await p.mouse.up(); await sleep(200);
+    const d1 = await p.locator("[data-testid=mini-drag]").boundingBox();
+    ok(Math.abs(d1.x - (d0.x - 160)) < 6 && Math.abs(d1.y - (d0.y - 126)) < 6, "la pastille du mini minuteur se déplace en la glissant"); }
   { const t0 = await p.locator("[data-testid=mini-time]").innerText(); await p.click("[data-testid=mini-toggle]"); await sleep(2300);
     const t1 = await p.locator("[data-testid=mini-time]").innerText(); ok(t0 !== t1 && (await stateOf()).timer.running, "Démarrer depuis le mini lance le minuteur global"); 
     await p.click("[data-testid=mini-toggle]"); await sleep(300); ok(!(await stateOf()).timer.running, "Pause depuis le mini met le minuteur en pause"); }
