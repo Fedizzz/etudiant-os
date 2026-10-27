@@ -93,6 +93,28 @@ try {
   // notes
   await p.fill("textarea[aria-label=Notes]", "- Appeler le prof de maths\n- Acheter des cahiers"); await sleep(900);
 
+  console.log("Focus : mini minuteur détaché");
+  await go("Focus");
+  await p.evaluate(() => { Object.defineProperty(window, "documentPictureInPicture", { value: undefined, configurable: true, writable: true }); });
+  await p.click("[data-testid=mini-detach]"); await sleep(400);
+  ok(await p.locator("[data-testid=mini-timer]").count() === 1, "« Détacher en mini » ouvre le mini minuteur (repli dans l'application)");
+  await go("Planning");
+  ok(await p.locator("[data-testid=mini-timer]").count() === 1, "le mini minuteur reste visible quand on change de page");
+  { const t0 = await p.locator("[data-testid=mini-time]").innerText(); await p.click("[data-testid=mini-toggle]"); await sleep(2300);
+    const t1 = await p.locator("[data-testid=mini-time]").innerText(); ok(t0 !== t1 && (await stateOf()).timer.running, "Démarrer depuis le mini lance le minuteur global"); 
+    await p.click("[data-testid=mini-toggle]"); await sleep(300); ok(!(await stateOf()).timer.running, "Pause depuis le mini met le minuteur en pause"); }
+  await p.click("[aria-label='Fermer le mini minuteur']"); await sleep(300);
+  ok(await p.locator("[data-testid=mini-timer]").count() === 0, "le mini minuteur se ferme");
+  // fenêtre flottante (Picture-in-Picture) simulée par une fenêtre popup
+  await p.evaluate(() => { window.documentPictureInPicture = { requestWindow: async () => window.open("about:blank", "pip", "popup,width=260,height=190") }; });
+  await go("Focus");
+  const [popup] = await Promise.all([p.context().waitForEvent("page"), p.click("[data-testid=mini-detach]")]); await sleep(600);
+  ok(await popup.locator("[data-testid=mini-timer]").count() === 1 && /^\d\d:\d\d$/.test(await popup.locator("[data-testid=mini-time]").innerText()), "avec Picture-in-Picture, le minuteur s'affiche dans la fenêtre flottante");
+  await popup.click("[data-testid=mini-toggle]"); await sleep(400);
+  ok((await stateOf()).timer.running, "les boutons de la fenêtre flottante pilotent le minuteur");
+  await popup.click("[data-testid=mini-toggle]"); await sleep(300);
+  await popup.close(); await sleep(400);
+  ok(await p.locator("[data-testid=mini-timer]").count() === 0, "fermer la fenêtre flottante referme le mini minuteur");
   console.log("Planning : création par clic, détail, suppression confirmée, notes glissées");
   await go("Planning");
   const grid = p.locator("[data-testid=day-grid]"); await p.evaluate(() => window.scrollTo(0, 300)); await sleep(200); const box = await grid.boundingBox();

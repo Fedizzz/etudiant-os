@@ -309,6 +309,8 @@ interface Ctx {
   undoable: (a: Action, text: string) => void;
   go: (v: ViewKey) => void; openTask: (id: ID | null) => void; now: number;
   env: AppEnv;
+  /** Mini-minuteur détaché (fenêtre flottante) : ouvert ou non, et bascule (à appeler depuis un clic). */
+  mini: boolean; toggleMini: () => void;
 }
 const StoreCtx = createContext<Ctx | null>(null);
 export const useStore = () => { const c = useContext(StoreCtx); if (!c) throw new Error("StoreCtx manquant"); return c; };
@@ -2516,8 +2518,37 @@ function useAmbient(): [Ambient, (k: Ambient) => void] {
   return [kind, play];
 }
 
+/** Minuteur compact : affiché dans une fenêtre flottante (Picture-in-Picture) ou, à défaut, en pastille dans l'application. */
+const MiniTimer: React.FC<{ win: Window | null; onClose: () => void }> = ({ win, onClose }) => {
+  const { state, dispatch } = useStore();
+  const [now, setNow] = useState(() => Date.now());
+  // Horloge propre à la fenêtre flottante : elle continue même si l'onglet principal est en arrière-plan.
+  useEffect(() => { const w = win ?? window; const id = w.setInterval(() => setNow(Date.now()), 500); return () => w.clearInterval(id); }, [win]);
+  const t = state.timer, cfg = state.settings.pomodoro, left = timerLeft(t, now), total = phaseSeconds(cfg, t.phase);
+  const task = state.tasks.find((x) => x.id === t.taskId);
+  const toggle = () => dispatch({ type: t.running ? "timer/pause" : "timer/start", now: Date.now() });
+  const skip = () => {
+    const done = total - left;
+    if (t.phase === "work" && done < 60) dispatch({ type: "timer/phase", phase: (t.cycles + 1) % cfg.longEvery === 0 ? "long" : "short" });
+    else dispatch({ type: "timer/finish", now: Date.now(), date: todayISO(), secondsDone: t.phase === "work" ? done : undefined });
+  };
+  const pct = Math.min(100, Math.max(0, (1 - left / total) * 100));
+  const face = (
+    <div className={cx("flex flex-col gap-2 bg-panel p-3 text-fg", win ? "h-full justify-center" : "w-56 rounded-2xl border-2 border-fg shadow-[3px_3px_0_0_rgb(var(--ink))]")} data-testid="mini-timer" role="timer" aria-label="Mini minuteur">
+      <div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-muted"><span>{PHASE_LABEL[t.phase]}</span><button aria-label="Fermer le mini minuteur" className="rounded px-1 hover:text-bad" onClick={onClose}>✕</button></div>
+      <p className="text-center font-display text-5xl font-extrabold tabular-nums leading-none tracking-tight" data-testid="mini-time">{pad(Math.floor(left / 60))}:{pad(left % 60)}</p>
+      <div className="h-1.5 overflow-hidden rounded-full bg-sunken"><div className={cx("h-full", t.phase === "work" ? "bg-accent" : "bg-ok")} style={{ width: `${pct}%` }} /></div>
+      <p className="truncate text-center text-[11px] text-muted">{task?.title ?? "Focus libre"}</p>
+      <div className="flex justify-center gap-2">
+        <Btn variant="primary" size="sm" onClick={toggle} data-testid="mini-toggle">{t.running ? <><Pause size={14} />Pause</> : <><Play size={14} />Démarrer</>}</Btn>
+        <Btn variant="ghost" size="sm" onClick={skip} aria-label="Phase suivante"><SkipForward size={14} /></Btn>
+      </div>
+    </div>);
+  return win ? createPortal(face, win.document.body) : <div className="fixed bottom-20 right-3 z-[70] md:bottom-4">{face}</div>;
+};
+
 const Focus: React.FC = () => {
-  const { state, dispatch, toast, now } = useStore();
+  const { state, dispatch, toast, now, mini, toggleMini } = useStore();
   const cfg = state.settings.pomodoro;
   const t = state.timer;
   const phase = t.phase, running = t.running, cycles = t.cycles;
@@ -2599,7 +2630,10 @@ const Focus: React.FC = () => {
             <Btn variant="primary" data-pomo-toggle className="h-11 w-32 text-sm" onClick={toggle}>{running ? <><Pause size={16} />Pause</> : <><Play size={16} />Démarrer</>}</Btn>
             <Btn variant="ghost" onClick={skip} aria-label="Passer à la phase suivante"><SkipForward size={16} /></Btn>
           </div>
-          <Btn onClick={() => setZen(true)}><Maximize size={15} />Mode focus plein écran</Btn>
+          <div className="flex flex-wrap justify-center gap-2">
+            <Btn onClick={() => setZen(true)}><Maximize size={15} />Mode focus plein écran</Btn>
+            <Btn onClick={toggleMini} aria-pressed={mini} data-testid="mini-detach" title="Garde le minuteur dans une petite fenêtre toujours visible, par-dessus vos autres applications">{mini ? "✕ Fermer le mini minuteur" : "⧉ Détacher en mini"}</Btn>
+          </div>
           <p className="text-xs text-muted"><Kbd>Espace</Kbd> démarrer / pause</p>
           <Field label="Tâche en cours" htmlFor="pomo-task" className="w-full max-w-sm">
             <Select id="pomo-task" value={t.taskId ?? ""} onChange={(e) => dispatch({ type: "timer/task", taskId: e.target.value || null })}>
@@ -4710,7 +4744,22 @@ export default function StudentOS({ state: ownState, dispatch: ownDispatch, env,
     dispatch(a);
     toast(text, "info", { label: "Annuler", run: () => { dispatch({ type: "replace", state: prev }); toast("Action annulée", "info"); } });
   }, [toast, dispatch]);
-  const ctx = useMemo(() => ({ state, dispatch, toast, undoable, go: setView, openTask: setEditTask, now, env }), [state, dispatch, toast, undoable, setView, now, env]);
+  // Mini-minuteur : fenêtre flottante Picture-in-Picture quand le navigateur le permet (Chrome/Edge), sinon pastille dans l'application.
+  const [mini, setMini] = useState<{ win: Window | null } | null>(null);
+  const toggleMini = useCallback(() => {
+    if (mini) { try { mini.win?.close(); } catch { /* déjà fermée */ } setMini(null); return; }
+    const dpip = (window as unknown as { documentPictureInPicture?: { requestWindow: (o: { width: number; height: number }) => Promise<Window> } }).documentPictureInPicture;
+    if (!dpip) { setMini({ win: null }); toast("Mini minuteur ouvert dans l'application (la fenêtre flottante n'est pas disponible sur ce navigateur).", "info"); return; }
+    dpip.requestWindow({ width: 260, height: 190 }).then((w) => {
+      // La fenêtre flottante reprend les styles et le thème de l'application.
+      document.querySelectorAll('style, link[rel="stylesheet"]').forEach((n) => w.document.head.appendChild(n.cloneNode(true)));
+      for (const a of Array.from(document.documentElement.attributes)) w.document.documentElement.setAttribute(a.name, a.value);
+      w.document.body.className = document.body.className; w.document.body.style.margin = "0"; w.document.body.style.height = "100vh";
+      w.addEventListener("pagehide", () => setMini(null));
+      setMini({ win: w });
+    }).catch(() => { setMini({ win: null }); });
+  }, [mini, toast]);
+  const ctx = useMemo(() => ({ state, dispatch, toast, undoable, go: setView, openTask: setEditTask, now, env, mini: !!mini, toggleMini }), [state, dispatch, toast, undoable, setView, now, env, mini, toggleMini]);
   const isDark = effTheme === "dark" || (effTheme === "system" && typeof matchMedia !== "undefined" && matchMedia("(prefers-color-scheme: dark)").matches);
   // Basculer à la main choisit explicitement clair ou sombre (le mode automatique se réactive dans les Réglages).
   const toggleTheme = () => { dispatch({ type: "settings", patch: { theme: isDark ? "light" : "dark" } }); if (state.settings.theme === "auto") toast("Thème fixé manuellement : réactivez « Automatique » dans les Réglages.", "info"); };
@@ -4776,6 +4825,7 @@ export default function StudentOS({ state: ownState, dispatch: ownDispatch, env,
   return (
     <StoreCtx.Provider value={ctx}><FlatCtx.Provider value={flatData}>
       <style>{accentCss(state.settings.accent)}</style>
+      {mini && <MiniTimer win={mini.win} onClose={toggleMini} />}
       <div className="flex min-h-full bg-bg text-fg">
         <aside className="sticky top-0 hidden h-screen w-[76px] shrink-0 flex-col overflow-y-auto p-3 md:flex lg:w-60 2xl:w-64" style={{ paddingTop: "calc(var(--safe-top) + 12px)" }}>
           <div className="mb-6 flex items-center gap-2.5 px-1 pt-2 lg:px-2"><div className="sticker grid h-9 w-9 place-items-center rounded-xl border-2 border-fg bg-pink text-white shadow-[3px_3px_0_0_rgb(var(--ink))]"><ListChecks size={17} /></div><span className="hidden font-display text-[19px] font-extrabold leading-none tracking-tight lg:inline">Étudiant<span className="text-accent">.</span>OS</span></div>
