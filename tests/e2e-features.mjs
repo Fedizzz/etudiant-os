@@ -70,11 +70,14 @@ try {
   const sessions = await p.locator("[data-testid=revision-plan] li").count();
   ok(sessions >= 3, `le plan de révision est généré (${sessions} séances)`);
   await p.fill("[data-testid=revision-plan] li:first-child input[placeholder^=Thème]", "Algèbre");
-  await p.fill("[data-testid=revision-plan] li:first-child input[aria-label^='Début']", "16:00"); await p.fill("[data-testid=revision-plan] li:first-child input[aria-label^='Fin']", "17:30");
+  await p.selectOption("[data-testid=revision-plan] li:first-child select[aria-label^='Moment']", "custom");
+  await p.fill("[data-testid=revision-plan] li:first-child input[aria-label^='Heure de la séance']", "16:00"); await p.selectOption("[data-testid=revision-plan] li:first-child select[aria-label^='Durée']", "90");
+  await p.selectOption("[data-testid=revision-plan] li:nth-child(2) select[aria-label^='Moment']", "soir");
   await p.click("[role=dialog] button[type=submit]"); await sleep(500);
   let st = await stateOf(); const ex = st.tasks.find((t) => t.title === "Partiel de maths");
   ok(ex && ex.dueTime === "12:00" && ex.revision.length === sessions && ex.estimate >= 200, "examen enregistré avec heure et plan");
-  ok(ex.revision.some((r) => r.start === "16:00" && r.minutes === 90), "début et fin choisis pour une séance (16:00–17:30)");
+  ok(ex.revision.some((r) => r.start === "16:00" && r.minutes === 90), "heure précise et durée simples pour une séance (16:00, 1 h 30)");
+  ok(ex.revision.some((r) => r.start === "18:00"), "le moment « Soir » place une séance à 18:00");
   ok(ex.revision.reduce((n, r) => n + r.minutes, 0) >= 195 && ex.revision.some((r) => r.topic === "Algèbre"), "séances: durée totale et thème conservés");
   ok((await p.locator("[data-testid=exams-list]").innerText()).includes("Partiel de maths") && (await p.locator("[data-testid=exams-list]").innerText()).includes("J-5"), "carte « Examens à venir » avec compte à rebours");
   // report
@@ -93,6 +96,13 @@ try {
   // notes
   await p.fill("textarea[aria-label=Notes]", "- Appeler le prof de maths\n- Acheter des cahiers"); await sleep(900);
 
+  console.log("Réglages : horaires des repas");
+  await go("Réglages");
+  await p.fill("#st-lunch-t", "14:00"); await p.fill("#st-lunch-f", "13:00"); await sleep(300);
+  ok((await stateOf()).settings.meals?.lunch?.from === "13:00", "l'heure du déjeuner se règle dans Réglages");
+  await p.fill("#st-dinner-t", "21:45"); await p.fill("#st-dinner-f", "21:00"); await sleep(300);
+  await go("Planning"); await sleep(300);
+  ok(await p.locator("[data-testid=day-grid] [role=button]:has-text('Déjeuner')").first().getAttribute("title").then((x) => /^13:00–14:00/.test(x ?? "")) , "le planning affiche le déjeuner à la nouvelle heure");
   console.log("Focus : mini minuteur détaché");
   await go("Focus");
   await p.evaluate(() => { Object.defineProperty(window, "documentPictureInPicture", { value: undefined, configurable: true, writable: true }); HTMLVideoElement.prototype.requestPictureInPicture = async () => { throw new Error("indisponible"); }; });

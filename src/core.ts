@@ -46,6 +46,7 @@ export interface Task {
 }
 export interface Postponement { from: string; to: string; at: string }
 /** start : heure de début choisie (« HH:MM ») = créneau fixe de `minutes` minutes ; absent = placé automatiquement dans les créneaux libres. */
+export const DEFAULT_MEALS = { lunch: { from: "12:15", to: "13:00" }, dinner: { from: "19:45", to: "20:30" } };
 export interface RevisionSession { id: ID; date: string; topic: string; minutes: number; start?: string; done?: boolean }
 export interface Recipe { id: ID; name: string; servings?: number; ingredients: string[]; steps: string[] }
 /** Étape d'une checklist. Pour une corvée, `done` n'est pas utilisé : l'avancement est noté par date dans `stepsDone`. */
@@ -118,6 +119,8 @@ export interface SettingsState {
   hiddenFeed?: string[];
   /** Thème automatique (theme = « auto ») : nuit de `from` à `to` (heure locale). */
   autoDark?: { from: string; to: string };
+  /** Horaires du déjeuner et du dîner (réservés dans le planning, aucune tâche automatique dessus). */
+  meals?: { lunch: { from: string; to: string }; dinner: { from: string; to: string } };
   /** Tutoriel de premier lancement : false = à montrer, true = terminé ou passé. */
   tutorialDone?: boolean;
 }
@@ -543,6 +546,9 @@ export function validateState(x: unknown): { ok: true; state: AppState; repaired
   settings.hiddenFeed = Array.isArray(settings.hiddenFeed) ? settings.hiddenFeed.filter((x) => isStr(x) && x.length < 600).slice(-500) : [];
   if (!["system", "light", "dark", "auto"].includes(settings.theme)) settings.theme = "system";
   { const ad = settings.autoDark as { from?: unknown; to?: unknown } | undefined; if (ad && isTime(ad.from) && isTime(ad.to)) settings.autoDark = { from: ad.from, to: ad.to }; else delete settings.autoDark; }
+  { const m = settings.meals as { lunch?: { from?: unknown; to?: unknown }; dinner?: { from?: unknown; to?: unknown } } | undefined;
+    const ok = (x?: { from?: unknown; to?: unknown }) => !!x && isTime(x.from) && isTime(x.to) && toMin(x.to as string) > toMin(x.from as string);
+    if (m && ok(m.lunch) && ok(m.dinner)) settings.meals = { lunch: { from: m.lunch!.from as string, to: m.lunch!.to as string }, dinner: { from: m.dinner!.from as string, to: m.dinner!.to as string } }; else delete settings.meals; }
   if (typeof settings.tutorialDone !== "boolean") delete settings.tutorialDone;
   settings.hiddenViews = Array.isArray(settings.hiddenViews) ? settings.hiddenViews : [];
   { const dl = settings.dashLayout as unknown as { order?: unknown; hidden?: unknown } | undefined; const ids = (v: unknown) => (Array.isArray(v) ? [...new Set(v.filter(isStr))].slice(0, 40) : []);
@@ -931,8 +937,8 @@ export function planDay(state: AppState, date: string, remaining?: Map<ID, numbe
 
   const fixed: Block[] = [
     ...dayClasses.map((c): Block => ({ start: toMin(c.start), end: toMin(c.end), kind: "class", label: `${courses.find((x) => x.id === c.courseId)?.name ?? "Cours"} · ${c.room}`, color: color(c.courseId), refId: c.id })),
-    { start: 12 * 60 + 15, end: 13 * 60, kind: "meal" as const, label: "Déjeuner" },
-    { start: 19 * 60 + 45, end: 20 * 60 + 30, kind: "meal" as const, label: "Dîner" },
+    { start: toMin((settings.meals ?? DEFAULT_MEALS).lunch.from), end: toMin((settings.meals ?? DEFAULT_MEALS).lunch.to), kind: "meal" as const, label: "Déjeuner" },
+    { start: toMin((settings.meals ?? DEFAULT_MEALS).dinner.from), end: toMin((settings.meals ?? DEFAULT_MEALS).dinner.to), kind: "meal" as const, label: "Dîner" },
     ...(settings.unavailable ?? []).filter((u) => u.day === wd && toMin(u.end) > toMin(u.start)).map((u): Block => ({ start: toMin(u.start), end: toMin(u.end), kind: "busy", label: u.label || "Indisponible", refId: u.id })),
     ...dayFeed.map((e): Block => ({ start: toMin(e.start), end: toMin(e.end), kind: "class", label: e.room ? `${e.title} · ${e.room}` : e.title, color: settings.feedColors?.[norm(e.title)] ?? feedColor.get(e.feedId), refId: e.uid, feedId: e.feedId })),
     ...dayEvents.map((e): Block => ({ start: toMin(e.start), end: toMin(e.end), kind: "event", label: e.title, color: e.color, refId: e.id })),
