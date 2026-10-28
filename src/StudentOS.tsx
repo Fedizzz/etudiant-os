@@ -1834,6 +1834,33 @@ const EventEditor: React.FC<{ ev?: PlanEvent; init?: { title?: string; date?: st
   </>);
 };
 
+/** Séances de révision d'une tâche, cochables d'un geste (grandes cases) depuis le planning ou la liste des examens. */
+const RevisionChecks: React.FC<{ task: Task; focusDate?: string; limit?: number }> = ({ task, focusDate, limit }) => {
+  const { dispatch, toast } = useStore();
+  const today = todayISO();
+  const [all, setAll] = useState(false);
+  const rev = [...(task.revision ?? [])].sort((a, b) => a.date.localeCompare(b.date) || (a.start ?? "").localeCompare(b.start ?? ""));
+  if (!rev.length) return null;
+  const shown = !limit || all ? rev : (() => { const base = focusDate ?? today, up = rev.filter((r) => r.date >= base || !r.done); return (up.length ? up : rev.slice(-limit)).slice(0, limit); })();
+  const flip = (r: RevisionSession) => { dispatch({ type: "task/update", id: task.id, patch: { revision: rev.map((x) => (x.id === r.id ? { ...x, done: !x.done || undefined } : x)) } }); toast(r.done ? "Séance remise à faire" : `Séance cochée : ${r.topic || fmtDate(r.date)}`, r.done ? "info" : "ok"); };
+  const nDone = rev.filter((r) => r.done).length;
+  return (
+    <div data-testid="revision-checks">
+      <p className="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted">{task.kind === "examen" ? "Séances de révision" : "Séances de travail"} · {nDone}/{rev.length} faites</p>
+      <ul className="flex flex-col gap-1">{shown.map((r) => (
+        <li key={r.id}>
+          <button type="button" role="checkbox" aria-checked={!!r.done} onClick={() => flip(r)} data-testid="revision-check"
+            className={cx("flex min-h-[44px] w-full items-center gap-3 rounded-xl border-2 px-3 py-1.5 text-left text-[13px] transition", r.done ? "border-ok/40 bg-ok/10 text-muted" : r.date === (focusDate ?? today) ? "border-accent/60 bg-accent/8" : "border-line bg-sunken hover:border-fg/50")}>
+            <span className={cx("grid h-6 w-6 shrink-0 place-items-center rounded-md border-2", r.done ? "border-ok bg-ok text-white" : "border-fg/50")}>{r.done && <Check size={14} strokeWidth={3} />}</span>
+            <span className="min-w-0 flex-1"><span className={cx("font-medium", r.done && "line-through")}>{fmtDate(r.date)}{r.start ? ` · ${r.start}` : ""}{r.topic ? ` — ${r.topic}` : ""}</span><span className="ml-2 text-[11px] text-muted">{fmtDur(r.minutes)}</span></span>
+            {!r.done && r.date === today && <Pill tone="warn">Aujourd'hui</Pill>}{!r.done && r.date < today && <Pill tone="bad">En retard</Pill>}
+          </button>
+        </li>))}</ul>
+      {limit && rev.length > limit && <button type="button" className="mt-1 text-[11px] font-semibold text-accent hover:underline" onClick={() => setAll(!all)}>{all ? "Réduire" : `Voir les ${rev.length} séances`}</button>}
+    </div>
+  );
+};
+
 const BlockDetail: React.FC<{ b: Block; date: string; onClose: () => void; onEditEvent?: (ev: PlanEvent) => void }> = ({ b, date, onClose, onEditEvent }) => {
   const { state, dispatch, toast, openTask, undoable } = useStore();
   const cls = b.kind === "class" && !b.feedId ? state.classes.find((c) => c.id === b.refId) : undefined;
@@ -1897,6 +1924,7 @@ const BlockDetail: React.FC<{ b: Block; date: string; onClose: () => void; onEdi
           {rows.map(([k, v]) => <React.Fragment key={k}><dt className="text-muted">{k}</dt><dd className="min-w-0 break-words">{v}</dd></React.Fragment>)}
         </dl>
         {chore && <ChoreMove chore={chore} date={date} start={b.start} onDone={onClose} />}
+        {task?.revision?.length ? <RevisionChecks task={task} focusDate={date} limit={4} /> : null}
         {task && <TaskMove task={task} date={date} b={b} onDone={onClose} />}
         {ev && <EventMove ev={ev} date={date} onDone={onClose} />}
         {ev?.steps?.length ? <div><p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted">Checklist</p><StepsCheck steps={ev.steps} done={(id) => !!ev.steps?.find((x) => x.id === id)?.done} onToggle={(stepId) => dispatch({ type: "event/step", id: ev.id, stepId })} label={`Checklist de ${ev.title}`} /></div> : null}
@@ -2387,7 +2415,7 @@ const ExamsCard: React.FC = () => {
           <button className="min-w-0 flex-1 text-left font-medium hover:text-accent" onClick={() => openTask(t.id)}>{t.title}{c ? <span className="ml-1.5 text-[11px] text-muted">{c.code || c.name}</span> : null}</button>
           <span className="text-[12px] text-muted">{fmtDate(t.deadline)}{t.dueTime ? ` · ${t.dueTime}` : ""}</span>
           <Pill tone={left <= 3 ? "bad" : left <= 7 ? "warn" : "muted"}>{left === 0 ? "Aujourd'hui" : `J-${left}`}</Pill>
-          <p className="basis-full pl-5 text-[11px] text-muted">{rev.length ? `Plan : ${done}/${rev.length} séances faites${next ? ` · prochaine : ${fmtDate(next.date)}${next.topic ? ` — ${next.topic}` : ""} (${fmtDur(next.minutes)})` : ""}` : "Pas de plan détaillé : modifiez l'examen pour en générer un."}</p>
+          {rev.length ? <div className="basis-full pl-5"><RevisionChecks task={t} limit={3} /></div> : <p className="basis-full pl-5 text-[11px] text-muted">Pas de plan détaillé : modifiez l'examen pour en générer un.</p>}
         </li>); })}</ul>
         : <p className="text-[13px] text-muted">Aucun examen à venir. Créez une tâche de type « Examen » pour fixer la date, l'heure et un plan de révision détaillé.</p>}
     </Card>
