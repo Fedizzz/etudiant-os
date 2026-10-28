@@ -80,6 +80,12 @@ try {
   ok(ex.revision.some((r) => r.start === "18:00"), "le moment « Soir » place une séance à 18:00");
   ok(ex.revision.reduce((n, r) => n + r.minutes, 0) >= 195 && ex.revision.some((r) => r.topic === "Algèbre"), "séances: durée totale et thème conservés");
   ok((await p.locator("[data-testid=exams-list]").innerText()).includes("Partiel de maths") && (await p.locator("[data-testid=exams-list]").innerText()).includes("J-5"), "carte « Examens à venir » avec compte à rebours");
+  { const row = p.locator("[data-testid=exams-list] [data-testid=revision-check]").first(); const before = (await stateOf()).tasks.find((x) => x.title === "Partiel de maths").revision.filter((r) => r.done).length;
+    await row.click(); await sleep(300);
+    ok((await stateOf()).tasks.find((x) => x.title === "Partiel de maths").revision.filter((r) => r.done).length === before + 1, "une séance se coche d'un geste depuis la liste des examens (grande case)");
+    ok(await p.locator("[data-testid=exams-list] [data-testid=revision-check][aria-checked=true]").count() >= 1, "la séance cochée est marquée comme faite");
+    await p.locator("[data-testid=exams-list] [data-testid=revision-check][aria-checked=true]").first().click(); await sleep(300);
+    ok((await stateOf()).tasks.find((x) => x.title === "Partiel de maths").revision.filter((r) => r.done).length === before, "un second appui la remet à faire"); }
   // report
   await p.click("button:has-text('Nouvelle tâche')"); await sleep(300);
   ok(await p.locator("text=Moment préféré pour travailler").count() === 1 && (await p.locator("text=Heure limite").count()) === 0, "le formulaire propose un « moment préféré » (matin, midi, soir), pas une heure limite");
