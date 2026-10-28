@@ -6,7 +6,7 @@ import { eventOn, layoutLanes, parseIngredient, scaleIngredient, stepMinutes, DU
 import type { Postponement, Recipe, RevisionSession } from "./core.ts";
 import { DEFAULT_POCKET_CATS, buildBudgetPdf, budgetInsights, categoryBreakdown, flatDebts, personalDebts, pocketStats, suggestLimits } from "./finance.ts";
 import type { MonthPoint } from "./finance.ts";
-import { fmtCountdown, liveStatus, debtRemaining, PET_KINDS, RESTORES_PER_MONTH, petStatus, restorableDays, restoresLeft } from "./core.ts";
+import { DEFAULT_MEALS, fmtCountdown, liveStatus, debtRemaining, PET_KINDS, RESTORES_PER_MONTH, petStatus, restorableDays, restoresLeft } from "./core.ts";
 import type { Debt } from "./core.ts";
 import { DAY_WORDS, dayOf, pageGeometry, parseGrid } from "./timetable.ts";
 import { parseIcs, normalizeFeedUrl, isFeedUrl } from "./ical.ts";
@@ -513,6 +513,19 @@ export const DueTimePicker: React.FC<{ id: string; value: string | undefined; on
   );
 };
 /** Plan de révision détaillé d'un examen : séances datées (thème + durée), génération automatique, cases « fait ». */
+/** Plage horaire d'un repas : les valeurs en cours de saisie sont gardées, et enregistrées dès que la fin est après le début. */
+const MealRange: React.FC<{ k: string; name: string; value: { from: string; to: string }; onCommit: (v: { from: string; to: string }) => void }> = ({ k, name, value, onCommit }) => {
+  const [d, setD] = useState(value);
+  useEffect(() => { setD(value); }, [value.from, value.to]);
+  const valid = !!d.from && !!d.to && toMin(d.to) > toMin(d.from);
+  const upd = (patch: Partial<{ from: string; to: string }>) => { const n = { ...d, ...patch }; setD(n); if (n.from && n.to && toMin(n.to) > toMin(n.from)) onCommit(n); };
+  return <>
+    <Field label={`${name} · début`} htmlFor={`st-${k}-f`}><Input id={`st-${k}-f`} type="time" value={d.from} onChange={(e) => upd({ from: e.target.value })} /></Field>
+    <Field label={`${name} · fin`} htmlFor={`st-${k}-t`} ><Input id={`st-${k}-t`} type="time" value={d.to} onChange={(e) => upd({ to: e.target.value })} aria-invalid={!valid} />{!valid && <span className="text-[11px] text-bad">La fin doit suivre le début</span>}</Field>
+  </>;
+};
+const SESSION_MOMENTS = [{ k: "matin", label: "🌅 Matin (9h)", start: "09:00" }, { k: "aprem", label: "☀️ Après-midi (15h)", start: "15:00" }, { k: "soir", label: "🌙 Soir (18h)", start: "18:00" }];
+const momentOf = (r: RevisionSession) => !r.start ? "auto" : SESSION_MOMENTS.find((m) => m.start === r.start)?.k ?? "custom";
 const RevisionEditor: React.FC<{ id: string; sessions: RevisionSession[]; onChange: (r: RevisionSession[]) => void; deadline: string; total: number; topics: string[]; kind?: TaskKind }> = ({ id, sessions, onChange, deadline, total, topics, kind }) => {
   const sorted = [...sessions].sort((a, b) => a.date.localeCompare(b.date));
   const gen = () => {
@@ -534,14 +547,16 @@ const RevisionEditor: React.FC<{ id: string; sessions: RevisionSession[]; onChan
           <button type="button" aria-label={r.done ? "Marquer non faite" : "Marquer faite"} aria-pressed={!!r.done} onClick={() => upd(r.id, { done: !r.done })} className={cx("grid h-5 w-5 place-items-center rounded border-2", r.done ? "border-fg bg-hi text-[rgb(24_22_46)]" : "border-fg/40")}>{r.done && <Check size={11} strokeWidth={3} />}</button>
           <div className="flex min-w-0 flex-wrap items-center gap-1.5">
             <Input type="date" aria-label={`Date de la séance ${i + 1}`} value={r.date} max={deadline} onChange={(e) => upd(r.id, { date: e.target.value })} className="h-8 w-40 text-[12px]" />
-            <Input aria-label={`Thème de la séance ${i + 1}`} placeholder="Thème (chapitre, exercices…)" value={r.topic} onChange={(e) => upd(r.id, { topic: e.target.value })} className="h-8 min-w-[10rem] flex-1 text-[12px]" />
-            <label className="flex items-center gap-1 text-[11px] text-muted">Début<Input type="time" aria-label={`Début de la séance ${i + 1}`} value={r.start ?? ""} onChange={(e) => upd(r.id, { start: e.target.value || undefined })} className="h-8 w-28 text-[12px]" /></label>
-            <label className="flex items-center gap-1 text-[11px] text-muted">Fin<Input type="time" aria-label={`Fin de la séance ${i + 1}`} disabled={!r.start} value={r.start ? toHHMM(Math.min(1439, toMin(r.start) + r.minutes)) : ""} onChange={(e) => { if (r.start && e.target.value && toMin(e.target.value) > toMin(r.start)) upd(r.id, { minutes: toMin(e.target.value) - toMin(r.start) }); }} className="h-8 w-28 text-[12px]" /></label>
-            <DurationPicker id={`${id}-d${i}`} label={`Durée de la séance ${i + 1}`} value={r.minutes} min={15} onChange={(n) => upd(r.id, { minutes: n })} className="w-44 [&_input]:h-8 [&_select]:h-8 [&_select]:text-[12px]" />
+            <Input aria-label={`Thème de la séance ${i + 1}`} placeholder="Thème (chapitre, exercices…)" value={r.topic} onChange={(e) => upd(r.id, { topic: e.target.value })} className="h-8 min-w-[9rem] flex-1 text-[12px]" />
+            <Select aria-label={`Moment de la séance ${i + 1}`} value={momentOf(r)} onChange={(e) => { const v = e.target.value; upd(r.id, { start: v === "auto" ? undefined : v === "custom" ? (r.start ?? "17:30") : SESSION_MOMENTS.find((m) => m.k === v)!.start }); }} className="h-8 w-36 text-[12px]">
+              <option value="auto">Moment auto</option>{SESSION_MOMENTS.map((m) => <option key={m.k} value={m.k}>{m.label}</option>)}<option value="custom">Heure précise…</option></Select>
+            {momentOf(r) === "custom" && <Input type="time" aria-label={`Heure de la séance ${i + 1}`} value={r.start ?? "17:30"} onChange={(e) => upd(r.id, { start: e.target.value || undefined })} className="h-8 w-28 text-[12px]" />}
+            <Select aria-label={`Durée de la séance ${i + 1}`} value={r.minutes} onChange={(e) => upd(r.id, { minutes: Number(e.target.value) })} className="h-8 w-28 text-[12px]">
+              {[...new Set([30, 45, 60, 90, 120, 180, r.minutes])].sort((x, y) => x - y).map((n) => <option key={n} value={n}>{fmtDur(n)}</option>)}</Select>
           </div>
           <button type="button" aria-label={`Supprimer la séance ${i + 1}`} className="p-1 text-muted hover:text-bad" onClick={() => onChange(sessions.filter((x) => x.id !== r.id))}><X size={13} /></button>
         </li>))}</ul>
-        : <p className="text-[12px] text-muted">Aucune séance : le temps est réparti selon les jours choisis ci-dessus. « Générer » répartit la durée estimée sur les jours précédant l'échéance (thèmes pris dans la checklist). Sans heure de début, la séance est placée automatiquement ; avec un début (et une fin), elle est fixée à ce créneau.</p>}
+        : <p className="text-[12px] text-muted">Aucune séance : le temps est réparti selon les jours choisis ci-dessus. « Générer » répartit la durée estimée sur les jours précédant l'échéance (thèmes pris dans la checklist). Choisissez un moment (matin, après-midi, soir) ou une heure précise ; sans choix, la séance est placée automatiquement.</p>}
     </div>
   );
 };
@@ -4508,6 +4523,11 @@ const SettingsView: React.FC = () => {
             <p className="col-span-2 text-[11px] text-muted">Le thème suit l'heure locale de cet appareil. Choisir « Clair » ou « Sombre » (ou le bouton lune/soleil) le fixe à la main.</p></div>}
           <Field label="Réveil par défaut" htmlFor="st-wake"><Input id="st-wake" type="time" value={s.wakeDefault} onChange={(e) => set({ wakeDefault: e.target.value })} /></Field>
           <Field label="Coucher par défaut" htmlFor="st-bed"><Input id="st-bed" type="time" value={s.bedDefault} onChange={(e) => set({ bedDefault: e.target.value })} /></Field>
+          <div className="col-span-2 grid grid-cols-2 gap-2 sm:grid-cols-4" data-testid="meal-times">
+            {(["lunch", "dinner"] as const).map((k) => { const m = s.meals ?? DEFAULT_MEALS;
+              return <MealRange key={k} k={k} name={k === "lunch" ? "Déjeuner" : "Dîner"} value={m[k]} onCommit={(v) => set({ meals: { ...m, [k]: v } })} />; })}
+            <p className="col-span-2 text-[11px] text-muted sm:col-span-4">Le planning garde ces créneaux libres de tâches automatiques. {s.meals && <button type="button" className="font-semibold underline" onClick={() => set({ meals: undefined })}>Remettre 12:15–13:00 et 19:45–20:30</button>}</p>
+          </div>
           <Field label="Préparation matin (min)" htmlFor="st-prep"><Input id="st-prep" type="number" min={10} max={180} value={s.prepMinutes} onChange={(e) => set({ prepMinutes: Number(e.target.value) })} /></Field>
           <Field label="Endormissement (min)" htmlFor="st-fall"><Input id="st-fall" type="number" min={0} max={60} value={s.fallAsleep} onChange={(e) => set({ fallAsleep: Number(e.target.value) })} /></Field>
           <div className="col-span-2 text-xs text-muted">{s.roommates.length > 0

@@ -334,3 +334,13 @@ test("corvée déplacée : l'origine mémorise la destination, l'annulation reti
   assert.equal(s.chores[0].movedTo, undefined);
   assert.deepEqual(s.chores[0].skipped, []);
 });
+
+test("horaires de déjeuner et dîner réglables dans le planning", () => {
+  const s = base(); const meals = (st: C.AppState) => C.planDay(st, "2026-10-14", undefined, TODAY).blocks.filter((b) => b.kind === "meal");
+  assert.deepEqual(meals(s).map((b) => [b.start, b.end]), [[12 * 60 + 15, 13 * 60], [19 * 60 + 45, 20 * 60 + 30]]);
+  const custom = { ...s, settings: { ...s.settings, meals: { lunch: { from: "13:00", to: "14:00" }, dinner: { from: "20:30", to: "21:15" } } } };
+  assert.deepEqual(meals(custom).map((b) => [b.start, b.end]), [[13 * 60, 14 * 60], [20 * 60 + 30, 21 * 60 + 15]]);
+  assert.deepEqual(roundtrip(custom).settings.meals, custom.settings.meals);
+  const bad = { ...s, settings: { ...s.settings, meals: { lunch: { from: "14:00", to: "13:00" }, dinner: { from: "20:30", to: "21:15" } } } } as C.AppState;
+  assert.equal(roundtrip(bad).settings.meals, undefined);
+});
